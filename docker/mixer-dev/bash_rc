@@ -1,0 +1,10 @@
+export PATH="${PATH}:${HOME}/.local/bin:${HOME}/.cargo/bin"
+export SHELL=/bin/bash
+
+# direnv requires per-directory `direnv allow` from the host; the container
+# inherits the host's bind-mounted .envrc state so the prompt is consistent.
+if command -v direnv >/dev/null 2>&1; then
+    eval "$(direnv hook bash)"
+fi
+
+eval "$(starship init bash)"

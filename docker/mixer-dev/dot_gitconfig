@@ -1,0 +1,7 @@
+[user]
+	email = mats.loman@rte.se
+	name = Mats Loman
+
+[core]
+	editor = nvim
+

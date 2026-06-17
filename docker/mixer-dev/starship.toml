@@ -1,0 +1,95 @@
+format = """\
+$hostname\
+$username\
+$directory\
+$git_branch\
+$git_state\
+$git_status\
+$character\
+"""
+
+add_newline = false
+
+[hostname]
+ssh_only = false
+ssh_symbol = '🌐'
+trim_at = '.'
+format = '[$ssh_symbol$hostname:]($style)'
+style = 'cyan'
+
+[username]
+style_root = 'red'
+style_user = 'white'
+format = '[$user]($style)'
+show_always = false
+
+[directory]
+format = "[󰋜 $path ]($style)[$read_only]($read_only_style)"
+style = "blue"
+read_only_style = "red"
+truncation_length = 1
+
+[git_branch]
+format = '[ $symbol$branch(:$remote_branch) ]($style)'
+symbol = "  "
+style = "yellow"
+
+[git_state]
+rebase = 'REBASING'
+merge = 'MERGING'
+revert = 'REVERTING'
+cherry_pick	= 'CHERRY-PICKING'
+bisect = 'BISECTING'
+am = 'AM'
+am_or_rebase = 'AM/REBASE'
+style = 'bold yellow'
+format = ' \([$state( $progress_current/$progress_total)]($style)\) '
+
+[git_status]
+format = '[$all_status]($style)'
+style = "bold red"
+conflicted = '='
+ahead =	'⇡'
+behind = '⇣'
+diverged = '⇕'
+up_to_date = ''
+untracked =	'?'
+stashed	= '\$'
+modified = '!'
+staged = '+'
+renamed	= '»'
+deleted	= '✘'
+ignore_submodules =	false
+
+
+[git_metrics]
+format = "([+$added]($added_style))[]($added_style)"
+added_style = "green"
+deleted_style = "bright-red"
+disabled = false
+
+[hg_branch]
+format = "[ $symbol$branch ]($style)"
+symbol = " "
+
+[cmd_duration]
+format = "[  $duration ]($style)"
+style = "fg:bright-white bg:18"
+
+[character]
+format = '$symbol'
+success_symbol = '[ ](bold green)'
+error_symbol = '[✗ ](bold red)'
+vimcmd_symbol = '[❮](bold green)'
+vimcmd_replace_one_symbol = '[❮](bold purple)'
+vimcmd_replace_symbol = '[❮](bold purple)'
+vimcmd_visual_symbol = '[❮](bold yellow)'
+
+[time]
+disabled = false
+time_format = "%R" # Hour:Minute Format
+style = "bg:#1d2230"
+format = '[[ 󱑍 $time ](bg:#1C3A5E fg:#8DFBD2)]($style)'
+
+
+
