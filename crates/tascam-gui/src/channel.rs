@@ -103,14 +103,16 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 });
             });
 
-            // Pan / balance along the bottom, filling the width.
+            // Pan / balance along the bottom, right-aligned so its value box
+            // lines up with the volume value box above.
             ui.horizontal(|ui| {
                 ui.label(if linked { "Balance" } else { "Pan" });
-                ui.spacing_mut().slider_width = INPUT_WIDTH - 100.0;
-                let mut pan = app.cached_int(Control::Pan, ch);
-                if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
-                    app.set(Control::Pan, ch, Value::Int(pan));
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mut pan = app.cached_int(Control::Pan, ch);
+                    if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
+                        app.set(Control::Pan, ch, Value::Int(pan));
+                    }
+                });
             });
         });
     });
