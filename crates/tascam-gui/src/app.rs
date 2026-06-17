@@ -6,7 +6,7 @@ use std::time::Duration;
 use eframe::egui;
 use tascam_us16x08::{Backend, Control, Meters, Us16x08, Value, Watcher};
 
-use crate::bridge;
+use crate::{bridge, channel};
 
 /// Meter repaint cadence (~30 Hz).
 const METER_INTERVAL: Duration = Duration::from_millis(33);
@@ -116,10 +116,7 @@ impl eframe::App for App {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.weak(format!(
-                "channel {} selected - editor arrives in the next milestone",
-                self.selected + 1
-            ));
+            egui::ScrollArea::vertical().show(ui, |ui| channel::show(self, ui));
         });
 
         ctx.request_repaint_after(METER_INTERVAL);
