@@ -1,0 +1,455 @@
+= C23 Coding Rules
+:toc: left
+:toclevels: 2
+:sectnums:
+:icons: font
+
+Rules for writing modern, safe C23. Aimed at codebases migrating from C11/C17.
+Each rule has a short rationale. Rules are SHOULD unless marked MUST.
+
+== Scope and conformance
+
+[[R1]]
+=== R1 -- MUST compile with `-std=c23`
+
+Use `-std=c23` (GCC 14+, Clang 19+). For older toolchains, `-std=c2x` is acceptable
+during transition. Do not rely on `__STDC_VERSION__ >= 202311L` without a fallback
+unless the toolchain floor is fixed.
+
+[[R2]]
+=== R2 -- MUST enable a strict warning set
+
+Minimum: `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes
+-Wold-style-definition -Wmissing-prototypes -Wnull-dereference
+-Wdouble-promotion -Wformat=2`.
+
+Treat warnings as errors in CI: `-Werror`.
+
+[[R3]]
+=== R3 -- SHOULD run static analysis and sanitizers
+
+* `-fanalyzer` (GCC) or `clang --analyze` on every TU in CI.
+* Host-side tests built with `-fsanitize=address,undefined`.
+* On embedded targets, UBSan minimal runtime (`-fsanitize-minimal-runtime`)
+  is acceptable for release-candidate builds.
+
+== Legacy constructs -- remove
+
+[[R10]]
+=== R10 -- MUST NOT use K&R function declarations or empty parameter lists
+
+`f()` now means `f(void)`. Always write parameters explicitly.
+
+[source,c]
+----
+void init(void);          // OK
+void init();              // OK in C23, but be explicit
+void init(/* old style */); // forbidden
+----
+
+[[R11]]
+=== R11 -- MUST use `nullptr` instead of `NULL` or `0`
+
+`nullptr` has type `nullptr_t` and converts cleanly to any pointer type. `NULL` is
+defined as `((void *)0)` or `0` depending on the implementation, which causes
+overload-resolution and variadic-argument surprises (e.g. `execl(path, "arg", NULL)`
+on platforms where `NULL` is `0`).
+
+`NULL` is still permitted in headers that must remain C11-compatible.
+
+[[R12]]
+=== R12 -- MUST use built-in `bool`, `true`, `false`
+
+Do not include `<stdbool.h>` and do not use `_Bool`. The keywords are part of the
+language now.
+
+[[R13]]
+=== R13 -- MUST use lowercase keywords
+
+Use `static_assert`, `alignas`, `alignof`, `thread_local` -- not the `_Capitalized`
+spellings. The old names remain for C11 compatibility headers only.
+
+[[R14]]
+=== R14 -- MUST NOT use trigraphs
+
+Removed in C23. Mechanically replace any remaining `??=`, `??/`, `??-`, etc.
+
+== Attributes -- use aggressively
+
+[[R20]]
+=== R20 -- MUST use `[[nodiscard]]` on functions where the return value matters
+
+Includes: error/status returns, allocation functions, "check before use" queries,
+and lock acquisition. Use the message form for non-obvious cases:
+
+[source,c]
+----
+[[nodiscard("must check for I/O error")]]
+int spi_read(spi_t *bus, uint8_t *dst, size_t n);
+----
+
+[[R21]]
+=== R21 -- SHOULD annotate switch fallthrough
+
+Use `[[fallthrough]];` on intentional fallthrough. With `-Wimplicit-fallthrough`
+this catches every accidental missing `break`.
+
+[[R22]]
+=== R22 -- SHOULD use `[[maybe_unused]]` instead of `(void)x;`
+
+For parameters, variables, and functions that are conditionally used (debug builds,
+`#ifdef` branches, callback signatures).
+
+[[R23]]
+=== R23 -- SHOULD use `[[deprecated("...")]]` during migrations
+
+Mark old APIs at the declaration so callers get a warning with the migration
+instruction inline.
+
+[[R24]]
+=== R24 -- SHOULD use `[[noreturn]]` on functions that do not return
+
+Replaces `_Noreturn`. Required for fatal-error handlers, `panic()`, `reboot()`.
+Enables better diagnostics and codegen.
+
+[[R25]]
+=== R25 -- MAY use `[[reproducible]]` and `[[unsequenced]]` for pure functions
+
+`[[unsequenced]]` (no side effects, no dependence on global state -- strict
+mathematical pure function) and `[[reproducible]]` (same inputs => same outputs,
+but may read state) enable the compiler to CSE and reorder calls. Useful on hot
+DSP/codec paths.
+
+== Safety facilities
+
+[[R30]]
+=== R30 -- MUST use `<stdckdint.h>` for untrusted arithmetic
+
+Replace hand-rolled overflow checks with `ckd_add`, `ckd_sub`, `ckd_mul`. These
+return `true` on overflow and produce a defined wrapped result, portably and
+without UB.
+
+[source,c]
+----
+size_t total;
+if (ckd_mul(&total, count, elem_size)) return ERR_OVERFLOW;
+----
+
+[[R31]]
+=== R31 -- MUST use `memset_explicit` for wiping secrets
+
+`memset` calls may be optimized away when the buffer is not read afterwards.
+`memset_explicit(buf, 0, n)` is guaranteed not to be elided. Use it for keys,
+passwords, and ephemeral cryptographic state.
+
+[[R32]]
+=== R32 -- SHOULD use `unreachable()` for impossible paths
+
+From `<stddef.h>`. Communicates intent to readers and lets the optimizer prune.
+Pair with a debug-build assertion:
+
+[source,c]
+----
+switch (state) {
+case S_IDLE:  /* ... */ break;
+case S_BUSY:  /* ... */ break;
+default:
+    assert(0 && "invalid state");
+    unreachable();
+}
+----
+
+[[R33]]
+=== R33 -- SHOULD use `<stdbit.h>` instead of compiler intrinsics
+
+Portable: `stdc_count_ones`, `stdc_leading_zeros`, `stdc_trailing_zeros`,
+`stdc_bit_width`, `stdc_first_leading_one`, etc. Available in generic and
+type-suffixed forms.
+
+[[R34]]
+=== R34 -- MAY use `[[assume(expr)]]` for optimizer hints
+
+Use sparingly. `[[assume(p != nullptr)]]` is a promise to the optimizer, not a
+runtime check. If the assumption is wrong it is undefined behavior. Prefer
+`assert()` + `unreachable()` unless profiling shows a real win.
+
+== Types
+
+[[R40]]
+=== R40 -- MUST give enums explicit underlying types when layout matters
+
+Required for register definitions, wire protocols, and any enum stored in a
+struct with size constraints:
+
+[source,c]
+----
+enum spi_mode : uint8_t {
+    SPI_MODE_0 = 0,
+    SPI_MODE_3 = 3,
+};
+----
+
+[[R41]]
+=== R41 -- SHOULD use `_BitInt(N)` for exact-width arithmetic
+
+For CRCs, fixed-point, packed-field arithmetic. Operations on `_BitInt(N)` are
+defined modulo `2^N` (unsigned) with explicit width -- no integer promotion
+surprises.
+
+Caveat: GCC support for wide `_BitInt(N)` (N > 128) is still maturing. Verify on
+your target toolchain before adopting broadly.
+
+[[R42]]
+=== R42 -- SHOULD prefer `constexpr` over `#define` for typed constants
+
+[source,c]
+----
+constexpr size_t   max_frame   = 1500;
+constexpr uint32_t magic_token = 0xDEADBEEFu;
+----
+
+Typed, scoped, debuggable, no preprocessor surprises. Use `#define` only for
+conditional compilation, header guards, and where preprocessor token pasting is
+actually needed.
+
+[[R43]]
+=== R43 -- SHOULD use `typeof` / `typeof_unqual` for generic macros
+
+Standardized in C23 -- no more reliance on GCC `__typeof__`. Use `typeof_unqual`
+when you need to strip `const`/`volatile` from the deduced type.
+
+[[R44]]
+=== R44 -- MAY use `auto` for declarations with obvious initializers
+
+[source,c]
+----
+auto h = open_device(path);   // type is device_handle_t
+----
+
+Rules of thumb: yes when the type is in the RHS and naming it adds noise; no
+when the type is non-obvious or load-bearing for the reader.
+
+[[R45]]
+=== R45 -- SHOULD use `char8_t` for UTF-8 string data
+
+Distinguishes UTF-8 from arbitrary `char` buffers in APIs. `u8"..."` literals now
+have type `char8_t[]`.
+
+[[R46]]
+=== R46 -- MUST use `const` on pointer parameters that are input-only
+
+If a function reads through a pointer but does not modify the pointee, the
+parameter type MUST be `const T *`. This is part of the API contract: it
+documents intent, enables the optimizer to assume the buffer is unchanged across
+calls, and lets callers pass `const`-qualified data without casts.
+
+[source,c]
+----
+size_t crc32(const uint8_t *data, size_t n);          // input only
+int    parse_header(const struct frame *f, header_t *out); // in / out
+----
+
+For output and in/out pointers, leave them non-`const` -- that asymmetry is the
+signal to the reader.
+
+[[R47]]
+=== R47 -- MAY use `const` on by-value parameters, but only in the definition
+
+In a *prototype*, `void f(int x)` and `void f(const int x)` are the same function
+type -- the `const` is ignored. It is therefore noise in headers. In the
+*definition*, `const` on a by-value parameter is a local discipline that
+prevents accidental reassignment of the parameter inside the body. Use it if
+your team agrees, but do not put it in headers.
+
+[[R48]]
+=== R48 -- SHOULD declare local variables and pointers `const` when not reassigned
+
+`const`-by-default for locals catches accidental mutation, communicates intent,
+and occasionally helps the optimizer. Apply to scalars, pointers, and pointer
+targets independently:
+
+[source,c]
+----
+const size_t   len   = strlen(s);          // value never changes
+const uint8_t *cur   = buf;                // pointer reassigned, target const
+uint8_t *const end   = buf + len;          // pointer fixed, target mutable
+const uint8_t *const lookup = kRomTable;   // both fixed (typical for const tables)
+----
+
+For function-scope tables of read-only data, prefer `static const` so the
+compiler can place them in `.rodata`.
+
+[[R49]]
+=== R49 -- SHOULD return by value for small objects; out-pointers only for large or in/out
+
+If an object fits in 1-2 registers, return it by value rather than via an
+out-parameter. The code is clearer (no aliasing questions, no "who owns this
+buffer" ambiguity), composes without intermediate variables, and the compiler
+typically returns the result in registers.
+
+[source,c]
+----
+// Prefer
+struct rgb rgb_from_hsv(struct hsv h);
+
+// Avoid -- out-parameter for a small return
+void rgb_from_hsv(struct hsv h, struct rgb *out);
+
+// OK -- large object, caller owns the buffer
+int capture_frame(camera_t *cam, struct frame *out);
+----
+
+Approximate thresholds (verify on your ABI):
+
+* AArch64 / x86-64 SysV: structs <= 16 bytes returned in registers
+* 32-bit ARM (AAPCS): <= 4 bytes in `r0`, larger via memory
+
+Reserve pointer parameters for: genuine inputs (`const T *`, per R46), true
+output buffers that are too large to return, and in/out buffers. When a
+function needs to return both a value and an error, prefer a small struct
+`{ status, value }` over a status return plus out-parameter, unless the value
+is large.
+
+== Initialization and literals
+
+[[R50]]
+=== R50 -- SHOULD use empty initializer `= {}` for zero-init
+
+Works for any type including those with no zero-able first member (where
+`= {0}` previously warned). Clearer intent.
+
+[[R51]]
+=== R51 -- SHOULD use binary literals and digit separators for masks
+
+[source,c]
+----
+constexpr uint16_t ctrl_mask = 0b0000'1111'0000'0001;
+constexpr uint32_t baud      = 1'000'000;
+----
+
+[[R52]]
+=== R52 -- SHOULD use `#embed` for binary assets
+
+Replace `xxd -i firmware.bin > firmware.h` build steps with:
+
+[source,c]
+----
+const uint8_t firmware[] = {
+    #embed "firmware.bin"
+};
+----
+
+Caveat: GCC 15+ / Clang 19+. Check your minimum toolchain. Verify behavior on
+all target compilers before removing the `xxd` step from build infrastructure.
+
+== Process and migration
+
+[[R60]]
+=== R60 -- SHOULD migrate one translation unit at a time
+
+`[[deprecated]]` the old API, introduce the new one, migrate call sites,
+remove. Do not mix big C23 cleanups with functional changes in the same commit.
+
+[[R61]]
+=== R61 -- MUST lock down struct layout with `static_assert`
+
+Before changing types of struct members or reordering fields:
+
+[source,c]
+----
+static_assert(sizeof(struct dma_descriptor) == 32, "DMA descriptor ABI");
+static_assert(offsetof(struct dma_descriptor, next) == 24, "next pointer offset");
+----
+
+[[R62]]
+=== R62 -- SHOULD verify C23 feature support per target toolchain
+
+Some features are still patchy across GCC and Clang versions, particularly
+on older toolchains. Maintain a small `c23_features.h` probe header
+documenting which features are usable on each target.
+
+Particular attention: `constexpr` objects (Clang 19+ only; Clang 18 rejects
+them at file scope), `#embed`, wide `_BitInt(N)`, `<stdckdint.h>`,
+`<stdbit.h>`, `[[reproducible]]` / `[[unsequenced]]`.
+
+A useful baseline pair is GCC 14 + Clang 19. Setting `-std=c23` with both in
+CI from day one catches portability issues before they accumulate.
+
+== Cross-toolchain pragmatics
+
+[[R70]]
+=== R70 -- MUST disable `-Wformat-nonliteral` when using variadic forwarder wrappers
+
+Idiomatic diagnostic wrappers take `const char *fmt, ...` and forward to
+`vsnprintf`/`vfprintf`:
+
+[source,c]
+----
+[[gnu::format(printf, 2, 3)]]
+static void diag(ctx_t *c, const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    char buf[512];
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    record(c, buf);
+}
+----
+
+GCC accepts this; Clang's `-Wformat-nonliteral` (enabled by `-Wformat=2`)
+flags the `vsnprintf(buf, sz, fmt, ap)` line as "format is not a string
+literal", even though `__attribute__((format))` already validates the
+literal at every call site.
+
+Add `-Wno-format-nonliteral` to the global warning set. The `format`
+attribute on the wrapper is the load-bearing check, and Clang already
+honors it at the call site.
+
+[[R71]]
+=== R71 -- MUST mark macro-emitted static-inline helpers `[[maybe_unused]]`
+
+When a header-only macro (e.g. `ARRAY_DEFINE(T, Name)`) expands to many
+`static inline` helpers, callers typically use only a subset. GCC silently
+tolerates the unused ones; Clang's `-Wunused-function` flags every one
+that the TU does not call.
+
+Annotate every emitted helper with `[[maybe_unused]]` inside the macro
+body so the policy lives once, not at each instantiation:
+
+[source,c]
+----
+#define ARRAY_DEFINE(T, Name)                                            \
+    [[nodiscard, maybe_unused]] static inline array_##Name##_t            \
+    array_##Name##_new(void) { ... }                                      \
+    [[maybe_unused]] static inline void                                   \
+    array_##Name##_push(array_##Name##_t *a, T x) { ... }                 \
+    /* ... 10 more emitted helpers ... */
+----
+
+Distinct from R22: this is library hygiene for a header-only template,
+not advice about user-written `(void)x` discards. Both rules can coexist
+in a codebase.
+
+[[R72]]
+=== R72 -- MUST cast explicitly when narrowing a non-literal enum
+
+Passing a literal `OP_FOO` (enum constant) to a `uint8_t` parameter is
+allowed: the compiler sees the value at compile time and verifies it
+fits. Passing a non-literal `Opcode` *value* -- e.g. `op_op` from a
+ternary or `ops->add` from a struct field -- fails Clang's
+`-Wimplicit-int-conversion` even when the underlying value would fit.
+
+Two acceptable shapes. Prefer the dedicated wrapper when the call site
+volume is high:
+
+[source,c]
+----
+/* One-off: explicit cast at the call site. */
+buffer_push_u8(&out, (uint8_t)op);
+
+/* Hot path: dedicated typed helper, cast inside. */
+static void emit_op(buffer_t *out, Opcode op) {
+    buffer_push_u8(out, (uint8_t)op);
+}
+emit_op(&out, ops->add);
+----
+

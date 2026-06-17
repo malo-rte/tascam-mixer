@@ -1,0 +1,514 @@
+#!/usr/bin/env python3
+"""docs-librarian -- audit + render utility for the docs/ tree.
+
+Implements the verb set the SKILL.md file describes:
+
+    docs-librarian render     regenerate docs/INDEX.adoc from _index.yaml
+    docs-librarian validate   exit non-zero on any invariant failure (CI hook)
+    docs-librarian next-id <class>   print the next free ID in a class
+    docs-librarian audit      run all checks, print human-readable report
+
+Invariants enforced (subset of SKILL.md L01..L14):
+
+    L02  directory / single-file name matches the canonical doc ID
+    L04  every document on disk has an entry in _index.yaml; every
+         non-Retired entry has a path that exists
+    L06  no duplicate IDs in _index.yaml
+    L07  Approved status has version >= 1.0
+    L12  slug is lowercase kebab-case ASCII
+    L13  classes ordered REQ, ARCH, DES, TEST, OPS, MAN, EXT, REP, ADR
+
+Out of scope (manual audit territory): L01 placement against ID prefix,
+L03 root file name matches dir, L05 retired-number reuse, L08-L09
+supersession pairs, L10 single-file size ceiling, L11 diagrams/ presence,
+L14 imports-manifest reachability.
+
+Usage from repo root:
+
+    .claude/skills/docs-librarian/scripts/docs-librarian render
+    .claude/skills/docs-librarian/scripts/docs-librarian validate
+    .claude/skills/docs-librarian/scripts/docs-librarian next-id MAN
+    .claude/skills/docs-librarian/scripts/docs-librarian audit
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+try:
+    import yaml
+except ImportError:
+    sys.stderr.write("ERROR: PyYAML required. Install with `apt install python3-yaml`.\n")
+    sys.exit(2)
+
+
+# Canonical class ordering per docs-librarian skill invariant L13.
+CLASS_ORDER = ["requirements", "architecture", "design", "test",
+               "operations", "manuals", "external", "reports", "adr"]
+CLASS_TO_PREFIX = {
+    "requirements": "REQ",
+    "architecture": "ARCH",
+    "design":       "DES",
+    "test":         "TEST",
+    "operations":   "OPS",
+    "manuals":      "MAN",
+    "external":     "EXT",
+    "reports":      "REP",
+    "adr":          "ADR",
+}
+PREFIX_TO_CLASS = {v: k for k, v in CLASS_TO_PREFIX.items()}
+
+# Section header per class for the rendered INDEX.adoc.
+CLASS_SECTION_TITLE = {
+    "requirements": "Requirements (REQ)",
+    "architecture": "Architecture (ARCH)",
+    "design":       "Design (DES)",
+    "test":         "Test (TEST)",
+    "operations":   "Operations (OPS)",
+    "manuals":      "Manuals (MAN)",
+    "external":     "External (EXT)",
+    "reports":      "Reports (REP)",
+    "adr":          "Architecture Decision Records (ADR)",
+}
+
+SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+ID_RE = re.compile(r"^DEV-TOOLS-(REQ|ARCH|DES|TEST|OPS|MAN|EXT|REP|ADR)-(\d{4})$")
+# Code->doc/task citations: `// implements: REQ-FWU-014`, `# see: DEV-TOOLS-ADR-0027`,
+# `// implements: DEV-TOOLS-DES-0010`, `// TODO(DEV-TOOLS-TASK-0042): ...`.
+# Full DEV-TOOLS-CLASS-NNNN, bare AREA-NNN, and abbreviated CLASS-NNNN forms accept.
+CITE_RE = re.compile(
+    r"\b(?:implements|see|satisfies|ref|TODO|FIXME)\s*[:(]\s*"
+    r"(DEV-TOOLS-(?:REQ|ARCH|DES|TEST|OPS|MAN|EXT|REP|ADR|TASK)-\d{4}"
+    r"|REQ-[A-Z][A-Z0-9]*-\d+"
+    r"|[A-Z][A-Z0-9]*-\d+"
+    r"|ADR-\d{4}"
+    r"|TASK-\d{4})",
+    re.IGNORECASE,
+)
+# Source file extensions scanned for citations (RS-92/PY-51/SH-50 family).
+SOURCE_EXTS = {".rs", ".c", ".h", ".py", ".sh", ".bash"}
+# Directories never scanned.
+SKIP_DIRS = {".git", "target", "node_modules", "build", "__pycache__", ".venv"}
+VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?$")
+
+
+def repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "docs" / "_index.yaml").exists():
+            return parent
+    sys.stderr.write("ERROR: cannot locate repo root (no docs/_index.yaml above this script).\n")
+    sys.exit(2)
+
+
+def load_index(root: Path) -> list[dict[str, Any]]:
+    text = (root / "docs" / "_index.yaml").read_text(encoding="utf-8")
+    data = yaml.safe_load(text)
+    docs = data.get("documents", []) if isinstance(data, dict) else []
+    if not isinstance(docs, list):
+        raise SystemExit("ERROR: _index.yaml `documents:` is not a list.")
+    return docs
+
+
+def parse_id(doc_id: str) -> tuple[str, int] | None:
+    m = ID_RE.match(doc_id)
+    if not m:
+        return None
+    return PREFIX_TO_CLASS[m.group(1)], int(m.group(2))
+
+
+# -- validate --------------------------------------------------------
+
+def validate(root: Path, index: list[dict[str, Any]]) -> list[str]:
+    """Return a list of finding strings. Empty list = clean."""
+    findings: list[str] = []
+    seen_ids: dict[str, int] = {}  # id -> index-of-entry
+
+    expected_class_order = [c for c in CLASS_ORDER]
+    last_class_idx = -1
+    last_seq_in_class = -1
+
+    for i, entry in enumerate(index):
+        ctx = f"_index.yaml[{i}]"
+        eid = entry.get("id", "")
+        eclass = entry.get("class", "")
+        status = entry.get("status", "")
+        version = str(entry.get("version", ""))
+        path = entry.get("path", "")
+
+        # L06 -- ID uniqueness.
+        if eid in seen_ids:
+            findings.append(f"L06: {ctx}: duplicate ID {eid!r} (also at index {seen_ids[eid]}).")
+        seen_ids[eid] = i
+
+        # ID shape and class consistency.
+        parsed = parse_id(eid)
+        if parsed is None:
+            findings.append(f"{ctx}: ID {eid!r} does not match `DEV-TOOLS-<CLASS>-<NNNN>`.")
+            continue
+        derived_class, seq = parsed
+        if derived_class != eclass:
+            findings.append(
+                f"{ctx}: ID {eid!r} implies class {derived_class!r} but `class:` is {eclass!r}.")
+
+        # L13 -- class ordering within the index.
+        cls_idx = expected_class_order.index(eclass) if eclass in expected_class_order else -1
+        if cls_idx < last_class_idx:
+            findings.append(
+                f"L13: {ctx}: class {eclass!r} appears after a later class in the canonical "
+                f"order (expected {expected_class_order}).")
+        elif cls_idx > last_class_idx:
+            last_class_idx = cls_idx
+            last_seq_in_class = -1
+        if cls_idx == last_class_idx and seq <= last_seq_in_class:
+            findings.append(
+                f"L13: {ctx}: sequence number {seq} in class {eclass!r} not strictly greater "
+                f"than the previous {last_seq_in_class} in the same class.")
+        if cls_idx == last_class_idx:
+            last_seq_in_class = max(last_seq_in_class, seq)
+
+        # L07 -- Approved >= 1.0.
+        if status == "Approved" and version and VERSION_RE.match(version):
+            major = int(version.split(".")[0])
+            if major < 1:
+                findings.append(f"L07: {ctx}: status Approved but version {version!r} < 1.0.")
+
+        # L04 -- path exists when entry is non-Retired.
+        if status != "Retired" and path:
+            full = root / path
+            if not full.exists():
+                findings.append(f"L04: {ctx}: path {path!r} does not exist on disk.")
+
+        # L02 / L12 -- slug shape and ID-vs-path consistency for non-Retired entries.
+        if status != "Retired" and path:
+            # Extract the last directory or file stem and check shape.
+            tail = Path(path).name or Path(path).parent.name
+            # The tail SHOULD start with the full canonical ID, project prefix
+            # included (e.g. DEV-TOOLS-REQ-0001-system-requirements).
+            if not (tail.startswith(eid) or tail.startswith(eid + ".adoc")):
+                findings.append(
+                    f"L02: {ctx}: path tail {tail!r} does not start with the ID {eid!r}.")
+            # Slug portion (after the ID prefix) shape.
+            suffix = tail[len(eid):].lstrip("-")
+            if suffix.endswith(".adoc"):
+                suffix = suffix[:-len(".adoc")]
+            if suffix and not SLUG_RE.match(suffix):
+                findings.append(
+                    f"L12: {ctx}: slug {suffix!r} is not lowercase kebab-case ASCII.")
+
+    return findings
+
+
+# -- next-id ---------------------------------------------------------
+
+def next_id(index: list[dict[str, Any]], class_arg: str) -> str:
+    """Return the next available `DEV-TOOLS-<CLASS>-<NNNN>` ID in the named class."""
+    class_arg = class_arg.lower()
+    if class_arg in PREFIX_TO_CLASS:
+        class_arg = PREFIX_TO_CLASS[class_arg]
+    elif class_arg in CLASS_TO_PREFIX:
+        pass
+    else:
+        # Maybe user passed lowercase prefix.
+        for prefix, cls in PREFIX_TO_CLASS.items():
+            if class_arg == prefix.lower():
+                class_arg = cls
+                break
+        else:
+            raise SystemExit(
+                f"ERROR: unknown class {class_arg!r}. "
+                f"Pick one of {list(CLASS_TO_PREFIX.keys())} or one of {list(PREFIX_TO_CLASS.keys())}.")
+    prefix = CLASS_TO_PREFIX[class_arg]
+    seqs = []
+    for entry in index:
+        parsed = parse_id(entry.get("id", ""))
+        if parsed and parsed[0] == class_arg:
+            seqs.append(parsed[1])
+    nxt = max(seqs) + 1 if seqs else 1
+    return f"DEV-TOOLS-{prefix}-{nxt:04d}"
+
+
+# -- render ----------------------------------------------------------
+
+def render(index: list[dict[str, Any]]) -> str:
+    """Produce the rendered INDEX.adoc text."""
+    today = date.today().isoformat()
+    out: list[str] = []
+    out.append("= DEV-TOOLS Documentation Index")
+    out.append(":doc-version:   {0}".format(today))
+    out.append(":doc-status:    Approved")
+    out.append(":doc-date:      {0}".format(today))
+    out.append(":doc-authors:   Mats Loman <mats.loman@rte.se>")
+    out.append(":revnumber:     {doc-version}")
+    out.append(":revdate:       {doc-date}")
+    out.append(":title-page:")
+    out.append("include::_attributes.adoc[]")
+    out.append("")
+    out.append("[NOTE]")
+    out.append("====")
+    out.append("This document is **generated** from `docs/_index.yaml` by")
+    out.append("`.claude/skills/docs-librarian/scripts/docs-librarian render`.")
+    out.append("Do not hand-edit; edit `_index.yaml` and regenerate.")
+    out.append("====")
+    out.append("")
+    out.append("The nine-class scheme defining IDs and placement is in")
+    out.append("`docs/README.adoc`. This file is the rendered, browseable")
+    out.append("index of every registered document.")
+    out.append("")
+
+    # Bucket by class, retain insertion order within class.
+    buckets: dict[str, list[dict[str, Any]]] = {c: [] for c in CLASS_ORDER}
+    for entry in index:
+        cls = entry.get("class", "")
+        if cls in buckets:
+            buckets[cls].append(entry)
+        else:
+            buckets.setdefault("__unknown__", []).append(entry)
+
+    for cls in CLASS_ORDER:
+        bucket = buckets.get(cls, [])
+        if not bucket:
+            continue
+        title = CLASS_SECTION_TITLE[cls]
+        out.append("== {0}".format(title))
+        out.append("")
+
+        active = [e for e in bucket if e.get("status") != "Retired"
+                  and e.get("status") != "Superseded"]
+        if active:
+            out.append("[cols=\"1,3,1,1,1\",options=\"header\"]")
+            out.append("|===")
+            out.append("| ID | Title | Status | Version | Date")
+            for entry in active:
+                superseded_marker = ""
+                if entry.get("superseded-by"):
+                    superseded_marker = " -> {0}".format(entry["superseded-by"])
+                out.append("| {id} | {title}{m} | {status} | {ver} | {date}".format(
+                    id=entry.get("id", ""),
+                    title=entry.get("title", ""),
+                    m=superseded_marker,
+                    status=entry.get("status", ""),
+                    ver=entry.get("version", ""),
+                    date=entry.get("date", ""),
+                ))
+            out.append("|===")
+            out.append("")
+
+        # Retired entries get a small footer block.
+        retired = [e for e in bucket if e.get("status") == "Retired"]
+        if retired:
+            out.append("=== Retired ({0})".format(title))
+            out.append("")
+            out.append("[cols=\"1,3\",options=\"header\"]")
+            out.append("|===")
+            out.append("| ID | Title")
+            for entry in retired:
+                out.append("| {id} | {title}".format(
+                    id=entry.get("id", ""), title=entry.get("title", "")))
+            out.append("|===")
+            out.append("")
+
+    if buckets.get("__unknown__"):
+        out.append("== Unknown class (audit failure)")
+        out.append("")
+        out.append("The following entries have a class not in the canonical order:")
+        out.append("")
+        for entry in buckets["__unknown__"]:
+            out.append("* {id} -- class={cls!r}".format(
+                id=entry.get("id", ""), cls=entry.get("class", "")))
+        out.append("")
+
+    return "\n".join(out) + "\n"
+
+
+# -- main ------------------------------------------------------------
+
+def check_links(root: Path, index: list[dict[str, Any]]) -> list[str]:
+    """Resolve code->doc citations against the index (doc-code-sync).
+
+    Scans source files for `implements:`/`see:`/`satisfies:`/`ref:` citations and
+    reports any that name a document ID absent from `_index.yaml`. A dangling
+    citation means the code points at a doc that has been renamed, retired, or
+    never existed -- a drift signal. Requirement-level IDs (REQ-AREA-NNN) resolve
+    against their owning document by prefix where a full doc ID is given; bare
+    REQ-AREA-NNN forms are reported as unresolved only when no requirement
+    document of that area exists (the per-requirement registry is out of scope
+    for the index, so bare requirement IDs are reported as INFO, not failures).
+    """
+    findings: list[str] = []
+
+    # Build the set of known document IDs from the index.
+    known_ids: set[str] = set()
+    for entry in index:
+        eid = entry.get("id", "")
+        if eid:
+            known_ids.add(eid)
+
+    # Tasks live in tasks/_tasks.yaml (managed by `tasklist`), not the doc index.
+    # Load their IDs so TASK citations resolve against the right registry.
+    known_tasks: set[str] = set()
+    tasks_path = root / "tasks" / "_tasks.yaml"
+    tasks_indexed = tasks_path.exists()
+    if tasks_indexed:
+        try:
+            tdata = yaml.safe_load(tasks_path.read_text(encoding="utf-8")) or {}
+            for t in (tdata.get("tasks", []) if isinstance(tdata, dict) else []):
+                tid = t.get("id", "")
+                if tid:
+                    known_tasks.add(tid)
+        except (OSError, yaml.YAMLError):
+            tasks_indexed = False
+
+    scanned = 0
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix not in SOURCE_EXTS:
+            continue
+        if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
+            continue
+        scanned += 1
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for m in CITE_RE.finditer(line):
+                cited = m.group(1).upper()
+                rel = path.relative_to(root)
+                if cited.startswith(("DEV-TOOLS-TASK-", "TASK-")):
+                    # Tasks resolve against tasks/_tasks.yaml, not the doc index.
+                    full = cited if cited.startswith("DEV-TOOLS-") \
+                        else f"DEV-TOOLS-TASK-{cited.split('-')[1]}"
+                    if not tasks_indexed:
+                        # No task registry present; defer to `tasklist` rather
+                        # than fail the doc check.
+                        continue
+                    if full not in known_tasks:
+                        findings.append(
+                            f"{rel}:{lineno}: citation {cited!r} -> {full} not "
+                            f"found in tasks/_tasks.yaml (dangling task reference).")
+                elif cited.startswith("DEV-TOOLS-"):
+                    if cited not in known_ids:
+                        findings.append(
+                            f"{rel}:{lineno}: citation {cited!r} not found in "
+                            f"_index.yaml (dangling doc reference).")
+                elif cited.startswith("ADR-"):
+                    full = f"DEV-TOOLS-ADR-{cited.split('-')[1]}"
+                    if full not in known_ids:
+                        findings.append(
+                            f"{rel}:{lineno}: citation {cited!r} -> {full} not "
+                            f"found in _index.yaml (dangling ADR reference).")
+                else:
+                    # Bare requirement-style ID (REQ-AREA-NNN / AREA-NNN). The
+                    # index tracks documents, not individual requirements, so we
+                    # can only confirm that *some* requirements document exists.
+                    if not any(e.get("class") == "requirements" for e in index):
+                        findings.append(
+                            f"{rel}:{lineno}: citation {cited!r} but no "
+                            f"requirements document is indexed.")
+    if scanned == 0:
+        findings.append("check-links: no source files scanned "
+                        f"(extensions {sorted(SOURCE_EXTS)}).")
+    return findings
+
+
+def release_manifest(root: Path, index: list[dict[str, Any]], version: str) -> int:
+    """Snapshot the doc set's versions for a release (doc-code-sync / release).
+
+    Records which version+status of every non-retired document corresponds to a
+    release, without conflating doc versions with the tool version: specs and ADRs
+    keep their own lifecycle version; this manifest captures the correspondence.
+    Written to docs/releases/<version>.yaml.
+    """
+    docs = []
+    for e in index:
+        if e.get("status") == "Retired":
+            continue
+        docs.append({
+            "id": e.get("id", ""),
+            "class": e.get("class", ""),
+            "version": str(e.get("version", "")),
+            "status": e.get("status", ""),
+        })
+    snapshot = {
+        "release": version,
+        "date": date.today().isoformat(),
+        "documents": docs,
+    }
+    out_path = root / "docs" / "releases" / f"{version}.yaml"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(yaml.safe_dump(snapshot, sort_keys=False, allow_unicode=True),
+                        encoding="utf-8")
+    print(f"wrote {out_path.relative_to(root)} "
+          f"({len(docs)} documents at release {version})")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="docs-librarian -- audit + render utility for docs/")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("render", help="regenerate docs/INDEX.adoc from _index.yaml")
+    sub.add_parser("validate", help="exit non-zero on any invariant failure")
+    sub.add_parser("audit", help="run all checks, print human-readable report")
+    sub.add_parser("check-links", help="resolve code->doc citations against the index")
+    p_rel = sub.add_parser("release-manifest",
+                           help="snapshot the doc set's versions for a release")
+    p_rel.add_argument("version", metavar="X.Y.Z", help="the release version")
+    p_next = sub.add_parser("next-id", help="print the next free ID in a class")
+    p_next.add_argument("class_arg", metavar="CLASS",
+                        help="REQ / ARCH / DES / TEST / OPS / MAN / EXT / REP / ADR "
+                             "(or the lowercase class name)")
+    args = parser.parse_args()
+
+    root = repo_root()
+    index = load_index(root)
+
+    if args.cmd == "next-id":
+        print(next_id(index, args.class_arg))
+        return 0
+
+    if args.cmd == "validate":
+        findings = validate(root, index)
+        if findings:
+            for f in findings:
+                print(f, file=sys.stderr)
+            return 1
+        return 0
+
+    if args.cmd == "check-links":
+        findings = check_links(root, index)
+        if findings:
+            for f in findings:
+                print(f, file=sys.stderr)
+            return 1
+        print("docs-librarian check-links: clean (all citations resolve).")
+        return 0
+
+    if args.cmd == "release-manifest":
+        return release_manifest(root, index, args.version)
+
+    if args.cmd == "audit":
+        findings = validate(root, index) + check_links(root, index)
+        if findings:
+            print(f"docs-librarian audit: {len(findings)} findings\n")
+            for f in findings:
+                print(f"  - {f}")
+            return 1
+        print(f"docs-librarian audit: clean ({len(index)} documents indexed).")
+        return 0
+
+    if args.cmd == "render":
+        out_path = root / "docs" / "INDEX.adoc"
+        out_path.write_text(render(index), encoding="utf-8")
+        print(f"wrote {out_path.relative_to(root)} ({len(index)} entries)")
+        return 0
+
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

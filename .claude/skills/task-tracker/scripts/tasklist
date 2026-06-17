@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""tasklist -- maintain the combined task list in tasks/_tasks.yaml.
+
+Sibling of the docs-librarian tool: tasks/_tasks.yaml is the source of truth,
+tasks/TASKS.adoc is generated from it. Verbs:
+
+    tasklist next-id                 print the next free DEV-TOOLS-TASK-NNNN
+    tasklist validate                exit non-zero on any invariant failure (CI)
+    tasklist render                  regenerate tasks/TASKS.adoc from _tasks.yaml
+    tasklist list [filters]          print matching tasks (filters below)
+    tasklist stats                   counts by status / kind / priority
+
+list filters (all optional, AND-combined):
+    --status S      --kind K      --priority P      --owner O      --tag T
+    --active        (status in Backlog/Ready/In progress/Blocked)
+
+Invariants enforced (T01..T10) -- any violation is a finding:
+    T01 ID shape DEV-TOOLS-TASK-NNNN
+    T02 status in the allowed set
+    T03 kind in the allowed set
+    T04 priority empty or in the allowed set
+    T05 status Blocked requires a non-empty blocked-by
+    T06 blocked-by / blocks reference existing tasks and are symmetric
+    T07 _tasks.yaml is sorted by ascending sequence number
+    T08 no duplicate IDs
+    T09 Done / Dropped tasks keep their id and title (not deleted)
+    T10 every links: doc reference of the form DEV-TOOLS-... is well-shaped
+
+Run from anywhere inside the repo (the tool walks up to find tasks/_tasks.yaml).
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+try:
+    import yaml
+except ImportError:
+    sys.stderr.write("ERROR: PyYAML required. Install with `apt install python3-yaml`.\n")
+    sys.exit(2)
+
+STATUSES = ["Backlog", "Ready", "In progress", "Blocked", "Done", "Dropped"]
+ACTIVE_STATUSES = ["Backlog", "Ready", "In progress", "Blocked"]
+KINDS = ["doc", "code", "infra", "bug", "feature", "chore", "research"]
+PRIORITIES = ["P0", "P1", "P2", "P3"]
+
+ID_RE = re.compile(r"^DEV-TOOLS-TASK-(\d{4})$")
+DOC_ID_RE = re.compile(r"^DEV-TOOLS-(REQ|ARCH|DES|TEST|OPS|MAN|EXT|REP|ADR)-\d{4}")
+# Render groups active tasks by priority, with unprioritised last.
+PRIORITY_ORDER = PRIORITIES + [""]
+
+
+def repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "tasks" / "_tasks.yaml").exists():
+            return parent
+    sys.stderr.write("ERROR: cannot locate repo root (no tasks/_tasks.yaml above this script).\n")
+    sys.exit(2)
+
+
+def load_tasks(root: Path) -> list[dict[str, Any]]:
+    text = (root / "tasks" / "_tasks.yaml").read_text(encoding="utf-8")
+    data = yaml.safe_load(text)
+    tasks = data.get("tasks", []) if isinstance(data, dict) else []
+    if not isinstance(tasks, list):
+        raise SystemExit("ERROR: _tasks.yaml `tasks:` is not a list.")
+    return tasks
+
+
+def seq_of(task_id: str) -> int | None:
+    m = ID_RE.match(task_id or "")
+    return int(m.group(1)) if m else None
+
+
+# -- validate --------------------------------------------------------
+
+def validate(tasks: list[dict[str, Any]]) -> list[str]:
+    findings: list[str] = []
+    by_id: dict[str, dict[str, Any]] = {}
+    last_seq = -1
+
+    for i, t in enumerate(tasks):
+        ctx = f"_tasks.yaml[{i}]"
+        tid = t.get("id", "")
+        seq = seq_of(tid)
+
+        if seq is None:
+            findings.append(f"T01: {ctx}: id {tid!r} does not match `DEV-TOOLS-TASK-NNNN`.")
+            continue
+        if tid in by_id:
+            findings.append(f"T08: {ctx}: duplicate id {tid!r}.")
+        by_id[tid] = t
+
+        if seq <= last_seq:
+            findings.append(f"T07: {ctx}: id {tid!r} (seq {seq}) is not after the previous {last_seq}.")
+        last_seq = max(last_seq, seq)
+
+        status = t.get("status", "")
+        if status not in STATUSES:
+            findings.append(f"T02: {ctx} ({tid}): status {status!r} not in {STATUSES}.")
+        kind = t.get("kind", "")
+        if kind not in KINDS:
+            findings.append(f"T03: {ctx} ({tid}): kind {kind!r} not in {KINDS}.")
+        prio = t.get("priority", "") or ""
+        if prio not in PRIORITIES and prio != "":
+            findings.append(f"T04: {ctx} ({tid}): priority {prio!r} not in {PRIORITIES} or empty.")
+
+        if status == "Blocked" and not t.get("blocked-by"):
+            findings.append(f"T05: {ctx} ({tid}): status Blocked but blocked-by is empty.")
+
+        if status in ("Done", "Dropped") and not t.get("title"):
+            findings.append(f"T09: {ctx} ({tid}): {status} task must keep a title.")
+
+        for ref in (t.get("links") or []):
+            head = str(ref).split()[0] if str(ref).split() else ""
+            if head.startswith("DEV-TOOLS-") and not DOC_ID_RE.match(head):
+                findings.append(f"T10: {ctx} ({tid}): link {head!r} looks like a doc ID but is malformed.")
+
+    # T06 -- relational integrity, second pass once all IDs are known.
+    for t in tasks:
+        tid = t.get("id", "")
+        for dep in (t.get("blocked-by") or []):
+            if dep not in by_id:
+                findings.append(f"T06: {tid}: blocked-by {dep!r} is not a known task.")
+            elif tid not in (by_id[dep].get("blocks") or []):
+                findings.append(f"T06: {tid}: blocked-by {dep!r} but {dep} does not list {tid} in blocks.")
+        for dep in (t.get("blocks") or []):
+            if dep not in by_id:
+                findings.append(f"T06: {tid}: blocks {dep!r} is not a known task.")
+
+    return findings
+
+
+# -- next-id ---------------------------------------------------------
+
+def next_id(tasks: list[dict[str, Any]]) -> str:
+    seqs = [s for s in (seq_of(t.get("id", "")) for t in tasks) if s is not None]
+    nxt = max(seqs) + 1 if seqs else 1
+    return f"DEV-TOOLS-TASK-{nxt:04d}"
+
+
+# -- list / stats ----------------------------------------------------
+
+def filter_tasks(tasks: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
+    out = tasks
+    if args.active:
+        out = [t for t in out if t.get("status") in ACTIVE_STATUSES]
+    if args.status:
+        out = [t for t in out if t.get("status") == args.status]
+    if args.kind:
+        out = [t for t in out if t.get("kind") == args.kind]
+    if args.priority:
+        out = [t for t in out if (t.get("priority") or "") == args.priority]
+    if args.owner:
+        out = [t for t in out if t.get("owner") == args.owner]
+    if args.tag:
+        out = [t for t in out if args.tag in (t.get("tags") or [])]
+    return out
+
+
+def print_list(tasks: list[dict[str, Any]]) -> None:
+    if not tasks:
+        print("(no matching tasks)")
+        return
+    width = max(len(t.get("id", "")) for t in tasks)
+    for t in tasks:
+        prio = t.get("priority") or "--"
+        print(f"{t.get('id',''):<{width}}  {prio:<3} {t.get('status',''):<12} "
+              f"{t.get('kind',''):<8} {t.get('title','')}")
+
+
+def print_stats(tasks: list[dict[str, Any]]) -> None:
+    def tally(field: str, order: list[str]) -> None:
+        counts = {k: 0 for k in order}
+        for t in tasks:
+            v = t.get(field) or ""
+            counts[v] = counts.get(v, 0) + 1
+        line = ", ".join(f"{k or '(none)'}={counts[k]}" for k in counts if counts[k])
+        print(f"  {field:<9}: {line}")
+    print(f"tasklist stats: {len(tasks)} tasks")
+    tally("status", STATUSES)
+    tally("kind", KINDS)
+    tally("priority", PRIORITIES + [""])
+
+
+# -- render ----------------------------------------------------------
+
+def render(tasks: list[dict[str, Any]]) -> str:
+    today = date.today().isoformat()
+    out: list[str] = []
+    out.append("= DEV-TOOLS Task List")
+    out.append(f":doc-version:   {today}")
+    out.append(":doc-status:    Approved")
+    out.append(f":doc-date:      {today}")
+    out.append(":revnumber:     {doc-version}")
+    out.append(":revdate:       {doc-date}")
+    out.append(":title-page:")
+    out.append(":toc:           left")
+    out.append("")
+    out.append("[NOTE]")
+    out.append("====")
+    out.append("Generated from `tasks/_tasks.yaml` by")
+    out.append("`.claude/skills/task-tracker/scripts/tasklist render`.")
+    out.append("Do not hand-edit; edit `_tasks.yaml` and regenerate.")
+    out.append("====")
+    out.append("")
+
+    active = [t for t in tasks if t.get("status") in ACTIVE_STATUSES]
+    closed = [t for t in tasks if t.get("status") in ("Done", "Dropped")]
+
+    out.append("== Active")
+    out.append("")
+    for prio in PRIORITY_ORDER:
+        bucket = [t for t in active if (t.get("priority") or "") == prio]
+        if not bucket:
+            continue
+        out.append(f"=== {prio or 'Unprioritised'}")
+        out.append("")
+        out.append('[cols="1,4,1,1,1,2",options="header"]')
+        out.append("|===")
+        out.append("| ID | Title | Kind | Status | Owner | Links")
+        for t in bucket:
+            links = ", ".join(str(x) for x in (t.get("links") or []))
+            out.append(f"| {t.get('id','')} | {t.get('title','')} | {t.get('kind','')} "
+                       f"| {t.get('status','')} | {t.get('owner','') or ''} | {links}")
+        out.append("|===")
+        out.append("")
+
+    if closed:
+        out.append("== Closed (Done / Dropped)")
+        out.append("")
+        out.append('[cols="1,4,1,1",options="header"]')
+        out.append("|===")
+        out.append("| ID | Title | Kind | Status")
+        for t in closed:
+            out.append(f"| {t.get('id','')} | {t.get('title','')} | {t.get('kind','')} | {t.get('status','')}")
+        out.append("|===")
+        out.append("")
+
+    return "\n".join(out) + "\n"
+
+
+# -- main ------------------------------------------------------------
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="tasklist -- maintain tasks/_tasks.yaml")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("next-id", help="print the next free DEV-TOOLS-TASK-NNNN")
+    sub.add_parser("validate", help="exit non-zero on any invariant failure")
+    sub.add_parser("render", help="regenerate tasks/TASKS.adoc")
+    sub.add_parser("stats", help="counts by status / kind / priority")
+    p_list = sub.add_parser("list", help="print matching tasks")
+    p_list.add_argument("--status", choices=STATUSES)
+    p_list.add_argument("--kind", choices=KINDS)
+    p_list.add_argument("--priority", choices=PRIORITIES)
+    p_list.add_argument("--owner")
+    p_list.add_argument("--tag")
+    p_list.add_argument("--active", action="store_true")
+    args = parser.parse_args()
+
+    root = repo_root()
+    tasks = load_tasks(root)
+
+    if args.cmd == "next-id":
+        print(next_id(tasks)); return 0
+    if args.cmd == "stats":
+        print_stats(tasks); return 0
+    if args.cmd == "list":
+        print_list(filter_tasks(tasks, args)); return 0
+    if args.cmd == "validate":
+        findings = validate(tasks)
+        for f in findings:
+            print(f, file=sys.stderr)
+        return 1 if findings else 0
+    if args.cmd == "render":
+        out_path = root / "tasks" / "TASKS.adoc"
+        out_path.write_text(render(tasks), encoding="utf-8")
+        print(f"wrote {out_path.relative_to(root)} ({len(tasks)} tasks)")
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

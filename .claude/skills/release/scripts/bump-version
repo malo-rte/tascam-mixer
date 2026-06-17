@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""bump-version -- enforce and step the repo's single unified version.
+
+Policy (see the `release` skill): every tool in the repo shares one version and
+they are all stepped together. One canonical source; every manifest derives from
+or is stamped to it; coherence is enforced by `check` (wired into
+run-all-checks.sh).
+
+    bump-version check                 verify every manifest == canonical (CI gate)
+    bump-version current               print the canonical version
+    bump-version <major|minor|patch>   step and stamp every manifest
+    bump-version set X.Y.Z             set an explicit version everywhere
+
+Canonical source resolution order:
+    1. a root VERSION file (preferred for mixed-language repos)
+    2. [workspace.package] version in the root Cargo.toml
+
+Exit codes: 0 ok / 1 mismatch or failure / 2 usage.
+
+Authored to python-coding-rules (typed, argparse, exit-code contract). Writing is
+done by scoped regex replacement to preserve manifest formatting; reading uses
+tomllib. Add project-specific manifests (a C version header, a Yocto recipe PV) to
+the MANIFESTS table.
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
+SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
+def repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / ".git").exists() or (parent / "VERSION").exists() \
+                or (parent / "Cargo.toml").exists():
+            return parent
+    return Path.cwd()
+
+
+@dataclass
+class Manifest:
+    """A file that carries the version, and how to read/replace it."""
+    path: Path
+    label: str
+    read: "callable"          # (text) -> version str | None
+    replace: "callable"       # (text, newver) -> text
+
+
+# --- per-manifest read/replace helpers ---------------------------------
+
+def _toml_table_version(table: str):
+    """Return reader+writer for a `version = "X"` inside a given TOML table."""
+    def read(text: str) -> str | None:
+        try:
+            data = tomllib.loads(text)
+        except tomllib.TOMLDecodeError:
+            return None
+        node: object = data
+        for key in table.split("."):
+            if not isinstance(node, dict) or key not in node:
+                return None
+            node = node[key]
+        if isinstance(node, dict) and isinstance(node.get("version"), str):
+            return node["version"]
+        return None
+
+    header = re.compile(rf"^\[{re.escape(table)}\]\s*$", re.MULTILINE)
+
+    def replace(text: str, newver: str) -> str:
+        m = header.search(text)
+        if not m:
+            return text
+        start = m.end()
+        nxt = re.search(r"^\[", text[start:], re.MULTILINE)
+        end = start + nxt.start() if nxt else len(text)
+        section = text[start:end]
+        section2 = re.sub(r'(?m)^(\s*version\s*=\s*")[^"]*(")',
+                          rf"\g<1>{newver}\g<2>", section, count=1)
+        return text[:start] + section2 + text[end:]
+
+    return read, replace
+
+
+def _plain_version():
+    def read(text: str) -> str | None:
+        s = text.strip()
+        return s if SEMVER_RE.match(s) else None
+
+    def replace(_text: str, newver: str) -> str:
+        return newver + "\n"
+
+    return read, replace
+
+
+def _adoc_applies_to():
+    """Reader/writer for `:applies-to-version: X.Y.Z` in an AsciiDoc front matter.
+
+    This is the opt-in that ties a user manual to the tool version it documents
+    (see the user-manual skill). A doc *without* this attribute is not a version
+    manifest and is left alone — specs and ADRs version on their own lifecycle.
+    """
+    attr = re.compile(r"(?m)^(:applies-to-version:[ \t]*)(\S+)[ \t]*$")
+
+    def read(text: str) -> str | None:
+        m = attr.search(text)
+        return m.group(2) if m else None
+
+    def replace(text: str, newver: str) -> str:
+        return attr.sub(rf"\g<1>{newver}", text, count=1)
+
+    return read, replace
+
+
+def discover(root: Path) -> list[Manifest]:
+    """Build the manifest list from the files actually present."""
+    out: list[Manifest] = []
+    vfile = root / "VERSION"
+    if vfile.exists():
+        r, w = _plain_version()
+        out.append(Manifest(vfile, "VERSION", r, w))
+    cargo = root / "Cargo.toml"
+    if cargo.exists():
+        r, w = _toml_table_version("workspace.package")
+        out.append(Manifest(cargo, "Cargo.toml [workspace.package]", r, w))
+    pyproject = root / "pyproject.toml"
+    if pyproject.exists():
+        r, w = _toml_table_version("project")
+        out.append(Manifest(pyproject, "pyproject.toml [project]", r, w))
+    # Manuals that opt in by declaring `:applies-to-version:` pin the tool version
+    # they document; they are stamped on release and checked for coherence.
+    docs = root / "docs"
+    if docs.exists():
+        for adoc in sorted(docs.rglob("*.adoc")):
+            try:
+                text = adoc.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if ":applies-to-version:" in text:
+                r, w = _adoc_applies_to()
+                out.append(Manifest(adoc, f"{adoc.relative_to(root)} :applies-to-version:", r, w))
+    # Project-specific manifests go here, e.g.:
+    #   include/version.h  -> regex on `#define DEV_TOOLS_VERSION "X"`
+    #   meta-*/recipes-*/foo/foo_%.bb -> PV
+    return out
+
+
+def read_versions(manifests: list[Manifest]) -> list[tuple[Manifest, str | None]]:
+    pairs: list[tuple[Manifest, str | None]] = []
+    for m in manifests:
+        try:
+            pairs.append((m, m.read(m.path.read_text(encoding="utf-8"))))
+        except OSError:
+            pairs.append((m, None))
+    return pairs
+
+
+def canonical(manifests: list[Manifest]) -> str | None:
+    """VERSION file wins; else Cargo [workspace.package]."""
+    for label in ("VERSION", "Cargo.toml [workspace.package]"):
+        for m in manifests:
+            if m.label == label:
+                v = m.read(m.path.read_text(encoding="utf-8"))
+                if v:
+                    return v
+    return None
+
+
+def cmd_check(root: Path) -> int:
+    manifests = discover(root)
+    if not manifests:
+        print("bump-version: no version manifests found (VERSION / Cargo.toml / "
+              "pyproject.toml).", file=sys.stderr)
+        return 0  # nothing to enforce yet; not a failure
+    canon = canonical(manifests)
+    if canon is None:
+        print("bump-version: no canonical version source.", file=sys.stderr)
+        return 1
+    bad = [(m.label, v) for m, v in read_versions(manifests) if v != canon]
+    if bad:
+        print(f"bump-version: version mismatch (canonical {canon!r}):",
+              file=sys.stderr)
+        for label, v in bad:
+            print(f"  {label}: {v!r}", file=sys.stderr)
+        return 1
+    print(f"bump-version: coherent ({canon}, {len(manifests)} manifests).")
+    return 0
+
+
+def cmd_current(root: Path) -> int:
+    canon = canonical(discover(root))
+    if canon is None:
+        print("bump-version: no canonical version source.", file=sys.stderr)
+        return 1
+    print(canon)
+    return 0
+
+
+def step(version: str, level: str) -> str:
+    m = SEMVER_RE.match(version)
+    if not m:
+        raise ValueError(f"canonical version {version!r} is not semver")
+    major, minor, patch = (int(x) for x in m.groups())
+    if level == "major":
+        return f"{major + 1}.0.0"
+    if level == "minor":
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def stamp(root: Path, newver: str) -> int:
+    manifests = discover(root)
+    if not manifests:
+        print("bump-version: no manifests to stamp.", file=sys.stderr)
+        return 1
+    for m in manifests:
+        text = m.path.read_text(encoding="utf-8")
+        new_text = m.replace(text, newver)
+        if new_text != text:
+            m.path.write_text(new_text, encoding="utf-8")
+            print(f"  stamped {m.label} -> {newver}")
+        else:
+            print(f"  WARNING: {m.label} unchanged (no version field matched?)",
+                  file=sys.stderr)
+    return cmd_check(root)
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="enforce/step the repo's unified version")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("check", help="verify every manifest == canonical version")
+    sub.add_parser("current", help="print the canonical version")
+    sub.add_parser("major", help="step the major version everywhere")
+    sub.add_parser("minor", help="step the minor version everywhere")
+    sub.add_parser("patch", help="step the patch version everywhere")
+    p_set = sub.add_parser("set", help="set an explicit version everywhere")
+    p_set.add_argument("version", help="X.Y.Z")
+    args = p.parse_args()
+
+    root = repo_root()
+
+    if args.cmd == "check":
+        return cmd_check(root)
+    if args.cmd == "current":
+        return cmd_current(root)
+    if args.cmd in ("major", "minor", "patch"):
+        canon = canonical(discover(root))
+        if canon is None:
+            print("bump-version: no canonical version source.", file=sys.stderr)
+            return 1
+        try:
+            newver = step(canon, args.cmd)
+        except ValueError as e:
+            print(f"bump-version: {e}", file=sys.stderr)
+            return 1
+        print(f"bump-version: {canon} -> {newver}")
+        return stamp(root, newver)
+    if args.cmd == "set":
+        if not SEMVER_RE.match(args.version):
+            print(f"bump-version: {args.version!r} is not semver X.Y.Z",
+                  file=sys.stderr)
+            return 2
+        return stamp(root, args.version)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,34 @@
+# clippy.toml — project clippy configuration
+#
+# Place at the workspace root (next to the top Cargo.toml). Tunes the lints
+# enabled via rust-coding-rules RS-3 / workspace-lints.toml. These are thresholds
+# and allowances, not lint levels — levels live in the [lints] table.
+
+# Error-handling discipline (RS-10): unwrap/expect/panic are denied in the lints
+# table; these don't belong in clippy.toml (they have no config knob). Listed in
+# workspace-lints.toml instead.
+
+# Cognitive/structural thresholds — keep functions small (software-design-rules)
+cognitive-complexity-threshold = 25
+too-many-arguments-threshold   = 7
+type-complexity-threshold      = 250
+too-many-lines-threshold       = 120
+
+# Disallow footguns by name (RS-10, RS-24). clippy::disallowed-methods /
+# disallowed-types fire wherever these appear.
+disallowed-methods = [
+    # Time/randomness that breaks test determinism (RS-80) — inject instead.
+    { path = "std::time::Instant::now", reason = "inject a clock; see RS-80" },
+    { path = "std::time::SystemTime::now", reason = "inject a clock; see RS-80" },
+]
+disallowed-types = [
+    # Mutable global state (RS-24). Thread a context instead.
+    # (Add project-specific banned types here.)
+]
+
+# MSRV (RS-1): set to the project minimum so clippy won't suggest newer APIs.
+# Keep in sync with rust-version in Cargo.toml. Project baseline: edition 2024.
+msrv = "1.85"
+
+# Allow certain names clippy flags as too short/confusing if they're domain terms.
+# allowed-idents-below-min-chars = ["id", "io", "ok", "x", "y"]

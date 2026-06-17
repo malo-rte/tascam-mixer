@@ -1,0 +1,60 @@
+# Cargo.toml — workspace lints
+#
+# Implements rust-coding-rules RS-3 (clippy denied) as a drop-in [lints] table.
+# Rust 1.74+ / edition 2021+; the [workspace.lints] table is inherited by every
+# member crate that declares `lints.workspace = true`.
+#
+# Per-crate override for crates that genuinely need unsafe (RS-4): drop
+# `unsafe_code = "forbid"` to "deny" and rely on undocumented_unsafe_blocks +
+# missing_safety_doc below.
+
+# ---- Put this in the WORKSPACE root Cargo.toml ----
+[workspace.lints.rust]
+unsafe_code                = "forbid"   # RS-4; change to "deny" in crates that need unsafe
+unsafe_op_in_unsafe_fn     = "deny"     # RS-4; already default-deny on edition 2024
+missing_docs               = "warn"     # RS-90; "deny" on published crates
+unused_must_use            = "deny"     # RS-12
+rust_2018_idioms           = "warn"
+
+[workspace.lints.clippy]
+# Baseline groups
+all                        = { level = "deny", priority = -1 }   # RS-3
+pedantic                   = { level = "warn", priority = -1 }   # RS-3: opt in, then allow noise below
+
+# Error-handling discipline (RS-10, RS-12)
+unwrap_used                = "deny"
+expect_used                = "deny"     # allowed in tests via the per-test override below
+panic                      = "deny"     # RS-10; reserve for const/impossible, documented
+indexing_slicing           = "warn"     # prefer .get(); panics are RS-10 hazards
+
+# Unsafe discipline (RS-30, RS-32, RS-71)
+undocumented_unsafe_blocks = "deny"     # every unsafe block needs // SAFETY:
+missing_safety_doc         = "deny"
+transmute_ptr_to_ptr       = "warn"     # RS-32
+
+# Async discipline (RS-52)
+await_holding_lock         = "deny"
+
+# API surface (RS-22, RS-61, RS-63)
+must_use_candidate         = "warn"     # RS-61
+return_self_not_must_use   = "warn"
+
+# pedantic lints not worth the noise — allow explicitly so `pedantic = warn` is livable
+module_name_repetitions    = "allow"
+missing_errors_doc         = "allow"    # covered by RS-90 review, not mechanically
+missing_panics_doc         = "allow"
+must_use_unit              = "allow"
+
+# ---- Then in EACH member crate's Cargo.toml ----
+# [lints]
+# workspace = true
+
+# ---- Per-test relaxation (RS-10 reserves unwrap/expect for tests) ----
+# In test modules, the deny-by-default unwrap/expect/panic are noise. Scope the
+# relaxation to test code only — never crate-wide:
+#
+#   #[cfg(test)]
+#   mod tests {
+#       #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#       ...
+#   }
