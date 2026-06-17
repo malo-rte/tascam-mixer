@@ -23,6 +23,8 @@ const METER_FULL_SCALE: f32 = 32768.0;
 /// Column widths for the INPUT / EQ / COMPRESSOR boxes.
 const INPUT_WIDTH: f32 = 220.0;
 const DSP_WIDTH: f32 = 320.0;
+/// Length of the INPUT volume fader.
+const VOLUME_FADER_LENGTH: f32 = 160.0;
 
 /// Render the editor for the currently selected channel.
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
@@ -58,17 +60,38 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 app.toggle_link(selected);
             }
 
-            egui::Grid::new("input_grid").num_columns(2).show(ui, |ui| {
-                control(app, ui, "Phase", Control::PhaseSwitch, ch);
-                control(app, ui, "Mute", Control::MuteSwitch, ch);
-                control(app, ui, "Volume", Control::LineVolume, ch);
-                control(
-                    app,
-                    ui,
-                    if linked { "Balance" } else { "Pan" },
-                    Control::Pan,
-                    ch,
-                );
+            ui.horizontal(|ui| {
+                let mut phase = app.cached_bool(Control::PhaseSwitch, ch);
+                if ui.checkbox(&mut phase, "Phase").changed() {
+                    app.set(Control::PhaseSwitch, ch, Value::Bool(phase));
+                }
+                let mut mute = app.cached_bool(Control::MuteSwitch, ch);
+                if ui.checkbox(&mut mute, "Mute").changed() {
+                    app.set(Control::MuteSwitch, ch, Value::Bool(mute));
+                }
+            });
+
+            // Volume as a vertical fader. Scoped so the longer slider length
+            // does not leak to the horizontal pan slider below.
+            ui.label("Volume");
+            ui.scope(|ui| {
+                ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
+                let mut volume = app.cached_int(Control::LineVolume, ch);
+                if ui
+                    .add(egui::Slider::new(&mut volume, 0..=133).vertical())
+                    .changed()
+                {
+                    app.set(Control::LineVolume, ch, Value::Int(volume));
+                }
+            });
+
+            // Pan / balance as a horizontal slider.
+            ui.horizontal(|ui| {
+                ui.label(if linked { "Balance" } else { "Pan" });
+                let mut pan = app.cached_int(Control::Pan, ch);
+                if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
+                    app.set(Control::Pan, ch, Value::Int(pan));
+                }
             });
         });
     });
