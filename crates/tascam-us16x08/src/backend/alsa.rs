@@ -98,20 +98,34 @@ impl Backend for AlsaBackend {
     fn get_int(&self, name: &str, index: u32) -> Result<i32> {
         let elem = self.find(name, index)?;
         let value = elem.read().map_err(backend_err)?;
-        value.get_integer(0).ok_or(Error::TypeMismatch {
-            control: "<elem>",
-            expected: "integer",
-        })
+        // Enumerated controls (e.g. "Line Out Route", "Compressor Ratio") store
+        // their selection in a separate union member from plain integers; read
+        // whichever this element actually is, mapping the enum item to its index.
+        if let Some(int) = value.get_integer(0) {
+            return Ok(int);
+        }
+        if let Some(item) = value.get_enumerated(0) {
+            return Ok(i32::try_from(item).unwrap_or(i32::MAX));
+        }
+        Err(Error::Backend(format!(
+            "control {name:?} is neither an integer nor an enumerated control"
+        )))
     }
 
     fn set_int(&mut self, name: &str, index: u32, val: i32) -> Result<()> {
         let elem = self.find(name, index)?;
-        // Read first to obtain a correctly typed ElemValue, then mutate slot 0.
+        // Read first to obtain a correctly typed ElemValue, then mutate slot 0,
+        // choosing the integer or enumerated accessor to match the element.
         let mut value = elem.read().map_err(backend_err)?;
-        value.set_integer(0, val).ok_or(Error::TypeMismatch {
-            control: "<elem>",
-            expected: "integer",
-        })?;
+        if value.set_integer(0, val).is_none() {
+            let item = u32::try_from(val)
+                .map_err(|_| Error::Backend(format!("negative value {val} for an enum control")))?;
+            value.set_enumerated(0, item).ok_or_else(|| {
+                Error::Backend(format!(
+                    "control {name:?} is neither an integer nor an enumerated control"
+                ))
+            })?;
+        }
         elem.write(&value).map_err(backend_err)?;
         Ok(())
     }
