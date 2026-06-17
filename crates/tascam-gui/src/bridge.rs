@@ -57,30 +57,30 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
 fn master_strip(app: &mut App, ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         ui.label("MASTER");
-        // Meters and the fader side by side to keep the section short.
+        // Meters on the left; the fader column (vol label, fader, mute) on the
+        // right, so the section stays short and mirrors the channel strips.
         ui.horizontal(|ui| {
             let (l, r) = app.meters().master_db();
             meter_bar(ui, fraction(l));
             meter_bar(ui, fraction(r));
 
-            let mut volume = app.cached_int(Control::MasterVolume, 0);
-            ui.spacing_mut().slider_width = FADER_LENGTH;
-            if ui
-                .add(
-                    egui::Slider::new(&mut volume, 0..=133)
-                        .vertical()
-                        .text("vol"),
-                )
-                .changed()
-            {
-                app.set(Control::MasterVolume, 0, Value::Int(volume));
-            }
-        });
+            ui.vertical(|ui| {
+                ui.label("vol");
+                let mut volume = app.cached_int(Control::MasterVolume, 0);
+                ui.spacing_mut().slider_width = FADER_LENGTH;
+                if ui
+                    .add(egui::Slider::new(&mut volume, 0..=133).vertical())
+                    .changed()
+                {
+                    app.set(Control::MasterVolume, 0, Value::Int(volume));
+                }
 
-        let muted = app.cached_bool(Control::MasterMute, 0);
-        if ui.selectable_label(muted, "MUTE").clicked() {
-            app.set(Control::MasterMute, 0, Value::Bool(!muted));
-        }
+                let muted = app.cached_bool(Control::MasterMute, 0);
+                if ui.selectable_label(muted, "MUTE").clicked() {
+                    app.set(Control::MasterMute, 0, Value::Bool(!muted));
+                }
+            });
+        });
     });
 }
 
