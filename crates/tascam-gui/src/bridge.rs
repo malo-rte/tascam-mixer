@@ -27,6 +27,22 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
         for ch in 0..NUM_CHANNELS {
             channel_strip(app, ui, ch);
         }
+        // Master L/R meters, right-aligned at the end of the bridge.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+            master_meters(app, ui);
+        });
+    });
+}
+
+/// The master L/R level meters shown at the right of the bridge.
+fn master_meters(app: &App, ui: &mut egui::Ui) {
+    ui.vertical(|ui| {
+        ui.label("Master");
+        ui.horizontal(|ui| {
+            let (l, r) = app.meters().master_db();
+            meter_bar(ui, fraction(l));
+            meter_bar(ui, fraction(r));
+        });
     });
 }
 
