@@ -15,11 +15,13 @@ use crate::app::App;
 
 /// Full-scale meter sample (see `Meters` / `convert::meter_scale`).
 const METER_FULL_SCALE: f32 = 32768.0;
-const METER_SIZE: egui::Vec2 = egui::vec2(18.0, 130.0);
+const METER_HEIGHT: f32 = 130.0;
+const METER_SIZE: egui::Vec2 = egui::vec2(18.0, METER_HEIGHT);
 /// Width of each channel column in the bridge.
 const COLUMN_WIDTH: f32 = 44.0;
-/// Length of the master volume fader.
-const FADER_LENGTH: f32 = 140.0;
+/// Length of the master volume fader — matched to the meter height so the
+/// fader and the L/R meters line up as one block.
+const FADER_LENGTH: f32 = METER_HEIGHT;
 
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
