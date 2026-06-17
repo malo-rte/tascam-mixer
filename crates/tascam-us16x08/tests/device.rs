@@ -146,10 +146,10 @@ fn watcher_reports_only_changes() {
     // No change yet.
     assert!(w.poll(&dev).unwrap().is_empty());
     // One change.
-    dev.set(Control::Solo, 1, Value::Bool(true)).unwrap();
+    dev.set(Control::PhaseSwitch, 1, Value::Bool(true)).unwrap();
     let changes = w.poll(&dev).unwrap();
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].control, Control::Solo);
+    assert_eq!(changes[0].control, Control::PhaseSwitch);
     assert_eq!(changes[0].index, 1);
     assert_eq!(changes[0].value, Value::Bool(true));
     // Polling again with no further change is empty.

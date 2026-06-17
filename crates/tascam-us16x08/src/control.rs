@@ -118,8 +118,6 @@ pub enum Control {
     LineVolume,
     /// Per-channel mute.
     MuteSwitch,
-    /// Per-channel solo.
-    Solo,
     /// Per-channel pan (0 = hard left, 254 = hard right, 127 = centre).
     Pan,
     /// Per-channel phase invert.
@@ -178,7 +176,6 @@ impl Control {
     pub const ALL: &'static [Control] = &[
         Self::LineVolume,
         Self::MuteSwitch,
-        Self::Solo,
         Self::Pan,
         Self::PhaseSwitch,
         Self::EqSwitch,
@@ -223,12 +220,6 @@ impl Control {
             },
             Self::MuteSwitch => Spec {
                 name: "Mute Switch",
-                aliases: &[],
-                kind: BOOL,
-                scope: Scope::Channel,
-            },
-            Self::Solo => Spec {
-                name: "Solo",
                 aliases: &[],
                 kind: BOOL,
                 scope: Scope::Channel,
@@ -491,7 +482,6 @@ impl Control {
         match self {
             Self::LineVolume => "line-volume",
             Self::MuteSwitch => "mute",
-            Self::Solo => "solo",
             Self::Pan => "pan",
             Self::PhaseSwitch => "phase",
             Self::EqSwitch => "eq-enable",

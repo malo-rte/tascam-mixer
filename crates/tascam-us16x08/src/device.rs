@@ -1,6 +1,6 @@
 //! The typed device facade over a [`Backend`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::backend::Backend;
 use crate::control::{Control, Kind, NUM_CHANNELS, Value};
@@ -31,18 +31,37 @@ fn resolve_name(control: Control, loaded: &[String]) -> &'static str {
 pub struct Us16x08<B: Backend> {
     backend: B,
     names: HashMap<Control, &'static str>,
+    present: HashSet<Control>,
 }
 
 impl<B: Backend> Us16x08<B> {
-    /// Wrap a backend, resolving control-name aliases against its element list.
+    /// Wrap a backend, resolving control-name aliases against its element list
+    /// and recording which controls the device actually exposes.
     #[must_use]
     pub fn new(backend: B) -> Self {
         let loaded = backend.elem_names();
-        let names = Control::ALL
-            .iter()
-            .map(|&control| (control, resolve_name(control, &loaded)))
-            .collect();
-        Self { backend, names }
+        let mut names = HashMap::new();
+        let mut present = HashSet::new();
+        for &control in Control::ALL {
+            let name = resolve_name(control, &loaded);
+            names.insert(control, name);
+            if loaded.iter().any(|n| n == name) {
+                present.insert(control);
+            }
+        }
+        Self {
+            backend,
+            names,
+            present,
+        }
+    }
+
+    /// Whether the connected device exposes this control. Not every cataloged
+    /// control exists on every device/kernel; callers that sweep the whole
+    /// catalog (e.g. [`crate::Watcher`]) use this to skip absent ones.
+    #[must_use]
+    pub fn is_present(&self, control: Control) -> bool {
+        self.present.contains(&control)
     }
 
     /// The resolved ALSA name for a control.

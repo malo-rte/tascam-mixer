@@ -59,7 +59,10 @@ impl Watcher {
     pub fn poll<B: Backend>(&mut self, device: &Us16x08<B>) -> Result<Vec<ControlChange>> {
         let mut changes = Vec::new();
         for &control in Control::ALL {
-            if matches!(control.kind(), Kind::Meter) {
+            // Skip the meter block (not a scalar) and any control this device
+            // does not expose (catalogs span kernel versions; not all are
+            // present on every device).
+            if matches!(control.kind(), Kind::Meter) || !device.is_present(control) {
                 continue;
             }
             for index in 0..control.scope().count() {
