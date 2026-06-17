@@ -45,6 +45,18 @@ fn get_returns_seeded_defaults() {
 }
 
 #[test]
+fn topology_explains_routing() {
+    // Backend-independent, so it needs no device or --mock.
+    tascamctl()
+        .arg("topology")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("signal flow"))
+        .stdout(predicate::str::contains("MASTER"))
+        .stdout(predicate::str::contains("Output 1..8"));
+}
+
+#[test]
 fn info_enum_lists_values() {
     tascamctl()
         .args(["--mock", "info", "comp-ratio"])

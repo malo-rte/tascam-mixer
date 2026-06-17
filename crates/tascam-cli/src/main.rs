@@ -31,6 +31,8 @@ struct Cli {
 enum Command {
     /// List every control with its key, scope, kind, and ALSA name.
     List,
+    /// Explain the card's signal flow and how the 8 outputs are routed.
+    Topology,
     /// Show details for one control (scope, range, enum values).
     Info {
         /// Control key (see `list`).
@@ -122,6 +124,10 @@ fn run_command<B: Backend>(dev: &mut Us16x08<B>, command: Command) -> Result<()>
             commands::list();
             Ok(())
         }
+        Command::Topology => {
+            commands::topology();
+            Ok(())
+        }
         Command::Info { control } => commands::info(&control),
         Command::Get { control, channel } => commands::get(dev, &control, channel),
         Command::Set {
@@ -144,6 +150,10 @@ fn run() -> Result<()> {
     match &cli.command {
         Command::List => {
             commands::list();
+            return Ok(());
+        }
+        Command::Topology => {
+            commands::topology();
             return Ok(());
         }
         Command::Info { control } => return commands::info(control),

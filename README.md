@@ -34,6 +34,7 @@ against the in-memory backend so every command works with no card attached.
 
 ```
 tascamctl list                       # list all controls (key, scope, kind, ALSA name)
+tascamctl topology                   # explain the signal flow and output routing
 tascamctl info comp-ratio            # detail one control (scope, range, enum values)
 tascamctl get  master-volume         # read a global control
 tascamctl get  mute -c 3             # read channel 3's mute

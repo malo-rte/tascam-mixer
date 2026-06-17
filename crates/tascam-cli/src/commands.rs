@@ -28,6 +28,37 @@ pub(crate) fn list() {
     }
 }
 
+/// Print the card's signal flow and routing model. Backend-independent.
+pub(crate) fn topology() {
+    print!(
+        "\
+Tascam US-16x08 signal flow
+===========================
+
+  16 inputs --> per channel: phase, EQ, compressor, fader, pan
+                                  |
+                                  v
+                       summed into the stereo MASTER bus (L / R)
+
+  computer playback (USB from the host) --> Output 1..8
+
+  The 8 physical line outputs are the only routing point. Each one
+  independently selects ONE source via `set route <src> -c <out>`:
+
+      line out <out 0..8>  <--  Master Left | Master Right | Output 1..8
+
+Notes
+-----
+  * The 16 input channels are NOT routed individually to outputs; they
+    are mixed into the stereo master. Only the 8 outputs are routed, and
+    each carries a single source.
+  * `Output 1..8` are the computer/DAW playback streams.
+  * `dsp-bypass` and `buss-out` affect the DSP path; consult the device
+    manual for their exact placement in the chain.
+"
+    );
+}
+
 /// Print detailed metadata for one control. Backend-independent.
 pub(crate) fn info(key: &str) -> Result<()> {
     let control = resolve(key)?;
