@@ -22,10 +22,13 @@ use crate::curves::{self, EqBand};
 const METER_FULL_SCALE: f32 = 32768.0;
 
 /// Column widths for the INPUT / EQ / COMPRESSOR boxes.
-const INPUT_WIDTH: f32 = 260.0;
+const INPUT_WIDTH: f32 = 300.0;
 const DSP_WIDTH: f32 = 320.0;
 /// Length of the INPUT volume fader — matched to the meter height beside it.
 const VOLUME_FADER_LENGTH: f32 = bridge::METER_HEIGHT;
+/// Footprint reserved for the meter+fader strip, so the switch column's width
+/// pushes the strip flush to the right edge.
+const VOLUME_STRIP_WIDTH: f32 = 90.0;
 
 /// Render the editor for the currently selected channel.
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
@@ -54,8 +57,10 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
             }
 
             ui.horizontal_top(|ui| {
-                // Switches and pan stacked on the left.
+                // Switches stacked on the left; the fixed width pushes the
+                // volume strip flush to the right edge.
                 ui.vertical(|ui| {
+                    ui.set_width(INPUT_WIDTH - VOLUME_STRIP_WIDTH);
                     let mut link_on = linked;
                     if ui
                         .checkbox(&mut link_on, format!("Stereo link {}-{}", low + 1, low + 2))
@@ -73,8 +78,8 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                     }
                 });
 
-                // Volume fader strip on the right: the channel meter beside the
-                // vertical fader, both the same height.
+                // Volume fader strip, right-aligned: the channel meter beside
+                // the vertical fader, both the same height.
                 ui.vertical(|ui| {
                     ui.label("Volume");
                     ui.horizontal(|ui| {
@@ -92,9 +97,10 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 });
             });
 
-            // Pan / balance along the bottom of the section.
+            // Pan / balance along the bottom, filling the width.
             ui.horizontal(|ui| {
                 ui.label(if linked { "Balance" } else { "Pan" });
+                ui.spacing_mut().slider_width = INPUT_WIDTH - 100.0;
                 let mut pan = app.cached_int(Control::Pan, ch);
                 if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
                     app.set(Control::Pan, ch, Value::Int(pan));
