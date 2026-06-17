@@ -1,6 +1,9 @@
 # Rust workspace
 /target
 
+# Rendered documentation (docs/build.sh output)
+/build
+
 # Legacy C++ autotools build artifacts (kept for reference under legacy/)
 legacy/configure
 legacy/compile

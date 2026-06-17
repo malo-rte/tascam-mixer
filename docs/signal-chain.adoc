@@ -44,15 +44,38 @@ can be folded into that bus and/or sent straight to outputs. Each of the eight
 physical line outputs independently selects one source. _(manual)_
 
 .US-16x08 signal flow
-[mermaid, fig-signal-chain, svg]
+[plantuml, fig-signal-chain, svg]
 ----
-flowchart LR
-    IN["16 inputs"] --> PH[phase] --> EQ["LCF + EQ"] --> CO[compressor] --> FA[fader] --> PA[pan] --> MB["MASTER bus L / R"]
-    PB["computer playback<br/>(COMPUTER 1..8)"]
-    PB -- buss-out --> MB
-    MB --> RT["route<br/>(per output)"]
-    PB -- direct --> RT
-    RT --> OUT["line out 1..8"]
+@startuml
+left to right direction
+skinparam monochrome true
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor white
+}
+
+rectangle "16 inputs"                    as IN
+rectangle "phase"                        as PH
+rectangle "LCF + EQ"                     as EQ
+rectangle "compressor"                   as CO
+rectangle "fader"                        as FA
+rectangle "pan"                          as PA
+rectangle "MASTER bus\nL / R"            as MB
+rectangle "route\n(per output)"          as RT
+rectangle "line out 1..8"                as OUT
+rectangle "computer playback\n(COMPUTER 1..8)" as PB
+
+IN -> PH
+PH -> EQ
+EQ -> CO
+CO -> FA
+FA -> PA
+PA -> MB
+MB -> RT
+RT -> OUT
+PB --> MB : buss-out
+PB --> RT : direct
+@enduml
 ----
 
 [[sec-channel-chain]]

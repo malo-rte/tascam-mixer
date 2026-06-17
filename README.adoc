@@ -110,6 +110,24 @@ and — when installed — `cargo deny`, `shellcheck`, and `shfmt`. It runs ever
 and reports all failures, exiting non-zero if any fails. CI
 (`.github/workflows/ci.yml`) additionally builds and tests on the MSRV (1.85).
 
+== Documentation
+
+Docs live in `docs/` as AsciiDoc. Render them to PDF (under `build/docs/`) with:
+
+[source,bash]
+----
+./docs/build.sh
+----
+
+This needs `asciidoctor-pdf` and `asciidoctor-diagram` (Ruby gems) plus `plantuml`
+(and `graphviz`) for the embedded figures:
+
+[source,bash]
+----
+sudo gem install asciidoctor-pdf asciidoctor-diagram
+sudo apt-get install plantuml graphviz
+----
+
 == Legacy C++ application (`legacy/`)
 
 The original GTK+ application. It relies on
