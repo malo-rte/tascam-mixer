@@ -1,10 +1,11 @@
 //! The eframe application shell: device ownership, control-state cache, layout.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 
 use eframe::egui;
-use tascam_us16x08::{Backend, Control, Kind, Meters, Scope, Us16x08, Value, Watcher};
+use tascam_us16x08::{Backend, Control, Kind, Meters, Preset, Scope, Us16x08, Value, Watcher};
 
 use crate::config::{self, GuiConfig};
 use crate::{bridge, channel, routing};
@@ -146,6 +147,45 @@ impl App {
         &self.meters
     }
 
+    /// Capture the whole mixer (or one channel's strip) to a JSON file.
+    fn save_preset(&mut self, path: &Path, channel: Option<u32>) {
+        let captured = match channel {
+            Some(ch) => self.device.capture_strip(ch),
+            None => self.device.capture_mixer(),
+        };
+        let result = captured
+            .map_err(|e| e.to_string())
+            .and_then(|preset| serde_json::to_string_pretty(&preset).map_err(|e| e.to_string()))
+            .and_then(|json| std::fs::write(path, json).map_err(|e| e.to_string()));
+        self.status = match result {
+            Ok(()) => format!("saved {}", path.display()),
+            Err(e) => format!("save failed: {e}"),
+        };
+    }
+
+    /// Load a JSON preset. A strip preset needs a target `channel`; a mixer
+    /// preset must be loaded with `None`.
+    fn load_preset(&mut self, path: &Path, channel: Option<u32>) {
+        let parsed = std::fs::read_to_string(path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| serde_json::from_str::<Preset>(&text).map_err(|e| e.to_string()));
+        match parsed {
+            Ok(preset) => match self.device.apply(&preset, channel) {
+                Ok(report) => {
+                    self.status = format!(
+                        "loaded {} ({} applied, {} skipped)",
+                        path.display(),
+                        report.applied,
+                        report.skipped.len()
+                    );
+                    self.sync_controls();
+                }
+                Err(e) => self.status = format!("load failed: {e}"),
+            },
+            Err(e) => self.status = format!("load failed: {e}"),
+        }
+    }
+
     /// Tab selector and the global DSP switches.
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
@@ -159,6 +199,46 @@ impl App {
             let buss = self.cached_bool(Control::BussOut, 0);
             if ui.selectable_label(buss, "Buss out").clicked() {
                 self.set(Control::BussOut, 0, Value::Bool(!buss));
+            }
+            ui.separator();
+            self.presets_menu(ui);
+        });
+    }
+
+    /// The Presets menu: save/load the whole mixer or the selected channel strip.
+    fn presets_menu(&mut self, ui: &mut egui::Ui) {
+        let channel = u32::from(self.selected);
+        ui.menu_button("Presets", |ui| {
+            if ui.button("Save mixer...").clicked() {
+                ui.close_menu();
+                if let Some(path) = save_dialog("mixer.json") {
+                    self.save_preset(&path, None);
+                }
+            }
+            if ui.button("Load mixer...").clicked() {
+                ui.close_menu();
+                if let Some(path) = open_dialog() {
+                    self.load_preset(&path, None);
+                }
+            }
+            ui.separator();
+            if ui
+                .button(format!("Save channel {} strip...", channel + 1))
+                .clicked()
+            {
+                ui.close_menu();
+                if let Some(path) = save_dialog("strip.json") {
+                    self.save_preset(&path, Some(channel));
+                }
+            }
+            if ui
+                .button(format!("Load strip into channel {}...", channel + 1))
+                .clicked()
+            {
+                ui.close_menu();
+                if let Some(path) = open_dialog() {
+                    self.load_preset(&path, Some(channel));
+                }
             }
         });
     }
@@ -197,4 +277,19 @@ impl eframe::App for App {
 
         ctx.request_repaint_after(METER_INTERVAL);
     }
+}
+
+/// Native "save file" dialog for a JSON preset.
+fn save_dialog(default_name: &str) -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
+        .add_filter("JSON preset", &["json"])
+        .set_file_name(default_name)
+        .save_file()
+}
+
+/// Native "open file" dialog for a JSON preset.
+fn open_dialog() -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
+        .add_filter("JSON preset", &["json"])
+        .pick_file()
 }
