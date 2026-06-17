@@ -40,6 +40,9 @@ fn main() -> Result<()> {
         Box::new(move |cc| {
             // Start zoomed in for larger controls; Ctrl +/- adjusts from here.
             cc.egui_ctx.set_zoom_factor(1.5);
+            // Uniform slider length so the editor's value boxes line up.
+            cc.egui_ctx
+                .style_mut(|style| style.spacing.slider_width = 120.0);
             Ok(Box::new(app::App::new(device, mock)))
         }),
     )

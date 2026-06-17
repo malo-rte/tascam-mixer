@@ -58,18 +58,18 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 app.toggle_link(selected);
             }
 
-            ui.horizontal(|ui| {
+            egui::Grid::new("input_grid").num_columns(2).show(ui, |ui| {
                 control(app, ui, "Phase", Control::PhaseSwitch, ch);
                 control(app, ui, "Mute", Control::MuteSwitch, ch);
+                control(app, ui, "Volume", Control::LineVolume, ch);
+                control(
+                    app,
+                    ui,
+                    if linked { "Balance" } else { "Pan" },
+                    Control::Pan,
+                    ch,
+                );
             });
-            control(app, ui, "Volume", Control::LineVolume, ch);
-            control(
-                app,
-                ui,
-                if linked { "Balance" } else { "Pan" },
-                Control::Pan,
-                ch,
-            );
         });
     });
 }
@@ -81,17 +81,19 @@ fn eq_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
         ui.vertical(|ui| {
             ui.heading("EQ");
             eq_curve(app, ui, ch);
-            control(app, ui, "EQ enable", Control::EqSwitch, ch);
-            control(app, ui, "Low gain", Control::EqLowVolume, ch);
-            control(app, ui, "Low freq", Control::EqLowFreq, ch);
-            control(app, ui, "Mid-low gain", Control::EqMidLowVolume, ch);
-            control(app, ui, "Mid-low freq", Control::EqMidLowFreq, ch);
-            control(app, ui, "Mid-low Q", Control::EqMidLowQ, ch);
-            control(app, ui, "Mid-high gain", Control::EqMidHighVolume, ch);
-            control(app, ui, "Mid-high freq", Control::EqMidHighFreq, ch);
-            control(app, ui, "Mid-high Q", Control::EqMidHighQ, ch);
-            control(app, ui, "High gain", Control::EqHighVolume, ch);
-            control(app, ui, "High freq", Control::EqHighFreq, ch);
+            egui::Grid::new("eq_grid").num_columns(2).show(ui, |ui| {
+                control(app, ui, "EQ enable", Control::EqSwitch, ch);
+                control(app, ui, "Low gain", Control::EqLowVolume, ch);
+                control(app, ui, "Low freq", Control::EqLowFreq, ch);
+                control(app, ui, "Mid-low gain", Control::EqMidLowVolume, ch);
+                control(app, ui, "Mid-low freq", Control::EqMidLowFreq, ch);
+                control(app, ui, "Mid-low Q", Control::EqMidLowQ, ch);
+                control(app, ui, "Mid-high gain", Control::EqMidHighVolume, ch);
+                control(app, ui, "Mid-high freq", Control::EqMidHighFreq, ch);
+                control(app, ui, "Mid-high Q", Control::EqMidHighQ, ch);
+                control(app, ui, "High gain", Control::EqHighVolume, ch);
+                control(app, ui, "High freq", Control::EqHighFreq, ch);
+            });
         });
     });
 }
@@ -103,12 +105,14 @@ fn comp_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
         ui.vertical(|ui| {
             ui.heading("Compressor");
             comp_curve(app, ui, ch);
-            control(app, ui, "Comp enable", Control::CompSwitch, ch);
-            control(app, ui, "Threshold", Control::CompThreshold, ch);
-            control(app, ui, "Ratio", Control::CompRatio, ch);
-            control(app, ui, "Attack", Control::CompAttack, ch);
-            control(app, ui, "Release", Control::CompRelease, ch);
-            control(app, ui, "Gain", Control::CompGain, ch);
+            egui::Grid::new("comp_grid").num_columns(2).show(ui, |ui| {
+                control(app, ui, "Comp enable", Control::CompSwitch, ch);
+                control(app, ui, "Threshold", Control::CompThreshold, ch);
+                control(app, ui, "Ratio", Control::CompRatio, ch);
+                control(app, ui, "Attack", Control::CompAttack, ch);
+                control(app, ui, "Release", Control::CompRelease, ch);
+                control(app, ui, "Gain", Control::CompGain, ch);
+            });
         });
     });
 }
@@ -196,23 +200,22 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
 
 /// Render one control as the widget its kind calls for, writing through on edit.
 fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, index: u32) {
+    // One grid row: label in column 1, the widget in column 2.
+    ui.label(label);
     match control.kind() {
         Kind::Bool => {
             let mut value = app.cached_bool(control, index);
-            if ui.checkbox(&mut value, label).changed() {
+            if ui.checkbox(&mut value, "").changed() {
                 app.set(control, index, Value::Bool(value));
             }
         }
         Kind::Int { min, max, .. } => {
             let mut value = app.cached_int(control, index);
-            ui.horizontal(|ui| {
-                ui.label(label);
-                let slider = egui::Slider::new(&mut value, min..=max)
-                    .custom_formatter(move |n, _| human_text(control, n));
-                if ui.add(slider).changed() {
-                    app.set(control, index, Value::Int(value));
-                }
-            });
+            let slider = egui::Slider::new(&mut value, min..=max)
+                .custom_formatter(move |n, _| human_text(control, n));
+            if ui.add(slider).changed() {
+                app.set(control, index, Value::Int(value));
+            }
         }
         Kind::Enum { values, .. } => {
             let current = app.cached_int(control, index);
@@ -222,16 +225,13 @@ fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, inde
                 .and_then(|i| values.get(i))
                 .copied()
                 .unwrap_or("?");
-            ui.horizontal(|ui| {
-                ui.label(label);
-                egui::ComboBox::from_id_salt((control, index))
-                    .selected_text(text)
-                    .show_ui(ui, |ui| {
-                        for (i, name) in values.iter().enumerate() {
-                            ui.selectable_value(&mut selected, i as i32, *name);
-                        }
-                    });
-            });
+            egui::ComboBox::from_id_salt((control, index))
+                .selected_text(text)
+                .show_ui(ui, |ui| {
+                    for (i, name) in values.iter().enumerate() {
+                        ui.selectable_value(&mut selected, i as i32, *name);
+                    }
+                });
             if selected != current {
                 app.set(control, index, Value::Enum(selected));
             }
@@ -239,6 +239,7 @@ fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, inde
         // Meter (and any future kind) is not an editable scalar control.
         _ => {}
     }
+    ui.end_row();
 }
 
 /// Format a raw control value in human units for the slider readout.
