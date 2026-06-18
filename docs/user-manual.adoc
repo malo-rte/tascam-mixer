@@ -6,6 +6,7 @@
 :applies-to-version: 0.1.0
 :revnumber:     {doc-version}
 :revdate:       {doc-date}
+:title-page:
 :toc:           left
 :toclevels:     3
 :sectnums:
