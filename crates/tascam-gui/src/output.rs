@@ -12,7 +12,7 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     // Fixed-width numeric value boxes, matching the editor.
     ui.spacing_mut().interact_size.x = crate::channel::VALUE_BOX_WIDTH;
 
-    // Master fader + mute (the L/R meters live in the bridge).
+    // Master fader (the L/R meters and mute live in the bridge).
     ui.label("Master");
     ui.label("vol");
     let mut volume = app.cached_int(Control::MasterVolume, 0);
@@ -23,11 +23,6 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
         .custom_parser(|s| parse_human(Control::MasterVolume, s));
     if ui.add(fader).changed() {
         app.set(Control::MasterVolume, 0, Value::Int(volume));
-    }
-
-    let mut muted = app.cached_bool(Control::MasterMute, 0);
-    if ui.checkbox(&mut muted, "Mute").changed() {
-        app.set(Control::MasterMute, 0, Value::Bool(muted));
     }
 
     ui.separator();

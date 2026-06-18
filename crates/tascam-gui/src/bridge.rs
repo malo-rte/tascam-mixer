@@ -34,8 +34,8 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-/// The master L/R level meters shown at the right of the bridge.
-fn master_meters(app: &App, ui: &mut egui::Ui) {
+/// The master L/R level meters and mute, shown at the right of the bridge.
+fn master_meters(app: &mut App, ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         ui.label("Master");
         ui.horizontal(|ui| {
@@ -43,6 +43,11 @@ fn master_meters(app: &App, ui: &mut egui::Ui) {
             meter_bar(ui, fraction(l));
             meter_bar(ui, fraction(r));
         });
+        // Mute button under the meters, matching the channel strips.
+        let muted = app.cached_bool(Control::MasterMute, 0);
+        if ui.selectable_label(muted, "M").clicked() {
+            app.set(Control::MasterMute, 0, Value::Bool(!muted));
+        }
     });
 }
 

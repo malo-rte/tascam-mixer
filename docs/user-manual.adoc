@@ -417,8 +417,8 @@ panels and controls is in <<sec-gui-ref>>.
 The meter bridge shows all 16 input channels and the master, always visible at
 the top. Each channel column has a number label, a level meter, and a mute
 button. Click a channel's number to focus it in the editor below; the focused
-channel (or its linked pair) is highlighted. The master level meters sit at the
-right of the bridge.
+channel (or its linked pair) is highlighted. The master level meters and the
+master mute button sit at the right of the bridge.
 
 [[sec-gui-editor]]
 === The channel editor
@@ -452,9 +452,9 @@ All numeric controls read and accept the display units described in
 [[sec-gui-output]]
 === The output panel
 
-The output panel on the right carries the global and master controls: the master
-volume fader, the master mute, the `DSP bypass` and `Buss out` switches, and the
-*Save default* and *Load default* buttons (see <<sec-gui-presets>>).
+The output panel on the right carries the master volume fader and the global
+switches: `DSP bypass` and `Buss out`, plus the *Save default* and *Load default*
+buttons (see <<sec-gui-presets>>). The master mute is in the meter bridge.
 
 [[sec-gui-routing]]
 === The routing tab
@@ -584,10 +584,10 @@ A Lua-configured Hyprland uses the equivalent
 |===
 | Area | Contents
 
-| Meter bridge (top) | 16 channel columns (number, level meter, mute) and the master level meters, always visible. Click a number to focus that channel.
+| Meter bridge (top) | 16 channel columns (number, level meter, mute) and the master level meters with a mute button, always visible. Click a number to focus that channel.
 | Toolbar | `Channel` / `Routing` tab buttons and the `Presets` menu.
 | Channel editor (centre) | INPUT, EQ, and Compressor boxes for the focused channel or linked pair.
-| Output panel (right) | Master fader and mute, `DSP bypass` and `Buss out` switches, `Save default` / `Load default` buttons.
+| Output panel (right) | Master fader, `DSP bypass` and `Buss out` switches, `Save default` / `Load default` buttons.
 | Status line (bottom) | The active device and the most recent error or result message.
 |===
 
@@ -600,6 +600,7 @@ A Lua-configured Hyprland uses the equivalent
 
 | Channel number (bridge) | Focus that channel in the editor.
 | Mute button (bridge / INPUT) | Toggle the channel mute.
+| Master mute (bridge) | Toggle the master mute.
 | Stereo link (INPUT) | Link or unlink the channel's pair.
 | Phase (INPUT) | Toggle channel phase.
 | Volume fader (INPUT) | Channel level, in dB.
@@ -610,7 +611,7 @@ A Lua-configured Hyprland uses the equivalent
 | Compressor enable (title) | Enable or bypass the channel compressor.
 | Compressor reset (title) | Return the compressor to defaults (no compression).
 | Threshold / ratio / attack / release / gain | Compressor parameters, in dB / ratio / ms / ms / dB.
-| Master fader / mute (output panel) | Master level and mute.
+| Master fader (output panel) | Master level.
 | DSP bypass / Buss out (output panel) | Global switches.
 | Save default / Load default (output panel) | Save or restore the shared default preset.
 | Routing rows (Routing tab) | Per-output source selection.
