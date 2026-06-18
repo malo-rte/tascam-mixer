@@ -16,13 +16,13 @@ use crate::value::{format_value, parse_value};
 
 /// Print the full control catalog. Backend-independent.
 pub(crate) fn list() {
-    println!("{:<18} {:<8} {:<14} ALSA NAME", "KEY", "SCOPE", "KIND");
+    println!("{:<18} {:<8} {:<22} ALSA NAME", "KEY", "SCOPE", "KIND");
     for &c in Control::ALL {
         println!(
-            "{:<18} {:<8} {:<14} {}",
+            "{:<18} {:<8} {:<22} {}",
             c.cli_key(),
             scope_str(c.scope()),
-            kind_str(c.kind()),
+            kind_str(c),
             c.alsa_name()
         );
     }
@@ -279,10 +279,19 @@ fn scope_detail(scope: Scope) -> String {
     }
 }
 
-fn kind_str(kind: Kind) -> String {
-    match kind {
+fn kind_str(control: Control) -> String {
+    match control.kind() {
         Kind::Bool => "bool".to_owned(),
-        Kind::Int { min, max, .. } => format!("int {min}..={max}"),
+        // Show the range in display units, falling back to the raw span for
+        // controls (e.g. the Q index) that have no special unit.
+        Kind::Int { min, max, .. } => {
+            let (lo, hi) = (units::format(control, min), units::format(control, max));
+            if lo == min.to_string() && hi == max.to_string() {
+                format!("int {min}..={max}")
+            } else {
+                format!("int {lo}..={hi}")
+            }
+        }
         Kind::Enum { values, .. } => format!("enum[{}]", values.len()),
         Kind::Meter => "meter".to_owned(),
         _ => "?".to_owned(),
