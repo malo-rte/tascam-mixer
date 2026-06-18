@@ -5,7 +5,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use eframe::egui;
-use tascam_us16x08::{Backend, Control, Kind, Meters, Preset, Scope, Us16x08, Value, Watcher};
+use tascam_us16x08::{
+    Backend, Control, Kind, Meters, NUM_CHANNELS, Preset, Scope, Us16x08, Value, Watcher,
+};
 
 use crate::config::{self, GuiConfig};
 use crate::{bridge, channel, output, routing};
@@ -114,6 +116,23 @@ impl App {
             .get((channel / 2) as usize)
             .copied()
             .unwrap_or(false)
+    }
+
+    /// Move the focused channel one step, treating a linked pair as a single
+    /// step and landing on the lower channel of a linked target pair.
+    fn nav(&mut self, forward: bool) {
+        let cur = u32::from(self.selected);
+        let mut next = if forward {
+            let base = if self.linked(cur) { cur | 1 } else { cur };
+            (base + 1).min(NUM_CHANNELS - 1)
+        } else {
+            let base = if self.linked(cur) { cur & !1 } else { cur };
+            base.saturating_sub(1)
+        };
+        if self.linked(next) {
+            next &= !1;
+        }
+        self.selected = u8::try_from(next).unwrap_or(0);
     }
 
     /// Toggle the stereo link for `channel`'s pair, persisting the change. When
@@ -238,13 +257,29 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Ok(m) = self.device.meters() {
-            self.meters = m;
+        match self.device.meters() {
+            Ok(m) => self.meters = m,
+            Err(e) => self.status = format!("device error: {e}"),
         }
         let now = ctx.input(|i| i.time);
         if now >= self.next_watch {
             self.sync_controls();
             self.next_watch = now + WATCH_INTERVAL_SECS;
+        }
+
+        // Arrow keys step the focused channel, but only when no widget (e.g. a
+        // slider) holds keyboard focus, so editing a value never moves channel.
+        if ctx.memory(egui::Memory::focused).is_none() {
+            let (mut prev, mut next) = (false, false);
+            ctx.input(|i| {
+                prev = i.key_pressed(egui::Key::ArrowLeft);
+                next = i.key_pressed(egui::Key::ArrowRight);
+            });
+            if next {
+                self.nav(true);
+            } else if prev {
+                self.nav(false);
+            }
         }
 
         egui::TopBottomPanel::top("bridge").show(ctx, |ui| bridge::show(self, ui));

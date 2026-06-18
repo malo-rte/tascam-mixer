@@ -14,8 +14,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install libasound (for the alsa feature)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install build deps (alsa feature + eframe/winit)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libgl1-mesa-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -28,8 +38,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install libasound (for the alsa feature)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Install build deps (alsa feature + eframe/winit)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libgl1-mesa-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.85.0"

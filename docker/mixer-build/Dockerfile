@@ -34,6 +34,12 @@ ARG BUILD_PACKAGES="\
     xz-utils \
     libxkbcommon-dev \
     libwayland-dev \
+    libasound2-dev \
+    libgl1-mesa-dev \
+    libxcb1-dev \
+    libxcb-render0-dev \
+    libxcb-shape0-dev \
+    libxcb-xfixes0-dev \
     libpcsclite-dev \
     libusb-1.0-0-dev \
     asciidoctor \
