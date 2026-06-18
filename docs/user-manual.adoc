@@ -430,18 +430,20 @@ INPUT:: The channel's stereo-link checkbox, phase and mute switches, a vertical
 volume fader with its level meter, and a pan slider along the bottom. When the
 pair is linked, the pan slider becomes a balance (see <<sec-gui-link>>).
 
-EQ:: An enable checkbox in the title row, a response curve showing the combined
-effect of the four bands, and the band controls below: gain and frequency for
-each of the low, mid-low, mid-high, and high bands, plus a Q control for the two
-mid bands. The low and high bands are shelving filters; the two mid bands are
+EQ:: A `Reset` button and an enable checkbox in the title row, a response curve
+showing the combined effect of the four bands, and the band controls below: gain
+and frequency for each of the low, mid-low, mid-high, and high bands, plus a Q
+control for the two mid bands. `Reset` returns the band controls to their
+defaults, which gives a flat response. The low and high bands are shelving filters; the two mid bands are
 peaking filters. The curve is indicative of the response shape. When the EQ is
 disabled (or `DSP bypass` is on) the curve is flat, since the EQ is doing
 nothing.
 
-Compressor:: An enable checkbox in the title row, a transfer curve (input level
-to output level) with the threshold, ratio, and make-up gain applied, a live
-gain-reduction bar, and the parameters below: threshold, ratio, attack, release,
-and gain. When the compressor is disabled (or `DSP bypass` is on) the curve is a
+Compressor:: A `Reset` button and an enable checkbox in the title row, a transfer
+curve (input level to output level) with the threshold, ratio, and make-up gain
+applied, a live gain-reduction bar, and the parameters below: threshold, ratio,
+attack, release, and gain. `Reset` returns the parameters to their defaults, a
+1:1 ratio with no make-up gain, so no compression occurs. When the compressor is disabled (or `DSP bypass` is on) the curve is a
 straight 1:1 line and the gain-reduction bar reads zero.
 
 All numeric controls read and accept the display units described in
@@ -589,8 +591,10 @@ tascam-mixer [--mock]
 | Volume fader (INPUT) | Channel level, in dB.
 | Pan / Balance (INPUT) | Channel pan, or pair balance when linked.
 | EQ enable (EQ title) | Enable or bypass the channel EQ.
+| EQ reset (EQ title) | Return the EQ bands to defaults (flat response).
 | EQ band gain / frequency / Q | Per-band EQ values, in dB / Hz / index.
 | Compressor enable (title) | Enable or bypass the channel compressor.
+| Compressor reset (title) | Return the compressor to defaults (no compression).
 | Threshold / ratio / attack / release / gain | Compressor parameters, in dB / ratio / ms / ms / dB.
 | Master fader / mute (output panel) | Master level and mute.
 | DSP bypass / Buss out (output panel) | Global switches.

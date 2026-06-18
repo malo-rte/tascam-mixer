@@ -33,6 +33,31 @@ const VOLUME_STRIP_WIDTH: f32 = 90.0;
 /// readout (e.g. `-127 dB`, `1000 ms`) so they are a fixed, uniform size.
 pub(crate) const VALUE_BOX_WIDTH: f32 = 60.0;
 
+/// EQ band controls the EQ `Reset` button returns to defaults (a flat curve),
+/// excluding the enable switch.
+const EQ_RESET: [Control; 10] = [
+    Control::EqLowVolume,
+    Control::EqLowFreq,
+    Control::EqMidLowVolume,
+    Control::EqMidLowFreq,
+    Control::EqMidLowQ,
+    Control::EqMidHighVolume,
+    Control::EqMidHighFreq,
+    Control::EqMidHighQ,
+    Control::EqHighVolume,
+    Control::EqHighFreq,
+];
+
+/// Compressor controls the Compressor `Reset` button returns to defaults (1:1
+/// ratio and no make-up gain, so no compression occurs), excluding the switch.
+const COMP_RESET: [Control; 5] = [
+    Control::CompThreshold,
+    Control::CompRatio,
+    Control::CompAttack,
+    Control::CompRelease,
+    Control::CompGain,
+];
+
 /// Render the editor for the currently selected channel.
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     let selected = u32::from(app.selected);
@@ -136,7 +161,7 @@ fn eq_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.group(|ui| {
         ui.set_width(DSP_WIDTH);
         ui.vertical(|ui| {
-            title_row(app, ui, "EQ", Control::EqSwitch, ch);
+            title_row(app, ui, "EQ", Control::EqSwitch, &EQ_RESET, ch);
             eq_curve(app, ui, ch);
             egui::Grid::new("eq_grid").num_columns(2).show(ui, |ui| {
                 control(app, ui, "Low gain", Control::EqLowVolume, ch);
@@ -159,7 +184,7 @@ fn comp_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.group(|ui| {
         ui.set_width(DSP_WIDTH);
         ui.vertical(|ui| {
-            title_row(app, ui, "Compressor", Control::CompSwitch, ch);
+            title_row(app, ui, "Compressor", Control::CompSwitch, &COMP_RESET, ch);
             comp_curve(app, ui, ch);
             egui::Grid::new("comp_grid").num_columns(2).show(ui, |ui| {
                 control(app, ui, "Threshold", Control::CompThreshold, ch);
@@ -283,8 +308,16 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
     ui.add(egui::ProgressBar::new(fraction).text("gain reduction"));
 }
 
-/// A box title with its enable checkbox right-aligned on the same row.
-fn title_row(app: &mut App, ui: &mut egui::Ui, title: &str, enable: Control, ch: u32) {
+/// A box title row: the title, then a right-aligned `Enable` checkbox with a
+/// `Reset` button to its left. Reset returns `reset` controls to their defaults.
+fn title_row(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    title: &str,
+    enable: Control,
+    reset: &[Control],
+    ch: u32,
+) {
     ui.horizontal(|ui| {
         ui.heading(title);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -292,8 +325,26 @@ fn title_row(app: &mut App, ui: &mut egui::Ui, title: &str, enable: Control, ch:
             if ui.checkbox(&mut enabled, "Enable").changed() {
                 app.set(enable, ch, Value::Bool(enabled));
             }
+            // Placed after the checkbox so it sits to its left in this layout.
+            if ui.button("Reset").clicked() {
+                reset_controls(app, reset, ch);
+            }
         });
     });
+}
+
+/// Set each control to its catalog default. Used by the section Reset buttons;
+/// EQ defaults give a flat response and compressor defaults give no compression.
+fn reset_controls(app: &mut App, controls: &[Control], ch: u32) {
+    for &control in controls {
+        // The reset lists hold only int/enum parameters, not switches or meters.
+        let value = match control.kind() {
+            Kind::Int { default, .. } => Value::Int(default),
+            Kind::Enum { default, .. } => Value::Enum(default),
+            _ => continue,
+        };
+        app.set(control, ch, value);
+    }
 }
 
 /// Render one control as the widget its kind calls for, writing through on edit.
