@@ -47,6 +47,7 @@ ARG BUILD_PACKAGES="\
     ruby-dev \
     default-jre-headless \
     graphviz \
+    plantuml \
 "
 
 RUN apt-get update && \
