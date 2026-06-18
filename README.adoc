@@ -17,9 +17,15 @@ The work proceeds in three stages:
 . *GUI* — `crates/tascam-gui`: the `tascam-mixer` graphical mixer (egui/eframe).
   *(done)*
 
-See link:docs/signal-chain.adoc[the signal-chain reference] for the card's verified
-signal flow (per-channel DSP, master bus, output routing) and how it maps onto the
-controls — the source of truth behind `tascamctl topology`.
+== Using the tools
+
+For installing and operating both tools, see
+link:docs/user-manual.adoc[the user manual]. It covers the signal flow, the
+command-line tool `tascamctl`, the graphical mixer `tascam-mixer`, presets, and
+the verified control catalog.
+
+A global `--mock` flag (CLI) or `--mock` argument (GUI) runs against an in-memory
+device with no card attached, e.g. `cargo run -p tascam-cli -- --mock list`.
 
 == Workspace layout
 
@@ -33,61 +39,9 @@ crates/
   tascam-gui/              # stage 3: the `tascam-mixer` graphical mixer
 ----
 
-== The CLI (`tascamctl`)
-
-A thin command-line front-end over the library. A global `--mock` flag runs against
-the in-memory backend so every command works with no card attached.
-
-[source,bash]
-----
-tascamctl list                       # list all controls (key, scope, kind, ALSA name)
-tascamctl topology                   # explain the signal flow and output routing
-tascamctl info comp-ratio            # detail one control (scope, unit range, enum values)
-tascamctl get  master-volume         # read a global control (prints e.g. "+0 dB")
-tascamctl get  eq-low-freq -c 0      # read in display units ("60 Hz")
-tascamctl set  master-volume +3dB -c 0  # absolute, in units (dB)
-tascamctl set  eq-low-freq 1.2kHz -c 0  # Hz / kHz for EQ frequencies
-tascamctl set  comp-release 200ms -c 0  # ms for compressor times
-tascamctl set  pan L50% -c 0         # pan as C / L..% / R..%
-tascamctl set  eq-low-volume -6dB -c 0  # a unit suffix makes a negative absolute
-tascamctl set  master-volume +5      # relative: adjust by 5 (in display units), clamped
-tascamctl set  mute on -c 3          # bool: on/off, true/false, 1/0, yes/no
-tascamctl set  mute toggle -c 3      # flip a boolean
-tascamctl set  route "Output 3" -c 0 # enum by label or index
-tascamctl meters                     # one-shot meter read (--raw for linear samples)
-tascamctl monitor                    # live meters until Ctrl-C
-tascamctl watch                      # print control changes as they happen
-tascamctl save mix.json              # save the whole mixer to JSON
-tascamctl save strip.json -c 0       # save just channel 0's strip
-tascamctl load mix.json              # restore the whole mixer
-tascamctl load strip.json -c 5       # apply a saved strip to channel 5
-tascamctl default                    # load the shared default mixer preset
-tascamctl default --save             # save the current mixer as the default
-----
-
-The `default` preset is a whole-mixer snapshot stored in the user config directory
-(shared with the GUI's *Save default* / *Load default* buttons), so a known starting
-state can be recalled with a single command.
-
-Integer controls read and accept their *display units* — dB for the faders, EQ
-gains, and compressor threshold/gain; Hz/kHz for EQ frequencies; ms for the
-compressor attack/release; and `C` / `L..%` / `R..%` for pan. A bare `+N`/`-N`
-adjusts relative to the current value (in those units), so to enter a negative
-absolute value, add a unit suffix (e.g. `-6dB`). Out-of-range values are clamped
-to the control's range.
-
-Presets are JSON. A whole-mixer preset holds the master controls, the routing, and
-all 16 channel strips; a strip preset holds one channel's controls and can be
-applied to any channel. Controls the device doesn't expose are skipped on load
-(reported on stderr).
-
-Run without a device using `cargo run -p tascam-cli -- --mock <command>`. Exit
-codes: `0` success, `1` runtime error (card missing, unknown control, value out of
-range), `2` usage error.
-
 == The library (`tascam-us16x08`)
 
-A typed wrapper over the ALSA high-level control (HCTL) interface — the Rust port
+A typed wrapper over the ALSA high-level control (HCTL) interface, the Rust port
 of the C++ `OAlsa` hardware layer.
 
 * `Control` enumerates every DSP/mixer control with its ALSA name, value kind,

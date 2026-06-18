@@ -1,0 +1,772 @@
+= Tascam US-16x08 Mixer User Manual
+:doc-version:   0.1
+:doc-status:    Draft
+:doc-date:      2026-06-18
+:doc-authors:   Mats Loman
+:applies-to-version: 0.1.0
+:revnumber:     {doc-version}
+:revdate:       {doc-date}
+:toc:           left
+:toclevels:     3
+:sectnums:
+:sectnumlevels:  4
+:icons:         font
+:source-highlighter: rouge
+:experimental:
+
+This manual describes how to control the Tascam US-16x08's built-in DSP mixer
+from Linux, using the two tools this project provides: the command-line tool
+`tascamctl` and the graphical mixer `tascam-mixer`.
+
+[[sec-intro]]
+== Introduction
+
+The US-16x08 is a 16-in / 8-out USB audio interface with an on-board DSP mixer:
+a 4-band equalizer, a low-cut filter, and a compressor on each input channel,
+summed into a stereo master bus and routed to eight physical outputs. On Linux
+the `snd-usb-audio` driver exposes that mixer as roughly 280 ALSA control
+elements. The two tools in this project drive those controls.
+
+`tascamctl`:: A command-line tool for reading and writing individual controls,
+watching changes, reading the level meters, and saving or restoring whole-mixer
+or single-channel presets. Suited to scripting and to quick one-off changes.
+
+`tascam-mixer`:: A graphical mixer with a live meter bridge, a focused
+channel editor showing the EQ and compressor as response curves, an output
+panel, and an output-routing tab. Suited to interactive mixing.
+
+Both tools act on the same hardware controls and share the same preset and
+default-preset files, so they can be used interchangeably.
+
+This manual applies to the Tascam US-16x08 mixer tools version 0.1.0. It is for
+anyone operating the interface on Linux. Read <<sec-glance>> first for the mental
+model, then the chapter for the tool you use (<<sec-cli>> or <<sec-gui>>). The
+reference chapters (<<sec-cli-ref>>, <<sec-gui-ref>>) and the verified control
+catalog (<<sec-appendix-catalog>>) are for looking up exact details.
+
+[[sec-scope]]
+== Scope
+
+This manual covers operating the US-16x08 DSP mixer through `tascamctl` and
+`tascam-mixer` on Linux.
+
+In scope:
+
+* Reading and writing the mixer controls (faders, pan, phase, mute, EQ,
+  compressor, routing, master, global switches).
+* Reading the level and gain-reduction meters.
+* Saving, restoring, and recalling presets, including the shared default preset.
+
+Out of scope:
+
+* *Audio streaming and recording.* The tools control the DSP mixer only; they do
+  not capture or play back audio. Recording and playback are handled by the
+  Linux audio stack (the `snd-usb-audio` driver and your DAW). See
+  <<sec-capture>> for where the recorded signal is taken from.
+* *Front-panel and interface functions* not exposed as DSP controls: mic preamp
+  gain, phantom power, and sample rate. These are set on the unit or by the audio
+  stack, not by these tools.
+* *The `tascam-us16x08` library API.* Building applications against the control
+  library is a developer topic; see the project README.
+
+Prerequisites:
+
+* A Linux system running the `snd-usb-audio` driver (kernel 4.11 or later, which
+  added US-16x08 support).
+* A connected US-16x08, recognized as ALSA card id `US16x08`.
+* A built `tascamctl` and/or `tascam-mixer` binary (see <<sec-install>>).
+
+For trying the tools without the hardware, every command and the whole GUI run
+against an in-memory mock device (see <<sec-mock>>).
+
+[[sec-glance]]
+== The mixer at a glance
+
+This chapter builds the mental model the rest of the manual relies on: how audio
+flows through the device, what the computer records, how controls are named and
+valued, and what presets and stereo link mean.
+
+[[sec-signal-flow]]
+=== Signal flow
+
+Each of the 16 inputs passes through a per-channel chain (phase, low-cut filter,
+EQ, compressor, mute, fader, pan) and is summed into a stereo master bus. The
+computer's eight USB playback streams (`COMPUTER 1`...`COMPUTER 8`) can be folded
+into that bus or sent straight to outputs. Each of the eight physical line
+outputs independently selects one source.
+
+.US-16x08 signal flow
+[plantuml, fig-signal-flow, svg]
+----
+@startuml
+left to right direction
+skinparam monochrome true
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor white
+}
+
+rectangle "16 inputs"                    as IN
+rectangle "phase"                        as PH
+rectangle "LCF + EQ"                     as EQ
+rectangle "compressor"                   as CO
+rectangle "fader"                        as FA
+rectangle "pan"                          as PA
+rectangle "MASTER bus\nL / R"            as MB
+rectangle "route\n(per output)"          as RT
+rectangle "line out 1..8"                as OUT
+rectangle "computer playback\n(COMPUTER 1..8)" as PB
+rectangle "computer capture\n(record, 16 ch)"  as CAP
+
+IN -> PH
+PH -> EQ
+EQ -> CO
+CO -> FA
+FA -> PA
+PA -> MB
+MB -> RT
+RT -> OUT
+PB --> MB : buss-out
+PB --> RT : direct
+IN --> CAP : capture (dry, pre-DSP)
+@enduml
+----
+
+The EQ and compressor are a per-channel module pair: the equalizer first, then
+the compressor acting on the equalized signal. The `dsp-bypass` switch skips the
+EQ and compressor for dry monitoring. The 16 channels are not routed to outputs
+individually; they are summed into the stereo master, and only the eight outputs
+are routed. The verified per-stage detail is in <<sec-appendix-catalog>>.
+
+[[sec-capture]]
+=== What the computer records
+
+The DSP is a monitor processor. The 16 channels the device sends to the computer
+for recording are taken *before* the DSP block: the recorded signal is the dry
+input, so the EQ, compressor, and fader change monitoring and the outputs but
+never the recording. There is no control to record the processed signal or to
+move the capture point. To capture the EQ or compressor, record the processed
+monitor mix another way (for example, route the stereo master to an output and
+record that) or apply the processing in the DAW.
+
+[[sec-controls-model]]
+=== Controls: scope, kind, and display units
+
+Every control has a short *key* (for example `eq-low-volume`), used by
+`tascamctl` and shown by the `list` command. Each control has a *scope* and a
+*kind*.
+
+Scope says how many instances a control has:
+
+* *global*: one instance (for example `master-volume`).
+* *channel*: one per input channel, 16 in all, selected with the channel index
+  0...15.
+* *output*: one per physical output, 8 in all, selected with the output index
+  0...7.
+
+Kind says what values a control takes:
+
+* *bool*: on or off (for example `mute`).
+* *int*: an integer in a fixed range (for example a fader or an EQ gain).
+* *enum*: one of a fixed set of labelled values (for example `comp-ratio` or
+  `route`).
+* *meter*: a read-only block of level values.
+
+Integer controls are read and written in *display units* rather than raw control
+numbers: dB for the faders, EQ gains, and compressor threshold and gain; Hz or
+kHz for the EQ band frequencies; ms for the compressor attack and release; and
+`C` / `L..%` / `R..%` for pan. Both tools use the same units, so a value shown by
+`tascamctl get` matches the value shown on the matching GUI control. The raw
+ranges behind these units are listed in <<sec-appendix-catalog>>.
+
+[[sec-presets-concept]]
+=== Presets and the default preset
+
+A *preset* is a saved set of control values stored as a JSON file. Two kinds
+exist:
+
+* A *mixer preset* holds the whole mixer: the master controls, the output
+  routing, and all 16 channel strips.
+* A *strip preset* holds one channel's controls and can be applied to any
+  channel.
+
+The *default preset* is a mixer preset kept in a fixed location in the user
+configuration directory. Both tools save to and load from the same default-preset
+file, so a default saved in one tool is recalled by the other. Use it to keep a
+known starting state that one command or one button restores.
+
+[[sec-link-concept]]
+=== Stereo link
+
+A *stereo link* groups an adjacent channel pair (1 and 2, 3 and 4, and so on)
+into one stereo strip. Linking is a feature of the GUI, not a hardware control:
+the device treats every channel independently. When a pair is linked, the GUI
+shows one strip, writes each edit to both channels, and turns the pan control
+into a *balance* that pans the two channels hard-opposite (lower toward left,
+upper toward right) and tilts that stereo image. The link state is remembered
+between GUI sessions.
+
+[[sec-install]]
+== Installing the tools
+
+Both tools are Rust binaries built from the project workspace.
+
+[[sec-build]]
+=== Building from source
+
+Prerequisites: a Rust toolchain (edition 2024, 1.85 or later) and the ALSA
+development headers, which the default build links against.
+
+. Install the ALSA headers. On Debian or Ubuntu: `sudo apt-get install
+  libasound2-dev`. On Arch: `sudo pacman -S alsa-lib`.
+. Build the tools from the workspace root:
++
+[source,bash]
+----
+cargo build --release
+----
++
+This produces `target/release/tascamctl` and `target/release/tascam-mixer`.
+
+To build a single tool, add `-p tascam-cli` or `-p tascam-gui`.
+
+[[sec-mock]]
+=== Running without hardware
+
+Both tools accept an in-memory mock device that needs no card and no ALSA
+headers, useful for trying commands or the interface before connecting hardware.
+
+* `tascamctl` takes a global `--mock` flag before the command, for example
+  `tascamctl --mock list`.
+* `tascam-mixer` takes a `--mock` argument: `tascam-mixer --mock`.
+
+To build without the ALSA dependency at all (mock only), build with
+`--no-default-features`.
+
+[[sec-cli]]
+== Using the command-line tool
+
+`tascamctl` runs one command per invocation. A global `--mock` flag selects the
+mock device; otherwise the tool opens the connected US-16x08. The exact command
+and option syntax is in <<sec-cli-ref>>.
+
+[[sec-cli-inspect]]
+=== Inspecting the controls
+
+To see every control with its key, scope, kind, and ALSA name:
+
+[source,bash]
+----
+tascamctl list
+----
+
+The KIND column shows each integer control's range in display units, for example
+`int -127 dB..=+6 dB` or `int 32 Hz..=1.6 kHz`.
+
+To explain the signal flow and how the eight outputs are routed:
+
+[source,bash]
+----
+tascamctl topology
+----
+
+To see one control in detail (scope, range in display units, enum values, and a
+short description):
+
+[source,bash]
+----
+tascamctl info comp-ratio
+----
+
+`list`, `topology`, and `info` do not touch the device, so they work without
+hardware and without `--mock`.
+
+[[sec-cli-read]]
+=== Reading values and meters
+
+Read one control's current value with `get`. For a channel or output control,
+give the index with `-c`:
+
+[source,bash]
+----
+tascamctl get master-volume        # a global control, prints e.g. "+0 dB"
+tascamctl get eq-low-freq -c 0     # channel 0, prints e.g. "60 Hz"
+tascamctl get mute -c 3            # channel 3, prints "true" or "false"
+----
+
+Read the level meters once with `meters`, or continuously until interrupted with
+`monitor`:
+
+[source,bash]
+----
+tascamctl meters                   # one reading, dB-scaled
+tascamctl meters --raw             # linear samples instead
+tascamctl monitor                  # repeat until Ctrl-C
+----
+
+Print control changes as they happen (for example, when someone turns a knob on
+the unit or another client writes a control):
+
+[source,bash]
+----
+tascamctl watch
+----
+
+NOTE: While `tascam-mixer` is running it polls the meters continuously. Run only
+one meter reader at a time; do not run `tascamctl monitor` against the device
+while the GUI is open.
+
+[[sec-cli-write]]
+=== Changing values
+
+Write a control with `set`. Boolean, enum, and integer controls each accept
+natural forms.
+
+Booleans accept `on`/`off`, `true`/`false`, `1`/`0`, `yes`/`no`, or `toggle` to
+flip the current value:
+
+[source,bash]
+----
+tascamctl set mute on -c 3
+tascamctl set mute toggle -c 3
+----
+
+Enum controls accept either the label or its index:
+
+[source,bash]
+----
+tascamctl set route "Output 3" -c 0
+tascamctl set comp-ratio 4 -c 0
+----
+
+Integer controls accept their display units. A bare number, or a number with a
+unit suffix, is an absolute value:
+
+[source,bash]
+----
+tascamctl set master-volume +3dB -c 0   # dB
+tascamctl set eq-low-freq 1.2kHz -c 0    # Hz / kHz
+tascamctl set comp-release 200ms -c 0    # ms
+tascamctl set pan L50% -c 0              # C / L..% / R..%
+----
+
+A bare `+N` or `-N` adjusts the control relative to its current value, in display
+units, so `+5` on a fader adds 5 dB and `+20` on `comp-release` adds 20 ms. To
+set a negative absolute value, add a unit suffix so it is not read as a relative
+adjust:
+
+[source,bash]
+----
+tascamctl set master-volume +5          # relative: add 5 dB
+tascamctl set eq-low-volume -6dB -c 0   # absolute: -6 dB
+----
+
+A value beyond a control's range is clamped to the range. `set` prints nothing on
+success.
+
+[[sec-cli-presets]]
+=== Saving and restoring
+
+Save the whole mixer, or a single channel's strip, to a JSON file:
+
+[source,bash]
+----
+tascamctl save mix.json                  # the whole mixer
+tascamctl save strip.json -c 0           # just channel 0's strip
+----
+
+Restore from a file. A mixer preset restores everything and takes no channel; a
+strip preset is applied to the channel given with `-c`:
+
+[source,bash]
+----
+tascamctl load mix.json                  # restore the whole mixer
+tascamctl load strip.json -c 5           # apply a strip to channel 5
+----
+
+On load, the number of controls applied is reported on standard error. Controls
+the device does not expose are skipped and listed.
+
+[[sec-cli-default]]
+=== The default preset
+
+Recall the shared default preset, or capture the current mixer as the default:
+
+[source,bash]
+----
+tascamctl default                        # load the default into the whole mixer
+tascamctl default --save                 # save the current mixer as the default
+----
+
+Loading before a default exists is an error that names the expected file. The
+file is shared with the GUI's *Save default* and *Load default* buttons (see
+<<sec-gui-presets>>).
+
+[[sec-gui]]
+== Using the graphical mixer
+
+`tascam-mixer` opens a single window: a meter bridge across the top, a focused
+channel (or linked pair) editor in the centre, an output panel on the right, and
+a toolbar to switch to the routing tab and manage presets. The full list of
+panels and controls is in <<sec-gui-ref>>.
+
+[[sec-gui-bridge]]
+=== The meter bridge
+
+The meter bridge shows all 16 input channels and the master, always visible at
+the top. Each channel column has a number label, a level meter, and a mute
+button. Click a channel's number to focus it in the editor below; the focused
+channel (or its linked pair) is highlighted. The master level meters sit at the
+right of the bridge.
+
+[[sec-gui-editor]]
+=== The channel editor
+
+The editor shows the focused channel, or one combined strip when the channel's
+pair is linked. It has three boxes side by side.
+
+INPUT:: The channel's stereo-link checkbox, phase and mute switches, a vertical
+volume fader with its level meter, and a pan slider along the bottom. When the
+pair is linked, the pan slider becomes a balance (see <<sec-gui-link>>).
+
+EQ:: An enable checkbox in the title row, a response curve showing the combined
+effect of the four bands, and the band controls below: gain and frequency for
+each of the low, mid-low, mid-high, and high bands, plus a Q control for the two
+mid bands. The low and high bands are shelving filters; the two mid bands are
+peaking filters. The curve is indicative of the response shape.
+
+Compressor:: An enable checkbox in the title row, a transfer curve (input level
+to output level) with the threshold, ratio, and make-up gain applied, a live
+gain-reduction bar, and the parameters below: threshold, ratio, attack, release,
+and gain.
+
+All numeric controls read and accept the display units described in
+<<sec-controls-model>>; type a value into a control's box to set it directly.
+
+[[sec-gui-output]]
+=== The output panel
+
+The output panel on the right carries the global and master controls: the master
+volume fader, the master mute, the `DSP bypass` and `Buss out` switches, and the
+*Save default* and *Load default* buttons (see <<sec-gui-presets>>).
+
+[[sec-gui-routing]]
+=== The routing tab
+
+The toolbar switches between the *Channel* editor and the *Routing* tab. The
+routing tab has one row per physical output (`LINE OUT 1`...`LINE OUT 8`), each
+selecting one source: `Master L`, `Master R`, or one of `Output 1`...`Output 8`.
+
+[[sec-gui-link]]
+=== Stereo link
+
+To link a channel pair into one stereo strip, focus either channel and tick the
+*Stereo link* checkbox in the INPUT box. The editor then shows one strip, and
+each edit is written to both channels. The pan control becomes a *Balance*: at
+centre (`C`) the pair is panned hard left and hard right for a full stereo image,
+and moving the balance tilts the image toward one side. Unticking the box unlinks
+the pair. The link state is saved between sessions. See <<sec-link-concept>> for
+the concept.
+
+[[sec-gui-presets]]
+=== Presets and the default preset
+
+The toolbar's *Presets* menu saves and loads presets through a file dialog:
+
+* *Save mixer* / *Load mixer* write or restore the whole mixer.
+* *Save channel N strip* / *Load strip into channel N* write or apply the focused
+  channel's strip.
+
+The output panel's *Save default* and *Load default* buttons capture the current
+mixer as the shared default preset, or restore it. This is the same default file
+that `tascamctl default` uses (see <<sec-cli-default>>).
+
+[[sec-gui-keyboard]]
+=== Keyboard and zoom
+
+With no control focused, the Left and Right arrow keys move the focused channel,
+treating a linked pair as one step. Ctrl with the plus or minus key zooms the
+whole interface in or out.
+
+[[sec-cli-ref]]
+== Command-line reference
+
+`tascamctl` invocation:
+
+[source]
+----
+tascamctl [--mock] <command> [arguments]
+----
+
+[[sec-cli-ref-global]]
+=== Global options
+
+[cols="2,5",options="header"]
+|===
+| Option | Effect
+
+| `--mock` | Use an in-memory mock device instead of the connected hardware. Valid before any command.
+|===
+
+[[sec-cli-ref-commands]]
+=== Commands
+
+For channel controls the channel index is 0...15; for output controls it is
+0...7. The default index when `-c` is omitted is 0.
+
+[cols="3,4,5",options="header"]
+|===
+| Command | Arguments | Description
+
+| `list` | none | List every control: key, scope, kind (range in display units), ALSA name.
+| `topology` | none | Print the signal flow and output-routing model.
+| `info` | `<control>` | Show one control's scope, range in display units (and raw span), enum values, and description.
+| `get` | `<control> [-c <index>]` | Print one control's current value in display units.
+| `set` | `<control> <value> [-c <index>]` | Write one control. `<value>` is absolute (number, unit-suffixed number, `on`/`off`, enum label or index), relative (`+N`/`-N`, in display units), or `toggle` for a boolean. Silent on success.
+| `meters` | `[--raw]` | Read the level meters once. `--raw` prints linear samples instead of dB-scaled values.
+| `monitor` | `[--interval <ms>] [--raw]` | Print the meters repeatedly until interrupted. Default interval 100 ms.
+| `watch` | `[--interval <ms>]` | Print control changes as they happen, until interrupted. Default interval 500 ms.
+| `save` | `<file> [-c <index>]` | Save state to a JSON file: the whole mixer, or one channel's strip with `-c`.
+| `load` | `<file> [-c <index>]` | Restore state from a JSON file. A strip preset needs `-c`; a mixer preset takes none.
+| `default` | `[--save]` | Load the shared default mixer preset, or save the current mixer as the default with `--save`.
+|===
+
+[[sec-cli-ref-exit]]
+=== Exit codes
+
+[cols="1,5",options="header"]
+|===
+| Code | Meaning
+
+| 0 | Success.
+| 1 | Runtime error: card missing, unknown control, value out of range, file error.
+| 2 | Usage error: bad arguments (reported by the argument parser).
+|===
+
+[[sec-gui-ref]]
+== Graphical interface reference
+
+`tascam-mixer` invocation:
+
+[source]
+----
+tascam-mixer [--mock]
+----
+
+[[sec-gui-ref-layout]]
+=== Window layout
+
+[cols="2,5",options="header"]
+|===
+| Area | Contents
+
+| Meter bridge (top) | 16 channel columns (number, level meter, mute) and the master level meters, always visible. Click a number to focus that channel.
+| Toolbar | `Channel` / `Routing` tab buttons and the `Presets` menu.
+| Channel editor (centre) | INPUT, EQ, and Compressor boxes for the focused channel or linked pair.
+| Output panel (right) | Master fader and mute, `DSP bypass` and `Buss out` switches, `Save default` / `Load default` buttons.
+| Status line (bottom) | The active device and the most recent error or result message.
+|===
+
+[[sec-gui-ref-controls]]
+=== Controls
+
+[cols="2,5",options="header"]
+|===
+| Control | Behaviour
+
+| Channel number (bridge) | Focus that channel in the editor.
+| Mute button (bridge / INPUT) | Toggle the channel mute.
+| Stereo link (INPUT) | Link or unlink the channel's pair.
+| Phase (INPUT) | Toggle channel phase.
+| Volume fader (INPUT) | Channel level, in dB.
+| Pan / Balance (INPUT) | Channel pan, or pair balance when linked.
+| EQ enable (EQ title) | Enable or bypass the channel EQ.
+| EQ band gain / frequency / Q | Per-band EQ values, in dB / Hz / index.
+| Compressor enable (title) | Enable or bypass the channel compressor.
+| Threshold / ratio / attack / release / gain | Compressor parameters, in dB / ratio / ms / ms / dB.
+| Master fader / mute (output panel) | Master level and mute.
+| DSP bypass / Buss out (output panel) | Global switches.
+| Save default / Load default (output panel) | Save or restore the shared default preset.
+| Routing rows (Routing tab) | Per-output source selection.
+|===
+
+[[sec-gui-ref-keys]]
+=== Keyboard
+
+[cols="2,5",options="header"]
+|===
+| Key | Action
+
+| Left / Right arrow | Move the focused channel (no control focused). A linked pair is one step.
+| Ctrl + / Ctrl - | Zoom the interface in or out.
+|===
+
+[appendix]
+[[sec-appendix-catalog]]
+== Control catalog and signal chain (verified reference)
+
+This appendix is the verified description of the device's controls and signal
+flow, the single source behind the CLI's `topology` output and the control
+catalog. Each claim is tagged for provenance: _(manual)_ from Tascam's published
+documentation, _(driver)_ from the Linux `snd-usb-audio` driver
+(`sound/usb/mixer_us16x08.c`, authoritative for which controls exist), and
+_(inferred)_ reasoned from those but not stated outright. The *Range* column
+shows the raw control's `min-max (default)`.
+
+The per-channel stages run in signal order: phase, low-cut filter, EQ,
+compressor, mute, fader, pan. The roles are _(manual)_; the EQ-before-compressor
+ordering is _(inferred)_ (the manual presents EQ as channel module 1 and the
+compressor as module 2, acting on the channel input volume).
+
+=== Phase
+
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `phase` | Phase Switch | on / off | Reverse the channel's phase.
+|===
+
+=== Low-cut filter
+
+The device has a per-channel low-cut (high-pass) filter, but the Linux driver
+registers no control for it, so neither tool can set it. _(driver)_
+
+=== EQ (4 bands)
+
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `eq-enable` | EQ Switch | on / off | Enable the channel equalizer.
+| `eq-low-volume` | EQ Low Volume | 0-24 (12) | Low band gain; 12 = 0 dB (plus or minus 12 dB).
+| `eq-low-freq` | EQ Low Frequency | 0-31 (5) | Low band frequency (32 Hz to 1.6 kHz).
+| `eq-midlow-volume` | EQ MidLow Volume | 0-24 (12) | Mid-low band gain (plus or minus 12 dB).
+| `eq-midlow-freq` | EQ MidLow Frequency | 0-63 (14) | Mid-low band frequency.
+| `eq-midlow-q` | EQ MidLow Q | 0-6 (2) | Mid-low band width (Q 0.25 to 16.0).
+| `eq-midhigh-volume` | EQ MidHigh Volume | 0-24 (12) | Mid-high band gain (plus or minus 12 dB).
+| `eq-midhigh-freq` | EQ MidHigh Frequency | 0-63 (27) | Mid-high band frequency.
+| `eq-midhigh-q` | EQ MidHigh Q | 0-6 (2) | Mid-high band width (Q 0.25 to 16.0).
+| `eq-high-volume` | EQ High Volume | 0-24 (12) | High band gain (plus or minus 12 dB).
+| `eq-high-freq` | EQ High Frequency | 0-31 (15) | High band frequency (1.6 kHz to 16 kHz).
+|===
+
+The band frequency ranges are indicative; only the low band's 32 Hz to 1.6 kHz
+span is confirmed by the manual.
+
+=== Compressor
+
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `comp-enable` | Compressor Switch | on / off | Enable the channel compressor.
+| `comp-threshold` | Compressor Threshold Volume | 0-32 (32) | Threshold; 0 = -32 dB, 32 = 0 dB.
+| `comp-ratio` | Compressor Ratio | enum 0-14 (0) | 1.0:1 to inf:1 (15 steps).
+| `comp-attack` | Compressor Attack | 0-198 (0) | Attack 2 to 200 ms.
+| `comp-release` | Compressor Release | 0-99 (0) | Release 10 to 1000 ms.
+| `comp-gain` | Compressor Volume | 0-20 (0) | Make-up gain 0 to 20 dB.
+|===
+
+The compressor meters expose input, output, and gain-reduction levels. _(manual)_
+
+=== Mute, fader, pan
+
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `mute` | Mute Switch | on / off | Mute the channel.
+| `line-volume` | Line Volume | 0-133 (127) | Channel level sent to the stereo bus; logarithmic dB curve.
+| `pan` | Pan Left-Right Volume | 0-254 (127) | 0 = hard left, 127 = centre, 254 = hard right; centre is -3 dB to each side.
+|===
+
+=== Master bus and routing
+
+The 16 channels are summed into a stereo master; the master meters show the mixed
+signal. Each `LINE OUT` selects one source through its own `route` instance.
+_(manual)_
+
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `master-volume` | Master Volume | 0-133 (127) | Master fader level; logarithmic dB curve.
+| `master-mute` | Master Mute Switch | on / off | Mute the master bus.
+| `route` | Line Out Route | enum 0-9, per output (0-7) | Source for one physical line output: `Master L`, `Master R`, or `Output 1`...`Output 8`.
+|===
+
+The 16 inputs are not routed to outputs individually; they are summed into the
+stereo master. Only the eight outputs are routed. `LINE OUT 1` and `LINE OUT 2`
+are mirrored to the headphones jack. _(manual)_
+
+=== Global switches and metering
+
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `dsp-bypass` | DSP Bypass Switch | on / off | Bypass the channel DSP (EQ and compressor) for dry monitoring. _(inferred)_
+| `buss-out` | Buss Out Switch | on / off | Fold the computer playback into the stereo master bus. _(manual/inferred)_
+| `meter` | Level Meter | read-only, 34 ints | Per-channel input levels (0-15), master L/R (16-17), per-channel compressor gain reduction (18-33).
+|===
+
+[appendix]
+[[sec-appendix-trouble]]
+== Troubleshooting
+
+Card not found:: `tascamctl` exits with an error and code 1 when no US-16x08 is
+present. Confirm the unit is connected and that `aplay -l` (or `cat
+/proc/asound/cards`) lists card id `US16x08`. To work without hardware, add
+`--mock`.
+
+Meters do not move in the GUI:: Another program may be reading the meters. Close
+any running `tascamctl monitor` against the same device; run one meter reader at
+a time.
+
+A value will not go where expected:: Integer values are in display units and are
+clamped to each control's range (see <<sec-appendix-catalog>>). A bare leading `-`
+is read as a relative adjust; for a negative absolute value, add a unit suffix
+(for example `-6dB`).
+
+A loaded preset reports skipped controls:: Controls the device does not expose
+(or that are absent on the running kernel) are skipped on load and listed. The
+rest are applied.
+
+[glossary]
+== List of used terms
+
+balance:: For a linked stereo pair, the single control that pans the two channels
+hard-opposite and tilts that stereo image left or right. Replaces the pan control
+in the GUI when a pair is linked.
+capture:: The audio the device sends to the computer for recording. Taken before
+the DSP block (the dry input).
+channel:: One of the 16 inputs, each with its own per-channel DSP chain. Selected
+by index 0...15.
+control:: One settable value of the mixer, identified by a key, with a scope and a
+kind.
+default preset:: A mixer preset stored in a fixed location in the user
+configuration directory, shared by both tools and recalled with one command or
+button.
+DSP:: The on-board digital signal processing (EQ, low-cut filter, compressor) that
+shapes monitoring and the outputs, not the recording.
+gain reduction:: The amount, in dB, by which the compressor is currently lowering a
+channel's level. Shown as a meter.
+key:: The short name of a control used by `tascamctl` (for example
+`master-volume`).
+LCF:: Low-cut filter; a per-channel high-pass filter present on the device but not
+exposed by the Linux driver.
+master bus:: The stereo mix into which the 16 channels are summed.
+meter:: A read-only level reading. The meter block carries per-channel levels, the
+master level, and per-channel gain reduction.
+mixer preset:: A saved file holding the whole mixer: master, routing, and all 16
+channel strips.
+mock device:: An in-memory stand-in for the hardware, selected with `--mock`, so
+the tools run with no card attached.
+route:: The per-output control that selects which source a physical line output
+carries.
+scope:: Whether a control is global, per channel, or per output.
+strip preset:: A saved file holding one channel's controls, applicable to any
+channel.
+stereo link:: A GUI grouping of an adjacent channel pair into one stereo strip;
+not a hardware control.

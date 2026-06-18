@@ -9,7 +9,8 @@
 //! shapes (shelf vs peak) and the digital warping toward Nyquist are faithful.
 //! The remaining approximation is the band centre-frequency mapping (only the
 //! LOW band's 32 Hz-1.6 kHz span is manual-confirmed) and the exact DSP rate,
-//! so absolute Hz are still indicative. See `docs/signal-chain.adoc`.
+//! so absolute Hz are still indicative. See the control catalog in
+//! `docs/user-manual.adoc`.
 #![allow(clippy::cast_precision_loss)]
 
 use std::f64::consts::{SQRT_2, TAU};

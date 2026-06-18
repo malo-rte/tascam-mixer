@@ -6,7 +6,8 @@
 //! The dB conventions are simple linear offsets of the raw control value (e.g.
 //! the fader's `raw - 127`), matching what the GUI displays. The EQ band
 //! frequencies are log-mapped over indicative ranges (only the LOW band's
-//! 32 Hz-1.6 kHz span is manual-confirmed; see `docs/signal-chain.adoc`).
+//! 32 Hz-1.6 kHz span is manual-confirmed; see the control catalog in
+//! `docs/user-manual.adoc`).
 //!
 //! Casts here are between small, in-range control values and `f64`; the
 //! precision loss is immaterial and the truncation matches the raw integer
