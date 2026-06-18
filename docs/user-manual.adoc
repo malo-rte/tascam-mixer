@@ -434,12 +434,15 @@ EQ:: An enable checkbox in the title row, a response curve showing the combined
 effect of the four bands, and the band controls below: gain and frequency for
 each of the low, mid-low, mid-high, and high bands, plus a Q control for the two
 mid bands. The low and high bands are shelving filters; the two mid bands are
-peaking filters. The curve is indicative of the response shape.
+peaking filters. The curve is indicative of the response shape. When the EQ is
+disabled (or `DSP bypass` is on) the curve is flat, since the EQ is doing
+nothing.
 
 Compressor:: An enable checkbox in the title row, a transfer curve (input level
 to output level) with the threshold, ratio, and make-up gain applied, a live
 gain-reduction bar, and the parameters below: threshold, ratio, attack, release,
-and gain.
+and gain. When the compressor is disabled (or `DSP bypass` is on) the curve is a
+straight 1:1 line and the gain-reduction bar reads zero.
 
 All numeric controls read and accept the display units described in
 <<sec-controls-model>>; type a value into a control's box to set it directly.

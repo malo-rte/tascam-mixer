@@ -208,11 +208,20 @@ fn eq_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         ),
     ];
 
+    // When the EQ is disabled (or the DSP is bypassed) it does nothing, so show
+    // a flat response rather than the inactive band settings.
+    let active = app.cached_bool(Control::EqSwitch, ch) && !app.cached_bool(Control::DspBypass, 0);
+
     // x is log10(Hz) over ~20 Hz .. 20 kHz.
     let points: Vec<[f64; 2]> = (0..=200)
         .map(|i| {
             let lf = 1.3 + (4.3 - 1.3) * (f64::from(i) / 200.0);
-            [lf, curves::eq_response_db(&bands, 10f64.powf(lf))]
+            let db = if active {
+                curves::eq_response_db(&bands, 10f64.powf(lf))
+            } else {
+                0.0
+            };
+            [lf, db]
         })
         .collect();
 
@@ -235,13 +244,20 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         .get(usize::try_from(app.cached_int(Control::CompRatio, ch)).unwrap_or(0))
         .map_or(1.0, |label| curves::ratio_from_label(label));
 
+    // When the compressor is disabled (or the DSP is bypassed) it does nothing,
+    // so show a 1:1 line and zero gain reduction rather than stale values.
+    let active =
+        app.cached_bool(Control::CompSwitch, ch) && !app.cached_bool(Control::DspBypass, 0);
+
     let points: Vec<[f64; 2]> = (0..=60)
         .map(|i| {
             let input = -60.0 + f64::from(i);
-            [
-                input,
-                curves::comp_output_db(input, threshold, ratio, makeup),
-            ]
+            let output = if active {
+                curves::comp_output_db(input, threshold, ratio, makeup)
+            } else {
+                input
+            };
+            [input, output]
         })
         .collect();
 
@@ -257,10 +273,14 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
             plot.line(Line::new(PlotPoints::from(points)));
         });
 
-    if let Some(gr) = app.meters().reduction_db(ch) {
-        let fraction = (gr.max(0) as f32 / METER_FULL_SCALE).clamp(0.0, 1.0);
-        ui.add(egui::ProgressBar::new(fraction).text("gain reduction"));
-    }
+    let fraction = if active {
+        app.meters().reduction_db(ch).map_or(0.0, |gr| {
+            (gr.max(0) as f32 / METER_FULL_SCALE).clamp(0.0, 1.0)
+        })
+    } else {
+        0.0
+    };
+    ui.add(egui::ProgressBar::new(fraction).text("gain reduction"));
 }
 
 /// A box title with its enable checkbox right-aligned on the same row.
