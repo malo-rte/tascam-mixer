@@ -569,7 +569,7 @@ example, to float the window in Hyprland:
 
 [source]
 ----
-windowrulev2 = float, class:^(tascam-mixer)$
+windowrule = float, class:^(tascam-mixer)$
 ----
 
 [[sec-gui-ref-layout]]
