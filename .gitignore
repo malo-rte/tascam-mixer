@@ -4,22 +4,4 @@
 # Rendered documentation (docs/build.sh output)
 /build
 
-# Legacy C++ autotools build artifacts (kept for reference under legacy/)
-legacy/configure
-legacy/compile
-legacy/depcomp
-legacy/install-sh
-legacy/missing
-legacy/Makefile
-legacy/Makefile.in
-legacy/autom4te.cache
-legacy/config.h
-legacy/config.log
-legacy/config.status
-legacy/stamp-h1
-legacy/de.paraair.tascamgtk.gschema.valid
-legacy/tascamgtk
-legacy/src/.deps
-legacy/src/.dirstamp
-legacy/src/*.o
 *~

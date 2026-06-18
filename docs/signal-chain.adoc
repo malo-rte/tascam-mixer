@@ -28,8 +28,8 @@ Each claim is tagged _(manual)_, _(driver)_, or _(inferred)_ — see <<sec-sourc
   diagrams_ (pp. 31–32).
 * *Linux kernel driver* `sound/usb/mixer_us16x08.c` (the `snd-usb-audio` US-16x08
   quirk) — authoritative for which controls exist and their types.
-* The original `tascamgtk` application (now under `legacy/`) for the author's
-  control labels.
+* The original `tascamgtk` GTKmm application (the pre-rewrite reference) for the
+  author's control labels.
 
 Provenance tags: _(manual)_ from the Reference Manual, _(driver)_ from the kernel
 driver, _(inferred)_ reasoned from those but not stated outright.

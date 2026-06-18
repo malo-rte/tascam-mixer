@@ -4,7 +4,7 @@
 :source-highlighter: rouge
 :experimental:
 
-This repository is being rewritten in Rust. The device's DSP mixer (faders, EQ,
+This repository is a Rust rewrite of the Tascam mixer. The device's DSP mixer (faders, EQ,
 compressor, routing, metering) is exposed by the Linux `snd-usb-audio` driver as
 ~280 ALSA control elements; the project drives that surface — there is no PCM
 streaming involved.
@@ -14,10 +14,8 @@ The work proceeds in three stages:
 . *Library* — `crates/tascam-us16x08`: a pure, UI-agnostic crate wrapping the ALSA
   control surface. *(done)*
 . *CLI* — `crates/tascam-cli`: the `tascamctl` command-line tool. *(done)*
-. *GUI* — a graphical mixer. _(planned)_
-
-The original GTKmm C++ application is preserved under `legacy/` for reference until
-the Rust mixer reaches feature parity.
+. *GUI* — `crates/tascam-gui`: the `tascam-mixer` graphical mixer (egui/eframe).
+  *(done)*
 
 See link:docs/signal-chain.adoc[the signal-chain reference] for the card's verified
 signal flow (per-channel DSP, master bus, output routing) and how it maps onto the
@@ -32,7 +30,7 @@ clippy.toml, deny.toml     # project lint / supply-chain config
 crates/
   tascam-us16x08/          # stage 1: the control-surface library
   tascam-cli/              # stage 2: the `tascamctl` command-line tool
-legacy/                    # original C++ tascamgtk app (reference)
+  tascam-gui/              # stage 3: the `tascam-mixer` graphical mixer
 ----
 
 == The CLI (`tascamctl`)
@@ -127,43 +125,3 @@ This needs `asciidoctor-pdf` and `asciidoctor-diagram` (Ruby gems) plus `plantum
 sudo gem install asciidoctor-pdf asciidoctor-diagram
 sudo apt-get install plantuml graphviz
 ----
-
-== Legacy C++ application (`legacy/`)
-
-The original GTK+ application. It relies on
-https://github.com/torvalds/linux/blob/master/sound/usb/mixer_us16x08.c[US16x08 support]
-in the Linux snd-usb-audio driver (Linux 4.11+).
-
-image::legacy/screenshot.png[Screenshot of the legacy mixer]
-
-Because this device contains about 280 control elements, working with traditional
-mixer applications like alsamixer or gnome-alsamixer was no option, so the author
-developed a dedicated mixer for comfortable access to the device's built-in DSP
-effects. An https://github.com/onkelDead/tascam.lv2[LV2 plugin] offers EQ and
-compressor control from any LV2-capable DAW.
-
-=== Building the legacy app
-
-Build tools: `autoconf`, `automake`, `autopoint`, `make`, `g++`. Libraries:
-`libgtkmm-3.0`, `libxml++` (2.6 to 5.0), and optionally `liblo`.
-
-On Debian-based systems:
-
-[source,bash]
-----
-apt install build-essential autoconf automake autopoint libgtkmm-3.0-dev libxml++2.6-dev liblo-dev
-----
-
-On Arch-based systems: `base-devel autoconf automake gtkmm3 libxml++-5.0 liblo`
-
-Then, from `legacy/`:
-
-[source,bash]
-----
-autoreconf -fiv
-./configure
-make
-----
-
-See `./configure --help` for options (install prefix, disabling OSC support). Run
-`make install` as root to install.
