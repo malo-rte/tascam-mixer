@@ -12,7 +12,7 @@
 
 use eframe::egui;
 use egui_plot::{Line, Plot, PlotBounds, PlotPoints};
-use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value};
+use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value, units};
 
 use crate::app::App;
 use crate::bridge;
@@ -113,7 +113,7 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                     let mut balance = app.pair_balance(ch);
                     let slider = egui::Slider::new(&mut balance, 0..=254)
                         .custom_formatter(|n, _| human_text(Control::Pan, n))
-                        .custom_parser(parse_pan);
+                        .custom_parser(|s| parse_human(Control::Pan, s));
                     if ui.add(slider).changed() {
                         app.set_balance(ch, balance);
                     }
@@ -121,7 +121,7 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                     let mut pan = app.cached_int(Control::Pan, ch);
                     let slider = egui::Slider::new(&mut pan, 0..=254)
                         .custom_formatter(|n, _| human_text(Control::Pan, n))
-                        .custom_parser(parse_pan);
+                        .custom_parser(|s| parse_human(Control::Pan, s));
                     if ui.add(slider).changed() {
                         app.set(Control::Pan, ch, Value::Int(pan));
                     }
@@ -177,7 +177,7 @@ fn comp_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
 fn eq_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
     let band = |kind: BandType, freq: Control, gain: Control, q: f64| EqBand {
         kind,
-        f0: freq_hz(freq, app.cached_int(freq, ch)).unwrap_or(1000.0),
+        f0: units::freq_hz(freq, app.cached_int(freq, ch)).unwrap_or(1000.0),
         q,
         gain_db: curves::eq_gain_db(app.cached_int(gain, ch)),
     };
@@ -321,125 +321,16 @@ fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, inde
     ui.end_row();
 }
 
-/// Parse a typed pan value (`C`, `L50%`, `R50`, or a raw number) into the raw
-/// 0..254 control value.
-fn parse_pan(text: &str) -> Option<f64> {
-    let text = text.trim();
-    if text.eq_ignore_ascii_case("c") {
-        return Some(127.0);
-    }
-    let (sign, rest) = match text.chars().next() {
-        Some('l' | 'L') => (-1.0, &text[1..]),
-        Some('r' | 'R') => (1.0, &text[1..]),
-        // A bare number is taken as the raw control value.
-        _ => return text.parse::<f64>().ok().map(|v| v.clamp(0.0, 254.0)),
-    };
-    let percent: f64 = rest.trim().trim_end_matches('%').trim().parse().ok()?;
-    Some((127.0 + sign * percent / 100.0 * 127.0).clamp(0.0, 254.0))
+/// Format a raw control value in its display units for a slider readout. Thin
+/// wrapper over the shared [`units::format`] so the GUI and CLI agree.
+pub(crate) fn human_text(control: Control, raw: f64) -> String {
+    units::format(control, raw as i32)
 }
 
 /// Inverse of [`human_text`]: parse a typed human value back to the raw control
 /// value, so editing a value box uses the same units it displays.
 pub(crate) fn parse_human(control: Control, text: &str) -> Option<f64> {
-    if matches!(control, Control::Pan) {
-        return parse_pan(text);
-    }
-    // Take the leading number, ignoring a `+` sign and any unit suffix.
-    let lower = text.trim().to_ascii_lowercase();
-    let trimmed = lower.trim_start_matches('+');
-    let number: String = trimmed
-        .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '-' || *c == '.')
-        .collect();
-    let value: f64 = number.parse().ok()?;
-
-    // EQ frequencies: parse Hz (or kHz) back to the raw band index.
-    if let Some((max_raw, lo, hi)) = freq_range(control) {
-        let hz = if lower.contains('k') {
-            value * 1000.0
-        } else {
-            value
-        };
-        let raw = f64::from(max_raw) * (hz / lo).ln() / (hi / lo).ln();
-        return Some(raw.clamp(0.0, f64::from(max_raw)));
-    }
-
-    let raw = match control {
-        Control::LineVolume | Control::MasterVolume => value + 127.0,
-        Control::EqLowVolume
-        | Control::EqMidLowVolume
-        | Control::EqMidHighVolume
-        | Control::EqHighVolume => value + 12.0,
-        Control::CompThreshold => value + 32.0,
-        Control::CompAttack => value - 2.0,
-        Control::CompRelease => value / 10.0 - 1.0,
-        // CompGain, Q, etc. display the raw value directly.
-        _ => value,
-    };
-    Some(raw)
-}
-
-/// The `(max_raw, lo_hz, hi_hz)` mapping for an EQ frequency control, or `None`
-/// for any other control. The ranges are indicative — only the LOW band's
-/// 32 Hz-1.6 kHz span is confirmed by the manual (see `docs/signal-chain.adoc`).
-fn freq_range(control: Control) -> Option<(i32, f64, f64)> {
-    match control {
-        Control::EqLowFreq => Some((31, 32.0, 1600.0)),
-        Control::EqMidLowFreq => Some((63, 100.0, 3200.0)),
-        Control::EqMidHighFreq => Some((63, 500.0, 8000.0)),
-        Control::EqHighFreq => Some((31, 1600.0, 16000.0)),
-        _ => None,
-    }
-}
-
-/// The centre frequency (Hz) of an EQ frequency control at its raw value.
-fn freq_hz(control: Control, raw: i32) -> Option<f64> {
-    freq_range(control).map(|(max_raw, lo, hi)| curves::log_freq(raw, max_raw, lo, hi))
-}
-
-/// Format a frequency in Hz / kHz.
-fn format_hz(hz: f64) -> String {
-    if hz >= 1000.0 {
-        format!("{:.1} kHz", hz / 1000.0)
-    } else {
-        format!("{hz:.0} Hz")
-    }
-}
-
-/// Format a raw control value in human units for the slider readout.
-pub(crate) fn human_text(control: Control, raw: f64) -> String {
-    let raw = raw as i32;
-    match control {
-        // Fader/level controls store dB offset by 127 (127 = 0 dB).
-        Control::LineVolume | Control::MasterVolume => format!("{:+} dB", raw - 127),
-        Control::EqLowVolume
-        | Control::EqMidLowVolume
-        | Control::EqMidHighVolume
-        | Control::EqHighVolume => format!("{:+} dB", raw - 12),
-        Control::CompThreshold => format!("{} dB", raw - 32),
-        Control::CompGain => format!("+{raw} dB"),
-        Control::CompAttack => format!("{} ms", raw + 2),
-        Control::CompRelease => format!("{} ms", (raw + 1) * 10),
-        Control::EqLowFreq
-        | Control::EqMidLowFreq
-        | Control::EqMidHighFreq
-        | Control::EqHighFreq => freq_hz(control, raw).map_or_else(|| format!("{raw}"), format_hz),
-        // Pan: 0..254 with 127 centred; show C / L..% / R..%.
-        Control::Pan => {
-            let offset = raw - 127;
-            if offset == 0 {
-                "C".to_owned()
-            } else {
-                let percent = (offset.abs() * 100 + 63) / 127;
-                if offset < 0 {
-                    format!("L{percent}%")
-                } else {
-                    format!("R{percent}%")
-                }
-            }
-        }
-        _ => format!("{raw}"),
-    }
+    units::parse(control, text).map(f64::from)
 }
 
 /// Format a log10(Hz) plot mark as a frequency label.

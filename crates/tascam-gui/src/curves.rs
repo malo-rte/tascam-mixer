@@ -127,15 +127,6 @@ pub(crate) fn eq_response_db(bands: &[EqBand], f: f64) -> f64 {
     bands.iter().map(|b| band_db(b, f)).sum()
 }
 
-/// Map a raw frequency-control index to Hz, log-spaced over `lo..=hi`.
-pub(crate) fn log_freq(raw: i32, max_raw: i32, lo: f64, hi: f64) -> f64 {
-    if max_raw <= 0 {
-        return lo;
-    }
-    let t = (f64::from(raw) / f64::from(max_raw)).clamp(0.0, 1.0);
-    lo * (hi / lo).powf(t)
-}
-
 /// Map a raw Q-control index (0..=6) to a Q factor, log-spaced over 0.25..=16.
 pub(crate) fn q_value(raw: i32) -> f64 {
     0.25 * (16.0_f64 / 0.25).powf((f64::from(raw) / 6.0).clamp(0.0, 1.0))
@@ -238,12 +229,6 @@ mod tests {
     fn eq_response_sums_bands() {
         let bands = [peaking(100.0, 1.0, 4.0), peaking(100.0, 1.0, 3.0)];
         assert!((eq_response_db(&bands, 100.0) - 7.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn log_freq_spans_the_range() {
-        assert!(close(log_freq(0, 31, 32.0, 1600.0), 32.0));
-        assert!(close(log_freq(31, 31, 32.0, 1600.0), 1600.0));
     }
 
     #[test]

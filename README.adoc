@@ -42,13 +42,17 @@ the in-memory backend so every command works with no card attached.
 ----
 tascamctl list                       # list all controls (key, scope, kind, ALSA name)
 tascamctl topology                   # explain the signal flow and output routing
-tascamctl info comp-ratio            # detail one control (scope, range, enum values)
-tascamctl get  master-volume         # read a global control
-tascamctl get  mute -c 3             # read channel 3's mute
-tascamctl set  mute on -c 3          # write it (bool: on/off, true/false, 1/0, yes/no)
+tascamctl info comp-ratio            # detail one control (scope, unit range, enum values)
+tascamctl get  master-volume         # read a global control (prints e.g. "+0 dB")
+tascamctl get  eq-low-freq -c 0      # read in display units ("60 Hz")
+tascamctl set  master-volume +3dB -c 0  # absolute, in units (dB)
+tascamctl set  eq-low-freq 1.2kHz -c 0  # Hz / kHz for EQ frequencies
+tascamctl set  comp-release 200ms -c 0  # ms for compressor times
+tascamctl set  pan L50% -c 0         # pan as C / L..% / R..%
+tascamctl set  eq-low-volume -6dB -c 0  # a unit suffix makes a negative absolute
+tascamctl set  master-volume +5      # relative: adjust by 5 (in display units), clamped
+tascamctl set  mute on -c 3          # bool: on/off, true/false, 1/0, yes/no
 tascamctl set  mute toggle -c 3      # flip a boolean
-tascamctl set  master-volume +5      # relative: adjust an int, clamped to range
-tascamctl set  master-volume -5      # (leading - is taken as the value)
 tascamctl set  route "Output 3" -c 0 # enum by label or index
 tascamctl meters                     # one-shot meter read (--raw for linear samples)
 tascamctl monitor                    # live meters until Ctrl-C
@@ -58,6 +62,13 @@ tascamctl save strip.json -c 0       # save just channel 0's strip
 tascamctl load mix.json              # restore the whole mixer
 tascamctl load strip.json -c 5       # apply a saved strip to channel 5
 ----
+
+Integer controls read and accept their *display units* — dB for the faders, EQ
+gains, and compressor threshold/gain; Hz/kHz for EQ frequencies; ms for the
+compressor attack/release; and `C` / `L..%` / `R..%` for pan. A bare `+N`/`-N`
+adjusts relative to the current value (in those units), so to enter a negative
+absolute value, add a unit suffix (e.g. `-6dB`). Out-of-range values are clamped
+to the control's range.
 
 Presets are JSON. A whole-mixer preset holds the master controls, the routing, and
 all 16 channel strips; a strip preset holds one channel's controls and can be

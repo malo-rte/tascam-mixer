@@ -36,7 +36,8 @@ fn get_returns_seeded_defaults() {
         .args(["--mock", "get", "master-volume"])
         .assert()
         .success()
-        .stdout(predicate::str::starts_with("127"));
+        // The default raw 127 reads out as 0 dB in display units.
+        .stdout(predicate::str::starts_with("+0 dB"));
     tascamctl()
         .args(["--mock", "get", "mute", "-c", "3"])
         .assert()
@@ -141,12 +142,14 @@ fn toggle_on_int_fails() {
 }
 
 #[test]
-fn set_out_of_range_fails() {
+fn set_out_of_range_clamps() {
+    // An absolute value beyond the control's range is clamped to it (as the GUI
+    // sliders and relative adjusts do), not rejected.
     tascamctl()
         .args(["--mock", "set", "eq-low-volume", "999", "-c", "0"])
         .assert()
-        .failure()
-        .code(1);
+        .success()
+        .stdout(predicate::str::is_empty());
 }
 
 #[test]

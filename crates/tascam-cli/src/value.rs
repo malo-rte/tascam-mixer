@@ -1,16 +1,20 @@
 //! Parsing and formatting control values for the command line.
 
 use anyhow::{Result, anyhow, bail};
-use tascam_us16x08::{Control, Kind, Value};
+use tascam_us16x08::{Control, Kind, Value, units};
 
-/// Parse a user-supplied string into a [`Value`] appropriate for `kind`.
-pub(crate) fn parse_value(kind: Kind, input: &str) -> Result<Value> {
-    match kind {
+/// Parse a user-supplied string into a [`Value`] for `control`. Integer
+/// controls accept their display units (dB, Hz, ms, pan) as well as a bare
+/// number; see [`tascam_us16x08::units`].
+pub(crate) fn parse_value(control: Control, input: &str) -> Result<Value> {
+    match control.kind() {
         Kind::Bool => Ok(Value::Bool(parse_bool(input)?)),
-        Kind::Int { .. } => input
-            .parse::<i32>()
-            .map(Value::Int)
-            .map_err(|_| anyhow!("expected an integer, got {input:?}")),
+        Kind::Int { .. } => units::parse(control, input).map(Value::Int).ok_or_else(|| {
+            anyhow!(
+                "could not parse {input:?} as a value for {} (try units like `+3 dB`, `1.2kHz`, `200ms`, `L50%`, or a number)",
+                control.cli_key()
+            )
+        }),
         Kind::Enum { values, .. } => Ok(Value::Enum(parse_enum(values, input)?)),
         Kind::Meter => bail!("this control is read-only; use the `meters` command"),
         _ => bail!("unsupported control kind"),
@@ -46,11 +50,12 @@ fn parse_enum(values: &[&str], input: &str) -> Result<i32> {
     )
 }
 
-/// Format a control's value for display, expanding enum indices to their label.
+/// Format a control's value for display in its display units, expanding enum
+/// indices to their label.
 pub(crate) fn format_value(control: Control, value: Value) -> String {
     match value {
         Value::Bool(b) => b.to_string(),
-        Value::Int(v) => v.to_string(),
+        Value::Int(v) => units::format(control, v),
         Value::Enum(v) => {
             if let Kind::Enum { values, .. } = control.kind() {
                 let label = usize::try_from(v).ok().and_then(|i| values.get(i)).copied();

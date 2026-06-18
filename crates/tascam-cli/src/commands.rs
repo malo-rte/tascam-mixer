@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use tascam_us16x08::{
     Backend, Control, Kind, Meters, NUM_CHANNELS, NUM_OUTPUTS, Preset, Scope, Us16x08, Value,
-    Watcher,
+    Watcher, units,
 };
 
 use crate::value::{format_value, parse_value};
@@ -60,7 +60,21 @@ pub(crate) fn info(key: &str) -> Result<()> {
         Kind::Bool => println!("  kind:  bool (on/off/true/false/1/0/yes/no, or toggle)"),
         Kind::Int { min, max, default } => {
             println!("  kind:  int");
-            println!("  range: {min}..={max} (default {default}); relative +N/-N supported");
+            // Show the range in display units (dB / Hz / ms / pan), noting the
+            // raw span too when the units differ from the bare values.
+            let (unit_min, unit_max, unit_def) = (
+                units::format(control, min),
+                units::format(control, max),
+                units::format(control, default),
+            );
+            if unit_min == min.to_string() && unit_max == max.to_string() {
+                println!("  range: {min}..={max} (default {default}); relative +N/-N supported");
+            } else {
+                println!(
+                    "  range: {unit_min}..={unit_max} (default {unit_def}); raw {min}..={max}; \
+                     relative +N/-N in display units"
+                );
+            }
         }
         Kind::Enum { values, default } => {
             println!("  kind:  enum (default {default})");
@@ -127,22 +141,31 @@ fn resolve_value<B: Backend>(
         return Ok(Value::Bool(!current));
     }
 
-    // `+N` / `-N` adjusts an integer relative to its current value, clamped to
-    // the control's range.
-    if let Kind::Int { min, max, .. } = control.kind() {
-        if raw.starts_with('+') || raw.starts_with('-') {
-            let delta: i32 = raw
-                .parse()
-                .map_err(|_| anyhow!("invalid relative amount {raw:?} (expected +N or -N)"))?;
-            let Value::Int(current) = dev.get(control, channel)? else {
-                bail!("expected an integer value");
-            };
-            return Ok(Value::Int(current.saturating_add(delta).clamp(min, max)));
-        }
+    // A bare signed integer (`+N` / `-N`) adjusts the control relative to its
+    // current value, in display units (dB, ms, Hz, pan percent), clamped to
+    // range. Anything with a unit suffix (e.g. `-6dB`) is an absolute value, so
+    // negative absolutes are still reachable.
+    if matches!(control.kind(), Kind::Int { .. }) && is_relative(raw) {
+        let delta: f64 = raw
+            .parse()
+            .map_err(|_| anyhow!("invalid relative amount {raw:?} (expected +N or -N)"))?;
+        let Value::Int(current) = dev.get(control, channel)? else {
+            bail!("expected an integer value");
+        };
+        let adjusted = units::to_unit(control, current) + delta;
+        return Ok(Value::Int(units::from_unit(control, adjusted)));
     }
 
     // Otherwise it's an absolute value.
-    parse_value(control.kind(), raw)
+    parse_value(control, raw)
+}
+
+/// Whether `s` is a bare signed integer (`+N` / `-N`), the relative-adjust form.
+/// A token carrying a unit (e.g. `-6dB`) is not relative — it is an absolute.
+fn is_relative(s: &str) -> bool {
+    matches!(s.as_bytes().first(), Some(b'+' | b'-'))
+        && s.len() > 1
+        && s[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Save mixer state to a JSON file: the whole mixer, or one channel's strip if
@@ -305,11 +328,28 @@ mod tests {
     }
 
     #[test]
-    fn absolute_int_has_no_sign() {
+    fn absolute_int_is_in_display_units() {
+        // EQ Low gain reads in dB: "+6" -> raw 18 (12 + 6).
         let d = dev();
         assert_eq!(
-            resolve_value(&d, Control::EqLowVolume, 0, "20").unwrap(),
-            Value::Int(20)
+            resolve_value(&d, Control::EqLowVolume, 0, "6").unwrap(),
+            Value::Int(18)
+        );
+        // A unit-suffixed negative is absolute, not a relative adjust.
+        assert_eq!(
+            resolve_value(&d, Control::EqLowVolume, 0, "-6dB").unwrap(),
+            Value::Int(6)
+        );
+    }
+
+    #[test]
+    fn relative_adjusts_in_display_units() {
+        // Compressor release reads in ms = (raw + 1) * 10; default raw 0 = 10 ms.
+        // "+20" adds 20 ms -> 30 ms -> raw 2.
+        let d = dev();
+        assert_eq!(
+            resolve_value(&d, Control::CompRelease, 0, "+20").unwrap(),
+            Value::Int(2)
         );
     }
 

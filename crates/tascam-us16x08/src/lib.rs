@@ -54,6 +54,7 @@ mod meter;
 mod preset;
 
 pub mod convert;
+pub mod units;
 
 #[cfg(feature = "alsa")]
 pub use backend::AlsaBackend;
