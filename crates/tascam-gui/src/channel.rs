@@ -109,7 +109,8 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 ui.spacing_mut().slider_width = INPUT_WIDTH - 130.0;
                 let mut pan = app.cached_int(Control::Pan, ch);
                 let slider = egui::Slider::new(&mut pan, 0..=254)
-                    .custom_formatter(|n, _| human_text(Control::Pan, n));
+                    .custom_formatter(|n, _| human_text(Control::Pan, n))
+                    .custom_parser(parse_pan);
                 if ui.add(slider).changed() {
                     app.set(Control::Pan, ch, Value::Int(pan));
                 }
@@ -299,6 +300,23 @@ fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, inde
         _ => {}
     }
     ui.end_row();
+}
+
+/// Parse a typed pan value (`C`, `L50%`, `R50`, or a raw number) into the raw
+/// 0..254 control value.
+fn parse_pan(text: &str) -> Option<f64> {
+    let text = text.trim();
+    if text.eq_ignore_ascii_case("c") {
+        return Some(127.0);
+    }
+    let (sign, rest) = match text.chars().next() {
+        Some('l' | 'L') => (-1.0, &text[1..]),
+        Some('r' | 'R') => (1.0, &text[1..]),
+        // A bare number is taken as the raw control value.
+        _ => return text.parse::<f64>().ok().map(|v| v.clamp(0.0, 254.0)),
+    };
+    let percent: f64 = rest.trim().trim_end_matches('%').trim().parse().ok()?;
+    Some((127.0 + sign * percent / 100.0 * 127.0).clamp(0.0, 254.0))
 }
 
 /// Format a raw control value in human units for the slider readout.
