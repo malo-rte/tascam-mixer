@@ -19,7 +19,7 @@ use crate::bridge;
 use crate::curves::{self, BandType, EqBand};
 
 /// Column widths for the INPUT / EQ / COMPRESSOR boxes.
-const INPUT_WIDTH: f32 = 300.0;
+const INPUT_WIDTH: f32 = 190.0;
 const DSP_WIDTH: f32 = 320.0;
 /// Length of the INPUT volume fader — matched to the meter height beside it.
 const VOLUME_FADER_LENGTH: f32 = bridge::METER_HEIGHT;
@@ -108,61 +108,65 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
             });
             ui.separator();
 
-            // Volume: the channel meter beside the vertical fader, both the same
-            // height, centred with the dB readout below.
+            // Volume: the channel meter beside the vertical fader (same height),
+            // with the dB readout below. The fixed-size region is centred by the
+            // surrounding vertical_centered (a plain horizontal would not be).
             ui.vertical_centered(|ui| {
                 ui.label("Volume");
-                ui.horizontal(|ui| {
-                    let level = app.meters().channel_db(ch).unwrap_or(0);
-                    bridge::meter_bar(ui, bridge::fraction(level));
-                    ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
-                    // When linked, the fader is the common level (the louder
-                    // side); the balance offset between the channels is kept.
-                    let mut volume = if linked {
-                        app.pair_levels(ch).0
-                    } else {
-                        app.cached_int(Control::LineVolume, ch)
-                    };
-                    let fader = egui::Slider::new(&mut volume, 0..=133)
-                        .vertical()
-                        .custom_formatter(|n, _| human_text(Control::LineVolume, n))
-                        .custom_parser(|s| parse_human(Control::LineVolume, s));
-                    if ui.add(fader).changed() {
-                        if linked {
-                            let balance = app.pair_levels(ch).1;
-                            app.set_pair_levels(ch, volume, balance);
+                let strip = egui::vec2(VALUE_BOX_WIDTH + 28.0, VOLUME_FADER_LENGTH + 28.0);
+                ui.allocate_ui_with_layout(
+                    strip,
+                    egui::Layout::left_to_right(egui::Align::TOP),
+                    |ui| {
+                        let level = app.meters().channel_db(ch).unwrap_or(0);
+                        bridge::meter_bar(ui, bridge::fraction(level));
+                        ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
+                        // When linked, the fader is the common level (the louder
+                        // side); the balance offset between the channels is kept.
+                        let mut volume = if linked {
+                            app.pair_levels(ch).0
                         } else {
-                            app.set(Control::LineVolume, ch, Value::Int(volume));
+                            app.cached_int(Control::LineVolume, ch)
+                        };
+                        let fader = egui::Slider::new(&mut volume, 0..=133)
+                            .vertical()
+                            .custom_formatter(|n, _| human_text(Control::LineVolume, n))
+                            .custom_parser(|s| parse_human(Control::LineVolume, s));
+                        if ui.add(fader).changed() {
+                            if linked {
+                                let balance = app.pair_levels(ch).1;
+                                app.set_pair_levels(ch, volume, balance);
+                            } else {
+                                app.set(Control::LineVolume, ch, Value::Int(volume));
+                            }
                         }
-                    }
-                });
+                    },
+                );
             });
             ui.separator();
 
-            // Balance for a linked pair, or Pan for a single channel. The pair
-            // stays panned hard L/R; Balance attenuates one channel's level (see
-            // `App::set_pair_levels`).
-            ui.horizontal(|ui| {
-                ui.label(if linked { "Balance" } else { "Pan" });
-                ui.spacing_mut().slider_width = INPUT_WIDTH - 130.0;
-                if linked {
-                    let (common, mut balance) = app.pair_levels(ch);
-                    let slider = egui::Slider::new(&mut balance, 0..=254)
-                        .custom_formatter(|n, _| human_text(Control::Pan, n))
-                        .custom_parser(|s| parse_human(Control::Pan, s));
-                    if ui.add(slider).changed() {
-                        app.set_pair_levels(ch, common, balance);
-                    }
-                } else {
-                    let mut pan = app.cached_int(Control::Pan, ch);
-                    let slider = egui::Slider::new(&mut pan, 0..=254)
-                        .custom_formatter(|n, _| human_text(Control::Pan, n))
-                        .custom_parser(|s| parse_human(Control::Pan, s));
-                    if ui.add(slider).changed() {
-                        app.set(Control::Pan, ch, Value::Int(pan));
-                    }
+            // Balance for a linked pair, or Pan for a single channel: label above
+            // a full-width slider. The pair stays panned hard L/R; Balance
+            // attenuates one channel's level (see `App::set_pair_levels`).
+            ui.label(if linked { "Balance" } else { "Pan" });
+            ui.spacing_mut().slider_width = INPUT_WIDTH - VALUE_BOX_WIDTH - 24.0;
+            if linked {
+                let (common, mut balance) = app.pair_levels(ch);
+                let slider = egui::Slider::new(&mut balance, 0..=254)
+                    .custom_formatter(|n, _| human_text(Control::Pan, n))
+                    .custom_parser(|s| parse_human(Control::Pan, s));
+                if ui.add(slider).changed() {
+                    app.set_pair_levels(ch, common, balance);
                 }
-            });
+            } else {
+                let mut pan = app.cached_int(Control::Pan, ch);
+                let slider = egui::Slider::new(&mut pan, 0..=254)
+                    .custom_formatter(|n, _| human_text(Control::Pan, n))
+                    .custom_parser(|s| parse_human(Control::Pan, s));
+                if ui.add(slider).changed() {
+                    app.set(Control::Pan, ch, Value::Int(pan));
+                }
+            }
         });
     });
 }
