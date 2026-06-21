@@ -202,10 +202,13 @@ known starting state that one command or one button restores.
 A *stereo link* groups an adjacent channel pair (1 and 2, 3 and 4, and so on)
 into one stereo strip. Linking is a feature of the GUI, not a hardware control:
 the device treats every channel independently. When a pair is linked, the GUI
-shows one strip, writes each edit to both channels, and turns the pan control
-into a *balance* that pans the two channels hard-opposite (lower toward left,
-upper toward right) and tilts that stereo image. The link state is remembered
-between GUI sessions.
+shows one strip and writes each edit to both channels. The pair is panned hard
+L/R (lower channel left, upper channel right) for a stereo image, and the pan
+control becomes a *balance*: the Volume fader sets the common level of both
+channels, and Balance attenuates one channel's level to favour the other side
+(at centre both sit at the common level; full left silences the right channel,
+full right silences the left). Balance is a level adjustment, not a pan, so the
+stereo image is preserved. The link state is remembered between GUI sessions.
 
 [[sec-install]]
 == Installing the tools
@@ -468,11 +471,12 @@ selecting one source: `Master L`, `Master R`, or one of `Output 1`...`Output 8`.
 
 To link a channel pair into one stereo strip, focus either channel and tick the
 *Stereo link* checkbox in the INPUT box. The editor then shows one strip, and
-each edit is written to both channels. The pan control becomes a *Balance*: at
-centre (`C`) the pair is panned hard left and hard right for a full stereo image,
-and moving the balance tilts the image toward one side. Unticking the box unlinks
-the pair. The link state is saved between sessions. See <<sec-link-concept>> for
-the concept.
+each edit is written to both channels. The pair is panned hard L/R, the Volume
+fader sets the common level, and the pan control becomes a *Balance* that
+attenuates one channel's level to favour the other side (`C` = both at the common
+level, full left silences the right channel, full right silences the left).
+Unticking the box unlinks the pair. The link state is saved between sessions. See
+<<sec-link-concept>> for the concept.
 
 [[sec-gui-presets]]
 === Presets and the default preset
@@ -603,8 +607,8 @@ A Lua-configured Hyprland uses the equivalent
 | Master mute (bridge) | Toggle the master mute.
 | Stereo link (INPUT) | Link or unlink the channel's pair.
 | Phase (INPUT) | Toggle channel phase.
-| Volume fader (INPUT) | Channel level, in dB.
-| Pan / Balance (INPUT) | Channel pan, or pair balance when linked.
+| Volume fader (INPUT) | Channel level in dB, or the linked pair's common level.
+| Pan / Balance (INPUT) | Channel pan, or the linked pair's level balance.
 | EQ enable (EQ title) | Enable or bypass the channel EQ.
 | EQ reset (EQ title) | Return the EQ bands to defaults (flat response).
 | EQ band gain / frequency / Q | Per-band EQ values, in dB / Hz / index.

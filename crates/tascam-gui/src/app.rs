@@ -117,23 +117,22 @@ impl App {
         }
     }
 
-    /// The balance setting (0..=254, 127 = centred full stereo) of a linked
-    /// pair, recovered from the two channels' pan positions.
-    pub(crate) fn pair_balance(&self, low: u32) -> i32 {
-        let left = self.cached_int(Control::Pan, low);
-        let right = self.cached_int(Control::Pan, low + 1);
-        // At most one channel is off its hard-panned rail (see `balance_to_pans`).
-        let delta = if left > 0 { left } else { right - 254 };
-        (delta + 127).clamp(0, 254)
+    /// The common fader level and balance of a linked pair, recovered from the
+    /// two channels' fader (`line-volume`) values. The pair stays panned hard
+    /// L/R; balance is a level attenuation of one side, not a pan.
+    pub(crate) fn pair_levels(&self, low: u32) -> (i32, i32) {
+        let left = self.cached_int(Control::LineVolume, low);
+        let right = self.cached_int(Control::LineVolume, low + 1);
+        levels_to_balance(left, right)
     }
 
-    /// Apply a stereo-balance setting to a linked pair: the lower channel pans
-    /// toward L and the upper toward R, with the whole image tilted by the
-    /// balance, so the two channels are never set to the same pan.
-    pub(crate) fn set_balance(&mut self, low: u32, balance: i32) {
-        let (left, right) = balance_to_pans(balance);
-        self.write_one(Control::Pan, low, Value::Int(left));
-        self.write_one(Control::Pan, low + 1, Value::Int(right));
+    /// Apply a common fader level and balance to a linked pair: the favoured
+    /// side sits at `common`, the other is attenuated toward silence, so the
+    /// stereo image (pan) is preserved and never needs gain above the fader top.
+    pub(crate) fn set_pair_levels(&mut self, low: u32, common: i32, balance: i32) {
+        let (left, right) = balance_to_levels(common, balance);
+        self.write_one(Control::LineVolume, low, Value::Int(left));
+        self.write_one(Control::LineVolume, low + 1, Value::Int(right));
     }
 
     /// Whether `channel`'s stereo pair is linked.
@@ -191,8 +190,9 @@ impl App {
     }
 
     /// Copy every per-channel control from `low` to its partner `low + 1`, then
-    /// pan the pair into a centred stereo image. Pan is excluded from the copy:
-    /// a linked pair is panned hard-opposite (L/R), not to the same position.
+    /// pan the pair hard L/R for a stereo image. Pan is excluded from the copy:
+    /// a linked pair is panned hard-opposite, not to the same position. The
+    /// faders are copied (equal), so balance starts centred.
     fn sync_pair(&mut self, low: u32) {
         for &control in Control::ALL {
             if matches!(control.scope(), Scope::Channel)
@@ -204,7 +204,9 @@ impl App {
                 }
             }
         }
-        self.set_balance(low, 127);
+        // Hard-pan the pair: lower channel left, upper channel right.
+        self.write_one(Control::Pan, low, Value::Int(0));
+        self.write_one(Control::Pan, low + 1, Value::Int(254));
     }
 
     /// The latest meter snapshot.
@@ -402,12 +404,44 @@ impl eframe::App for App {
     }
 }
 
-/// Map a balance setting (0..=254, 127 = centred full stereo) to the lower and
-/// upper channel pan positions of a linked pair. At centre the pair is hard
-/// L/R; the balance tilts both pans together, clamped at the rails.
-fn balance_to_pans(balance: i32) -> (i32, i32) {
-    let delta = balance - 127;
-    (delta.clamp(0, 254), (254 + delta).clamp(0, 254))
+/// The `line-volume` raw maximum (channel fader top); see the control catalog.
+const LINE_VOLUME_MAX: i32 = 133;
+
+/// Integer divide, rounding to nearest.
+fn round_div(num: i32, den: i32) -> i32 {
+    (num + den / 2) / den
+}
+
+/// Map a common fader level (`line-volume` raw) and a balance setting (0..=254,
+/// 127 = centred) to the lower and upper channel fader values. The favoured side
+/// stays at `common`; the other is attenuated toward silence. Balance 0 favours
+/// the left (lower) channel, 254 the right (upper); pan stays hard L/R.
+fn balance_to_levels(common: i32, balance: i32) -> (i32, i32) {
+    let common = common.clamp(0, LINE_VOLUME_MAX);
+    let balance = balance.clamp(0, 254);
+    if balance >= 127 {
+        // Favour right: attenuate the lower (left) channel.
+        (round_div(common * (254 - balance), 127), common)
+    } else {
+        // Favour left: attenuate the upper (right) channel.
+        (common, round_div(common * balance, 127))
+    }
+}
+
+/// Inverse of [`balance_to_levels`]: recover `(common, balance)` from a linked
+/// pair's two fader values. The louder side is the common level; the quieter
+/// side's attenuation gives the balance.
+fn levels_to_balance(left: i32, right: i32) -> (i32, i32) {
+    let common = left.max(right);
+    if common <= 0 {
+        return (0, 127);
+    }
+    let balance = match left.cmp(&right) {
+        std::cmp::Ordering::Less => 254 - round_div(left * 127, common),
+        std::cmp::Ordering::Greater => round_div(right * 127, common),
+        std::cmp::Ordering::Equal => 127,
+    };
+    (common, balance.clamp(0, 254))
 }
 
 /// Native "save file" dialog for a JSON preset.
@@ -427,32 +461,44 @@ fn open_dialog() -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::balance_to_pans;
+    use super::{balance_to_levels, levels_to_balance};
 
-    /// Recover balance from a pair's pan positions (mirror of `pair_balance`).
-    fn balance_from_pans(left: i32, right: i32) -> i32 {
-        let delta = if left > 0 { left } else { right - 254 };
-        (delta + 127).clamp(0, 254)
+    #[test]
+    fn centre_balance_keeps_both_at_common() {
+        assert_eq!(balance_to_levels(100, 127), (100, 100));
     }
 
     #[test]
-    fn centre_balance_is_hard_opposite() {
-        assert_eq!(balance_to_pans(127), (0, 254));
+    fn extreme_balance_silences_one_side() {
+        // Full right favours the right (upper) channel: left fader to silence.
+        assert_eq!(balance_to_levels(120, 254), (0, 120));
+        // Full left silences the right (upper) channel.
+        assert_eq!(balance_to_levels(120, 0), (120, 0));
     }
 
     #[test]
-    fn linked_pair_is_never_panned_equally() {
-        for balance in 0..=254 {
-            let (left, right) = balance_to_pans(balance);
-            assert_ne!(left, right, "balance {balance} collapsed both channels");
-        }
+    fn balance_attenuates_only_the_quieter_side() {
+        // Half-right: left attenuated to ~half, right stays at common.
+        let (left, right) = balance_to_levels(100, 190);
+        assert_eq!(right, 100);
+        assert!((40..=60).contains(&left), "left = {left}");
     }
 
     #[test]
-    fn balance_round_trips_through_pan_positions() {
-        for balance in 0..=254 {
-            let (left, right) = balance_to_pans(balance);
-            assert_eq!(balance_from_pans(left, right), balance);
+    fn levels_round_trip_is_stable() {
+        for common in [1, 40, 100, 133] {
+            for balance in 0..=254 {
+                let (left, right) = balance_to_levels(common, balance);
+                let (rc, rb) = levels_to_balance(left, right);
+                assert_eq!(rc, common, "common {common} balance {balance}");
+                // The recovered balance re-applies to the same fader values, so
+                // the slider reading is stable and never drifts between frames.
+                assert_eq!(
+                    balance_to_levels(rc, rb),
+                    (left, right),
+                    "balance {balance}"
+                );
+            }
         }
     }
 }
