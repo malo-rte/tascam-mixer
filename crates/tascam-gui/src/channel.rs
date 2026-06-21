@@ -361,7 +361,9 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
             AxisHints::new(Axis::Y)
                 .label("output dB")
                 .formatter(|m, _| format!("{:.0}", m.value))
-                .label_spacing(egui::Rangef::new(14.0, 28.0)),
+                // The plot is short, so the y ticks are ~15 px apart; keep the
+                // spacing threshold below that so they do not fade out.
+                .label_spacing(egui::Rangef::new(8.0, 14.0)),
         ])
         .show(ui, |plot| {
             // Transfer curve as a region filled down to the graph floor.
