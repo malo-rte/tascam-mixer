@@ -272,6 +272,9 @@ impl App {
         let cfg = config::load();
         self.zoom = cfg.zoom;
         self.window = cfg.window;
+        // The stereo-link grouping is part of the saved setup too, so the UI
+        // interprets the restored faders/pans the same way they were saved.
+        self.links = cfg.links;
         match config::default_preset_path() {
             Some(path) => self.load_preset(&path, None),
             None => "load failed: no config directory".clone_into(&mut self.status),

@@ -54,10 +54,17 @@ impl Watcher {
     /// Re-read every (non-meter) control and return those whose value differs
     /// from the previous poll.
     ///
+    /// A control that fails to read is skipped so one transient error does not
+    /// discard the whole pass (which on the first poll would leave a caller's
+    /// cache unseeded).
+    ///
     /// # Errors
-    /// Propagates backend read errors.
+    /// Returns a read error only if no control could be read at all (e.g. the
+    /// device is gone); individual read failures are skipped.
     pub fn poll<B: Backend>(&mut self, device: &Us16x08<B>) -> Result<Vec<ControlChange>> {
         let mut changes = Vec::new();
+        let mut read_any = false;
+        let mut last_err = None;
         for &control in Control::ALL {
             // Skip the meter block (not a scalar) and any control this device
             // does not expose (catalogs span kernel versions; not all are
@@ -66,7 +73,14 @@ impl Watcher {
                 continue;
             }
             for index in 0..control.scope().count() {
-                let value = device.get(control, index)?;
+                let value = match device.get(control, index) {
+                    Ok(value) => value,
+                    Err(e) => {
+                        last_err = Some(e);
+                        continue;
+                    }
+                };
+                read_any = true;
                 let key = (control, index);
                 if self.snapshot.get(&key) != Some(&value) {
                     self.snapshot.insert(key, value);
@@ -76,6 +90,12 @@ impl Watcher {
                         value,
                     });
                 }
+            }
+        }
+        // Surface a hard failure (device gone) but tolerate isolated misreads.
+        if !read_any {
+            if let Some(e) = last_err {
+                return Err(e);
             }
         }
         Ok(changes)
