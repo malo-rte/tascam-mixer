@@ -338,7 +338,10 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
     };
 
     Plot::new("comp_curve")
-        .height(130.0)
+        // Square: input and output share the -60..0 dB range, so the 1:1
+        // diagonal is at 45 degrees and the y ticks have room to render.
+        .height(DSP_WIDTH)
+        .width(DSP_WIDTH)
         .allow_drag(false)
         .allow_zoom(false)
         .allow_scroll(false)
@@ -361,8 +364,7 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
             AxisHints::new(Axis::Y)
                 .label("output dB")
                 .formatter(|m, _| format!("{:.0}", m.value))
-                // The plot is short, so the y ticks are ~15 px apart; keep the
-                // spacing threshold below that so they do not fade out.
+                .min_thickness(24.0)
                 .label_spacing(egui::Rangef::new(8.0, 14.0)),
         ])
         .show(ui, |plot| {
