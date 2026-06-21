@@ -407,9 +407,23 @@ impl eframe::App for App {
 /// The `line-volume` raw maximum (channel fader top); see the control catalog.
 const LINE_VOLUME_MAX: i32 = 133;
 
-/// Integer divide, rounding to nearest.
-fn round_div(num: i32, den: i32) -> i32 {
-    (num + den / 2) / den
+/// Attenuate a fader value by a balance fraction `f` (0..=1), in the amplitude
+/// domain: the gain is reduced to `(1 - f)` of `common`. The fader is roughly
+/// linear in dB (1 raw step per dB), so a raw delta of `20*log10(1-f)` applies
+/// that gain. This is gentle near the centre (about -6 dB at half) and only
+/// reaches silence at `f == 1`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn attenuate(common: i32, f: f64) -> i32 {
+    if f <= 0.0 {
+        return common;
+    }
+    if f >= 1.0 {
+        return 0;
+    }
+    let db = 20.0 * (1.0 - f).log10(); // <= 0
+    (f64::from(common) + db)
+        .round()
+        .clamp(0.0, f64::from(common)) as i32
 }
 
 /// Map a common fader level (`line-volume` raw) and a balance setting (0..=254,
@@ -421,24 +435,29 @@ fn balance_to_levels(common: i32, balance: i32) -> (i32, i32) {
     let balance = balance.clamp(0, 254);
     if balance >= 127 {
         // Favour right: attenuate the lower (left) channel.
-        (round_div(common * (254 - balance), 127), common)
+        (attenuate(common, f64::from(balance - 127) / 127.0), common)
     } else {
         // Favour left: attenuate the upper (right) channel.
-        (common, round_div(common * balance, 127))
+        (common, attenuate(common, f64::from(127 - balance) / 127.0))
     }
 }
 
 /// Inverse of [`balance_to_levels`]: recover `(common, balance)` from a linked
 /// pair's two fader values. The louder side is the common level; the quieter
-/// side's attenuation gives the balance.
+/// side's attenuation (read back in the amplitude domain) gives the balance.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn levels_to_balance(left: i32, right: i32) -> (i32, i32) {
     let common = left.max(right);
     if common <= 0 {
         return (0, 127);
     }
+    let att = left.min(right);
+    // Recover f from the gain ratio (1 - f) = 10^((att - common) / 20).
+    let amp = 10f64.powf(f64::from(att - common) / 20.0);
+    let offset = ((1.0 - amp).clamp(0.0, 1.0) * 127.0).round() as i32;
     let balance = match left.cmp(&right) {
-        std::cmp::Ordering::Less => 254 - round_div(left * 127, common),
-        std::cmp::Ordering::Greater => round_div(right * 127, common),
+        std::cmp::Ordering::Less => 127 + offset, // left attenuated -> favour right
+        std::cmp::Ordering::Greater => 127 - offset,
         std::cmp::Ordering::Equal => 127,
     };
     (common, balance.clamp(0, 254))
@@ -477,11 +496,12 @@ mod tests {
     }
 
     #[test]
-    fn balance_attenuates_only_the_quieter_side() {
-        // Half-right: left attenuated to ~half, right stays at common.
+    fn half_balance_is_gentle() {
+        // Half-right is about -6 dB on the left (amplitude halved), not silence;
+        // the right stays at the common level.
         let (left, right) = balance_to_levels(100, 190);
         assert_eq!(right, 100);
-        assert!((40..=60).contains(&left), "left = {left}");
+        assert!((90..=98).contains(&left), "left = {left}");
     }
 
     #[test]
@@ -491,12 +511,12 @@ mod tests {
                 let (left, right) = balance_to_levels(common, balance);
                 let (rc, rb) = levels_to_balance(left, right);
                 assert_eq!(rc, common, "common {common} balance {balance}");
-                // The recovered balance re-applies to the same fader values, so
-                // the slider reading is stable and never drifts between frames.
-                assert_eq!(
-                    balance_to_levels(rc, rb),
-                    (left, right),
-                    "balance {balance}"
+                // The recovered balance re-applies to within one step, so the
+                // slider reading does not drift between frames.
+                let (l2, r2) = balance_to_levels(rc, rb);
+                assert!(
+                    (l2 - left).abs() <= 1 && (r2 - right).abs() <= 1,
+                    "balance {balance}: ({left},{right}) -> b{rb} -> ({l2},{r2})"
                 );
             }
         }
