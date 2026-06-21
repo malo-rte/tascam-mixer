@@ -11,7 +11,7 @@
 )]
 
 use eframe::egui;
-use egui_plot::{Line, LineStyle, Plot, PlotPoint, PlotPoints, Polygon, Text};
+use egui_plot::{Axis, AxisHints, Line, LineStyle, Plot, PlotPoint, PlotPoints, Polygon, Text};
 use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value, units};
 
 use crate::app::App;
@@ -349,8 +349,20 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         .include_x(0.0)
         .include_y(-60.0)
         .include_y(0.0)
-        .x_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
-        .y_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
+        // Bare-number ticks (narrow, so more of them fit) with the dB unit on
+        // the axis name, and a tighter label spacing than the default.
+        .custom_x_axes(vec![
+            AxisHints::new(Axis::X)
+                .label("input dB")
+                .formatter(|m, _| format!("{:.0}", m.value))
+                .label_spacing(egui::Rangef::new(24.0, 48.0)),
+        ])
+        .custom_y_axes(vec![
+            AxisHints::new(Axis::Y)
+                .label("output dB")
+                .formatter(|m, _| format!("{:.0}", m.value))
+                .label_spacing(egui::Rangef::new(14.0, 28.0)),
+        ])
         .show(ui, |plot| {
             // Transfer curve as a region filled down to the graph floor.
             plot.line(
