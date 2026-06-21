@@ -343,12 +343,12 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         .allow_zoom(false)
         .allow_scroll(false)
         // Fix the scale to -60..0 dB on both axes via the builder (not
-        // set_plot_bounds in the closure) so the axis tick labels render.
+        // set_plot_bounds in the closure) so the axis tick labels render. Keep
+        // the default margin so the edge ticks are not clipped.
         .include_x(-60.0)
         .include_x(0.0)
         .include_y(-60.0)
         .include_y(0.0)
-        .set_margin_fraction(egui::vec2(0.0, 0.0))
         .x_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
         .y_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
         .show(ui, |plot| {
