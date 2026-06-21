@@ -11,7 +11,7 @@
 )]
 
 use eframe::egui;
-use egui_plot::{Line, Plot, PlotBounds, PlotPoint, PlotPoints, Polygon, Text};
+use egui_plot::{Line, LineStyle, Plot, PlotBounds, PlotPoint, PlotPoints, Polygon, Text};
 use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value, units};
 
 use crate::app::App;
@@ -309,7 +309,6 @@ fn eq_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
 /// The compressor transfer curve (input dB -> output dB) plus a GR meter.
 fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
     let threshold = f64::from(app.cached_int(Control::CompThreshold, ch) - 32);
-    let makeup = f64::from(app.cached_int(Control::CompGain, ch));
     let ratio = COMP_RATIO_VALUES
         .get(usize::try_from(app.cached_int(Control::CompRatio, ch)).unwrap_or(0))
         .map_or(1.0, |label| curves::ratio_from_label(label));
@@ -322,8 +321,10 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
     let points: Vec<[f64; 2]> = (0..=60)
         .map(|i| {
             let input = -60.0 + f64::from(i);
+            // The curve shows the compression characteristic only; make-up gain
+            // is a flat output trim and would just shift (and clip) the curve.
             let output = if active {
-                curves::comp_output_db(input, threshold, ratio, makeup)
+                curves::comp_output_db(input, threshold, ratio, 0.0)
             } else {
                 input
             };
@@ -349,6 +350,12 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
             // Fixed scale: input/output -60..0 dB, so the view does not jump as
             // the parameters change.
             plot.set_plot_bounds(PlotBounds::from_min_max([-60.0, -60.0], [0.0, 0.0]));
+            // 1:1 reference diagonal (input == output), drawn under the curve.
+            plot.line(
+                Line::new(PlotPoints::from(vec![[-60.0, -60.0], [0.0, 0.0]]))
+                    .color(egui::Color32::from_gray(90))
+                    .style(LineStyle::dashed_loose()),
+            );
             plot.line(Line::new(PlotPoints::from(points)));
 
             // Gain-reduction meter: a vertical bar at the right edge growing

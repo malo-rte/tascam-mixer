@@ -444,8 +444,9 @@ disabled (or `DSP bypass` is on) the curve is flat, since the EQ is doing
 nothing.
 
 Compressor:: A `Reset` button and an enable checkbox in the title row, a transfer
-curve (input level to output level) with the threshold, ratio, and make-up gain
-applied, a vertical gain-reduction meter inside the graph, and the parameters below: threshold, ratio,
+curve (input level to output level) showing the threshold and ratio against a 1:1
+reference diagonal (make-up gain is a separate output trim and is not folded into
+the curve), a vertical gain-reduction meter inside the graph, and the parameters below: threshold, ratio,
 and gain on the first row, attack and release on the second. Each is a drag-value
 (drag to change, click to type), except ratio, which is a dropdown of the
 available ratios. `Reset` returns the parameters to their defaults, a 1:1 ratio
