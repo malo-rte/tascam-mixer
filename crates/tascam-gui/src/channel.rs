@@ -30,6 +30,10 @@ const VOLUME_STRIP_WIDTH: f32 = 90.0;
 /// readout (e.g. `-127 dB`, `1000 ms`) so they are a fixed, uniform size.
 pub(crate) const VALUE_BOX_WIDTH: f32 = 60.0;
 
+/// Headroom (dB) past 0 on the compressor graph axes, reserving a lane to the
+/// right of the input-0 line for the gain-reduction bar.
+const GR_LANE_MAX: f64 = 6.0;
+
 /// EQ band controls the EQ `Reset` button returns to defaults (a flat curve),
 /// excluding the enable switch.
 const EQ_RESET: [Control; 10] = [
@@ -348,22 +352,25 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         // Fix the scale to -60..0 dB on both axes via the builder (not
         // set_plot_bounds in the closure) so the axis tick labels render. Keep
         // the default margin so the edge ticks are not clipped.
+        // A little headroom past 0 dB on both axes (kept equal so the diagonal
+        // stays ~45 degrees) gives the gain-reduction bar its own lane to the
+        // right of the input-0 line, clear of the transfer curve.
         .include_x(-60.0)
-        .include_x(0.0)
+        .include_x(GR_LANE_MAX)
         .include_y(-60.0)
-        .include_y(0.0)
+        .include_y(GR_LANE_MAX)
         // Bare-number ticks (narrow, so more of them fit) with the dB unit on
-        // the axis name, and a tighter label spacing than the default.
+        // the axis name; the positive headroom is unlabelled.
         .custom_x_axes(vec![
             AxisHints::new(Axis::X)
                 .label("input dB")
-                .formatter(|m, _| format!("{:.0}", m.value))
+                .formatter(db_tick)
                 .label_spacing(egui::Rangef::new(24.0, 48.0)),
         ])
         .custom_y_axes(vec![
             AxisHints::new(Axis::Y)
                 .label("output dB")
-                .formatter(|m, _| format!("{:.0}", m.value))
+                .formatter(db_tick)
                 .min_thickness(24.0)
                 .label_spacing(egui::Rangef::new(8.0, 14.0)),
         ])
@@ -382,19 +389,19 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
                     .style(LineStyle::dashed_loose()),
             );
 
-            // Gain-reduction meter: a thin vertical bar flush to the right edge,
-            // growing down from 0 dB; full scale spans the whole height.
+            // Gain-reduction meter: a vertical bar in the headroom lane to the
+            // right of the input-0 line, growing down from 0 dB.
             let depth = -60.0 * f64::from(gr);
             let bar = Polygon::new(PlotPoints::from(vec![
-                [-1.5, 0.0],
-                [0.0, 0.0],
-                [0.0, depth],
-                [-1.5, depth],
+                [1.5, 0.0],
+                [GR_LANE_MAX, 0.0],
+                [GR_LANE_MAX, depth],
+                [1.5, depth],
             ]))
             .fill_color(egui::Color32::from_rgba_unmultiplied(230, 120, 60, 200))
             .stroke(egui::Stroke::NONE);
             plot.polygon(bar);
-            plot.text(Text::new(PlotPoint::new(-4.5, -57.0), "GR"));
+            plot.text(Text::new(PlotPoint::new(3.7, 3.0), "GR"));
         });
 }
 
@@ -500,6 +507,16 @@ pub(crate) fn human_text(control: Control, raw: f64) -> String {
 /// value, so editing a value box uses the same units it displays.
 pub(crate) fn parse_human(control: Control, text: &str) -> Option<f64> {
     units::parse(control, text).map(f64::from)
+}
+
+/// Compressor axis tick label: the dB value, leaving the positive
+/// gain-reduction headroom unlabelled.
+fn db_tick(mark: egui_plot::GridMark, _range: &std::ops::RangeInclusive<f64>) -> String {
+    if mark.value > 0.5 {
+        String::new()
+    } else {
+        format!("{:.0}", mark.value)
+    }
 }
 
 /// Format a log10(Hz) plot mark as a frequency label.
