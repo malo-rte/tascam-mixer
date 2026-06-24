@@ -14,6 +14,13 @@ version.
   (no fixed limit), each with Load and Delete; equivalent to a hardware mixer's
   scene memories, kept on the host.
 
+### Fixed
+
+- **GUI** — the stereo-link grouping is now saved inside every whole-mixer preset
+  and scene (as an extra `links` field that `tascamctl` ignores), so loading a
+  preset, scene, or the default restores which pairs are linked. Previously the
+  grouping only travelled with the shared default.
+
 ## [0.2.1] - 2026-06-24
 
 ### Fixed

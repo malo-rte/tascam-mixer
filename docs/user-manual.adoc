@@ -188,7 +188,8 @@ A *preset* is a saved set of control values stored as a JSON file. Two kinds
 exist:
 
 * A *mixer preset* holds the whole mixer: the master controls, the output
-  routing, and all 16 channel strips.
+  routing, and all 16 channel strips. Saved from the GUI, it also records the
+  stereo-link grouping (an extra field `tascamctl` ignores).
 * A *strip preset* holds one channel's controls and can be applied to any
   channel.
 
@@ -209,7 +210,9 @@ control becomes a *balance*: the Volume fader sets the common level of both
 channels, and Balance attenuates one channel's level to favour the other side
 (at centre both sit at the common level; full left silences the right channel,
 full right silences the left). Balance is a level adjustment, not a pan, so the
-stereo image is preserved. The link state is remembered between GUI sessions.
+stereo image is preserved. The link state is remembered between GUI sessions and
+is saved inside each whole-mixer preset and scene, so loading one restores its
+grouping.
 
 [[sec-install]]
 == Installing the tools
@@ -549,8 +552,10 @@ row with *Load*, which applies it to the whole mixer, and *Delete*, which remove
 the file after a confirmation.
 
 A scene holds the same whole-mixer state as a mixer preset (master, routing, and
-all 16 channel strips); it does not carry the GUI-only stereo-link grouping, zoom,
-or window size. Scenes are independent of the shared default preset
+all 16 channel strips), plus the stereo-link grouping, so loading it restores
+which pairs are linked. It does not carry the interface zoom or window size (those
+travel only with the default preset). Scenes are independent of the shared default
+preset
 (<<sec-gui-presets>>): the default is the one applied automatically on connect,
 while scenes are recalled by hand.
 

@@ -355,13 +355,8 @@ impl App {
 
     /// Capture the whole mixer (or one channel's strip) to a JSON file.
     fn save_preset(&mut self, path: &Path, channel: Option<u32>) {
-        let captured = match channel {
-            Some(ch) => self.device.capture_strip(ch),
-            None => self.device.capture_mixer(),
-        };
-        let result = captured
-            .map_err(|e| e.to_string())
-            .and_then(|preset| serde_json::to_string_pretty(&preset).map_err(|e| e.to_string()))
+        let result = self
+            .build_preset_json(channel)
             .and_then(|json| std::fs::write(path, json).map_err(|e| e.to_string()));
         self.status = match result {
             Ok(()) => format!("saved {}", path.display()),
@@ -369,27 +364,68 @@ impl App {
         };
     }
 
+    /// Capture a preset and serialise it. A whole-mixer preset also carries the
+    /// GUI-only stereo-link grouping as an extra `links` field, so loading it
+    /// restores the grouping. The library and CLI do not use that field (serde
+    /// ignores it), keeping the file a valid hardware preset.
+    fn build_preset_json(&self, channel: Option<u32>) -> Result<String, String> {
+        let preset = match channel {
+            Some(ch) => self.device.capture_strip(ch),
+            None => self.device.capture_mixer(),
+        }
+        .map_err(|e| e.to_string())?;
+        let mut value = serde_json::to_value(&preset).map_err(|e| e.to_string())?;
+        if channel.is_none() {
+            if let Some(object) = value.as_object_mut() {
+                let links = serde_json::to_value(self.links).map_err(|e| e.to_string())?;
+                object.insert("links".to_owned(), links);
+            }
+        }
+        serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
+    }
+
     /// Load a JSON preset. A strip preset needs a target `channel`; a mixer
     /// preset must be loaded with `None`.
     fn load_preset(&mut self, path: &Path, channel: Option<u32>) {
         let parsed = std::fs::read_to_string(path)
             .map_err(|e| e.to_string())
-            .and_then(|text| serde_json::from_str::<Preset>(&text).map_err(|e| e.to_string()));
-        match parsed {
-            // Mute the master and verify each write, so a full load is silent
-            // while it applies and survives a device that is still settling.
-            Ok(preset) => match self.device.apply_muted(&preset, channel, LOAD_TIMING) {
-                Ok(report) => {
-                    self.status = format!(
-                        "loaded {} ({} applied, {} skipped)",
-                        path.display(),
-                        report.applied,
-                        report.skipped.len()
-                    );
-                    self.sync_controls();
-                }
-                Err(e) => self.status = format!("load failed: {e}"),
-            },
+            .and_then(|text| {
+                serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string())
+            });
+        let value = match parsed {
+            Ok(value) => value,
+            Err(e) => {
+                self.status = format!("load failed: {e}");
+                return;
+            }
+        };
+        // Restore the stereo-link grouping a whole-mixer preset carries, before
+        // applying, so the UI interprets the restored faders/pans the same way.
+        if channel.is_none() {
+            if let Some(links) = extract_links(&value) {
+                self.links = links;
+                self.save_config();
+            }
+        }
+        let preset: Preset = match serde_json::from_value(value) {
+            Ok(preset) => preset,
+            Err(e) => {
+                self.status = format!("load failed: {e}");
+                return;
+            }
+        };
+        // Mute the master and verify each write, so a full load is silent while
+        // it applies and survives a device that is still settling.
+        match self.device.apply_muted(&preset, channel, LOAD_TIMING) {
+            Ok(report) => {
+                self.status = format!(
+                    "loaded {} ({} applied, {} skipped)",
+                    path.display(),
+                    report.applied,
+                    report.skipped.len()
+                );
+                self.sync_controls();
+            }
             Err(e) => self.status = format!("load failed: {e}"),
         }
     }
@@ -674,6 +710,21 @@ pub(crate) fn scene_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// Read the GUI-only stereo-link grouping from a whole-mixer preset's optional
+/// `links` field. `None` if the field is absent or malformed (e.g. a preset
+/// saved by the CLI), in which case the current grouping is kept.
+fn extract_links(value: &serde_json::Value) -> Option<[bool; 8]> {
+    let array = value.get("links")?.as_array()?;
+    if array.len() != 8 {
+        return None;
+    }
+    let mut links = [false; 8];
+    for (slot, item) in links.iter_mut().zip(array) {
+        *slot = item.as_bool()?;
+    }
+    Some(links)
+}
+
 /// The display name of a scene file: its stem without the `.json` extension.
 pub(crate) fn scene_label(path: &Path) -> String {
     path.file_stem().map_or_else(
@@ -715,7 +766,36 @@ fn open_dialog() -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{balance_to_levels, levels_to_balance};
+    use super::{balance_to_levels, extract_links, levels_to_balance};
+
+    #[test]
+    fn links_round_trip_through_preset_json() {
+        let links = [true, false, false, true, false, true, false, false];
+        // A whole-mixer preset object with the GUI's extra `links` field.
+        let value = serde_json::json!({
+            "kind": "mixer",
+            "version": 1,
+            "master": {},
+            "route": {},
+            "channels": [],
+            "links": links,
+        });
+
+        // The grouping is recovered, and the library still parses the preset
+        // (the extra field is ignored).
+        assert_eq!(extract_links(&value), Some(links));
+        assert!(serde_json::from_value::<tascam_us16x08::Preset>(value).is_ok());
+    }
+
+    #[test]
+    fn missing_or_malformed_links_keep_current_grouping() {
+        assert_eq!(extract_links(&serde_json::json!({"kind": "mixer"})), None);
+        assert_eq!(
+            extract_links(&serde_json::json!({"links": [true, false]})),
+            None
+        );
+        assert_eq!(extract_links(&serde_json::json!({"links": "nope"})), None);
+    }
 
     #[test]
     fn centre_balance_keeps_both_at_common() {
