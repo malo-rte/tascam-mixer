@@ -17,6 +17,9 @@ version.
   Save and recall one channel's settings (strip presets) from the settings
   directory; saves from the focused channel and loads onto it, so it doubles as a
   quick way to copy settings between channels.
+- **GUI** — copy/paste between channels: *Copy channel* / *Paste channel* above
+  the editor for the whole strip, and *Copy* / *Paste* in the EQ and Compressor
+  title rows for just that section. Pasting onto a linked pair applies to both.
 
 ### Removed
 

@@ -524,6 +524,12 @@ straight 1:1 line and the gain-reduction bar reads zero.
 All numeric controls read and accept the display units described in
 <<sec-controls-model>>; type a value into a control's box to set it directly.
 
+Copy and paste:: Above the boxes, *Copy channel* captures the whole focused strip;
+focus another channel and *Paste channel* applies it. The EQ and Compressor boxes
+have their own *Copy* and *Paste* buttons in their title rows, to copy just that
+section between channels. *Paste* is disabled until something has been copied, and
+pasting onto a linked pair applies to both channels.
+
 [[sec-gui-output]]
 === The output panel
 

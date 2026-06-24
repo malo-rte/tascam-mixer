@@ -14,7 +14,7 @@ use eframe::egui;
 use egui_plot::{Axis, AxisHints, Line, LineStyle, Plot, PlotPoint, PlotPoints, Polygon, Text};
 use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value, units};
 
-use crate::app::App;
+use crate::app::{App, Group};
 use crate::bridge;
 use crate::curves::{self, BandType, EqBand};
 
@@ -67,11 +67,31 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     // Fixed-width numeric value boxes across the editor.
     ui.spacing_mut().interact_size.x = VALUE_BOX_WIDTH;
 
+    // Whole-channel copy/paste: capture this strip and apply it to another.
+    ui.horizontal(|ui| {
+        copy_paste(app, ui, Group::Channel, "Copy channel", "Paste channel");
+        ui.label("copy a channel's settings, then focus another and paste");
+    });
+
     ui.horizontal_top(|ui| {
         input_box(app, ui, ch, selected, linked, low);
         eq_box(app, ui, ch);
         comp_box(app, ui, ch);
     });
+}
+
+/// A Copy button and a Paste button (disabled until something is copied) for a
+/// per-channel control group, writing through to the focused channel on paste.
+fn copy_paste(app: &mut App, ui: &mut egui::Ui, group: Group, copy: &str, paste: &str) {
+    if ui.button(copy).clicked() {
+        app.copy_group(group);
+    }
+    if ui
+        .add_enabled(app.has_clip(group), egui::Button::new(paste))
+        .clicked()
+    {
+        app.paste_group(group);
+    }
 }
 
 /// The INPUT box: channel identity, link, phase, mute, fader, pan/balance.
@@ -196,7 +216,7 @@ fn eq_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.group(|ui| {
         ui.set_width(DSP_WIDTH);
         ui.vertical(|ui| {
-            title_row(app, ui, "EQ", Control::EqSwitch, &EQ_RESET, ch);
+            title_row(app, ui, "EQ", Group::Eq, Control::EqSwitch, &EQ_RESET, ch);
             eq_curve(app, ui, ch);
             egui::Grid::new("eq_grid").num_columns(4).show(ui, |ui| {
                 ui.label("");
@@ -227,7 +247,15 @@ fn comp_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.group(|ui| {
         ui.set_width(DSP_WIDTH);
         ui.vertical(|ui| {
-            title_row(app, ui, "Compressor", Control::CompSwitch, &COMP_RESET, ch);
+            title_row(
+                app,
+                ui,
+                "Compressor",
+                Group::Comp,
+                Control::CompSwitch,
+                &COMP_RESET,
+                ch,
+            );
             comp_curve(app, ui, ch);
             // Threshold / Ratio / Gain on the first row, Attack / Release on the
             // second. Ratio is an enum, so it stays a dropdown.
@@ -407,18 +435,21 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         });
 }
 
-/// A box title row: the title, then a right-aligned `Enable` checkbox with a
-/// `Reset` button to its left. Reset returns `reset` controls to their defaults.
+/// A box title row: the title and Copy/Paste buttons for `group`, then a
+/// right-aligned `Enable` checkbox with a `Reset` button to its left. Reset
+/// returns `reset` controls to their defaults.
 fn title_row(
     app: &mut App,
     ui: &mut egui::Ui,
     title: &str,
+    group: Group,
     enable: Control,
     reset: &[Control],
     ch: u32,
 ) {
     ui.horizontal(|ui| {
         ui.heading(title);
+        copy_paste(app, ui, group, "Copy", "Paste");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let mut enabled = app.cached_bool(enable, ch);
             if ui.checkbox(&mut enabled, "Enable").changed() {

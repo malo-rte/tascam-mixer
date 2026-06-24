@@ -34,6 +34,54 @@ pub(crate) enum PresetKind {
     Strip,
 }
 
+/// A group of per-channel controls that can be copied from one channel and
+/// pasted onto another, via the in-app clipboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Group {
+    /// The whole channel strip (phase, fader, pan, mute, EQ, compressor).
+    Channel,
+    /// The EQ section only (enable plus the four bands).
+    Eq,
+    /// The compressor section only (enable plus the parameters).
+    Comp,
+}
+
+impl Group {
+    /// A short noun for status messages.
+    fn label(self) -> &'static str {
+        match self {
+            Group::Channel => "channel",
+            Group::Eq => "EQ",
+            Group::Comp => "compressor",
+        }
+    }
+}
+
+/// EQ controls a copy/paste carries (enable plus the four bands).
+const EQ_GROUP: [Control; 11] = [
+    Control::EqSwitch,
+    Control::EqLowVolume,
+    Control::EqLowFreq,
+    Control::EqMidLowVolume,
+    Control::EqMidLowFreq,
+    Control::EqMidLowQ,
+    Control::EqMidHighVolume,
+    Control::EqMidHighFreq,
+    Control::EqMidHighQ,
+    Control::EqHighVolume,
+    Control::EqHighFreq,
+];
+
+/// Compressor controls a copy/paste carries (enable plus the parameters).
+const COMP_GROUP: [Control; 6] = [
+    Control::CompSwitch,
+    Control::CompThreshold,
+    Control::CompRatio,
+    Control::CompAttack,
+    Control::CompRelease,
+    Control::CompGain,
+];
+
 /// Meter repaint cadence (~30 Hz).
 const METER_INTERVAL: Duration = Duration::from_millis(33);
 /// How often to re-read controls so external changes (front panel, another
@@ -91,6 +139,10 @@ pub(crate) struct App {
     pub(crate) strip_name: String,
     /// A preset awaiting delete confirmation in a preset tab.
     pub(crate) pending_delete: Option<PathBuf>,
+    /// Copy/paste clipboards for the channel, EQ, and compressor groups.
+    clip_channel: Option<Vec<(Control, Value)>>,
+    clip_eq: Option<Vec<(Control, Value)>>,
+    clip_comp: Option<Vec<(Control, Value)>>,
     status: String,
 }
 
@@ -128,6 +180,9 @@ impl App {
             scene_name: String::new(),
             strip_name: String::new(),
             pending_delete: None,
+            clip_channel: None,
+            clip_eq: None,
+            clip_comp: None,
             status: String::new(),
         };
         if connected {
@@ -539,6 +594,52 @@ impl App {
         };
     }
 
+    /// The clipboard slot for `group`.
+    fn clipboard_mut(&mut self, group: Group) -> &mut Option<Vec<(Control, Value)>> {
+        match group {
+            Group::Channel => &mut self.clip_channel,
+            Group::Eq => &mut self.clip_eq,
+            Group::Comp => &mut self.clip_comp,
+        }
+    }
+
+    /// Whether `group`'s clipboard holds a copy ready to paste.
+    pub(crate) fn has_clip(&self, group: Group) -> bool {
+        match group {
+            Group::Channel => self.clip_channel.is_some(),
+            Group::Eq => self.clip_eq.is_some(),
+            Group::Comp => self.clip_comp.is_some(),
+        }
+    }
+
+    /// Copy `group`'s controls from the focused channel into the clipboard.
+    pub(crate) fn copy_group(&mut self, group: Group) {
+        let ch = u32::from(self.selected);
+        let mut values = Vec::new();
+        for control in group_controls(group) {
+            if self.device.is_present(control) {
+                if let Some(&value) = self.cache.get(&(control, ch)) {
+                    values.push((control, value));
+                }
+            }
+        }
+        *self.clipboard_mut(group) = Some(values);
+        self.status = format!("copied {} from channel {}", group.label(), ch + 1);
+    }
+
+    /// Paste `group`'s copied controls onto the focused channel (and its pair,
+    /// when linked, via [`Self::set`]). No-op if the clipboard is empty.
+    pub(crate) fn paste_group(&mut self, group: Group) {
+        let ch = u32::from(self.selected);
+        let Some(values) = self.clipboard_mut(group).clone() else {
+            return;
+        };
+        for (control, value) in values {
+            self.set(control, ch, value);
+        }
+        self.status = format!("pasted {} to channel {}", group.label(), ch + 1);
+    }
+
     /// Tab selector. (Presets live in the Scenes and Channel-presets tabs; the
     /// global DSP switches live in the OUTPUT panel.)
     fn toolbar(&mut self, ui: &mut egui::Ui) {
@@ -731,6 +832,20 @@ fn extract_links(value: &serde_json::Value) -> Option<[bool; 8]> {
         *slot = item.as_bool()?;
     }
     Some(links)
+}
+
+/// The per-channel controls a copy/paste of `group` carries.
+fn group_controls(group: Group) -> Vec<Control> {
+    match group {
+        Group::Eq => EQ_GROUP.to_vec(),
+        Group::Comp => COMP_GROUP.to_vec(),
+        // The whole strip: every per-channel, non-meter control.
+        Group::Channel => Control::ALL
+            .iter()
+            .copied()
+            .filter(|c| c.scope() == Scope::Channel && !matches!(c.kind(), Kind::Meter))
+            .collect(),
+    }
 }
 
 /// The display name of a preset file: its stem without the `.json` extension.
