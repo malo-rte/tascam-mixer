@@ -13,6 +13,10 @@ version.
   it later. Scenes are stored as ordinary preset files in the settings directory
   (no fixed limit), each with Save (overwrite in place), Load, and Delete;
   equivalent to a hardware mixer's scene memories, kept on the host.
+- **GUI** — a *Channel presets* tab: the single-channel counterpart of scenes.
+  Save and recall one channel's settings (strip presets) from the settings
+  directory; saves from the focused channel and loads onto it, so it doubles as a
+  quick way to copy settings between channels.
 
 ### Fixed
 

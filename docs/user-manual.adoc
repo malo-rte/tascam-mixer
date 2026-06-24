@@ -478,9 +478,9 @@ becoming ready, add `ExecStartPre=/bin/sleep 1` to the service.
 
 `tascam-mixer` opens a single window: a meter bridge across the top, a focused
 channel (or linked pair) editor in the centre, an output panel on the right, and
-a toolbar to switch between the channel editor, the routing tab, and the scenes
-tab, and to manage presets. The full list of panels and controls is in
-<<sec-gui-ref>>.
+a toolbar to switch between the channel editor, the routing tab, the scenes tab,
+and the channel-presets tab, and to manage presets. The full list of panels and
+controls is in <<sec-gui-ref>>.
 
 [[sec-gui-bridge]]
 === The meter bridge
@@ -559,6 +559,18 @@ travel only with the default preset). Scenes are independent of the shared defau
 preset
 (<<sec-gui-presets>>): the default is the one applied automatically on connect,
 while scenes are recalled by hand.
+
+[[sec-gui-channel-presets]]
+=== The channel presets tab
+
+The *Channel presets* tab is the single-channel counterpart of the scenes tab: it
+saves and recalls one channel's settings (fader, pan, phase, mute, EQ, and
+compressor) as strip presets stored in the settings directory, with no fixed
+limit. It works on the channel currently focused in the editor: *Save this
+channel* (or the per-row *Save*) captures that channel, and *Load* applies a
+preset to it. As with scenes, each saved preset has *Save* (overwrite), *Load*,
+and *Delete*. Because a strip preset is not tied to a channel, you can save from
+one channel and load onto another -- the quick way to copy a channel's settings.
 
 [[sec-gui-link]]
 === Stereo link
@@ -683,9 +695,10 @@ A Lua-configured Hyprland uses the equivalent
 | Area | Contents
 
 | Meter bridge (top) | 16 channel columns (number, level meter, mute) and the master level meters with a mute button, always visible. Click a number to focus that channel.
-| Toolbar | `Channel` / `Routing` / `Scenes` tab buttons and the `Presets` menu.
+| Toolbar | `Channel` / `Routing` / `Scenes` / `Channel presets` tab buttons and the `Presets` menu.
 | Channel editor (centre) | INPUT, EQ, and Compressor boxes for the focused channel or linked pair.
 | Scenes tab (centre) | A name field with `Save current mix`, and a list of saved scenes each with `Save` (overwrite), `Load`, and `Delete`.
+| Channel presets tab (centre) | A name field with `Save this channel`, and a list of saved channel presets each with `Save` (overwrite), `Load`, and `Delete`.
 | Output panel (right) | Master fader, `DSP bypass` and `Buss out` switches, `Save default` / `Load default` buttons.
 | Status line (bottom) | The active device and the most recent error or result message.
 |===

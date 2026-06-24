@@ -57,6 +57,12 @@ pub(crate) fn scenes_dir() -> Option<PathBuf> {
     ProjectDirs::from("de", "paraair", "tascam-mixer").map(|dirs| dirs.config_dir().join("scenes"))
 }
 
+/// Directory holding the user's saved channel presets (single-channel strips),
+/// under the config directory. `None` if no home directory can be determined.
+pub(crate) fn strips_dir() -> Option<PathBuf> {
+    ProjectDirs::from("de", "paraair", "tascam-mixer").map(|dirs| dirs.config_dir().join("strips"))
+}
+
 /// Load the saved config, falling back to defaults on any error.
 pub(crate) fn load() -> GuiConfig {
     let Some(path) = config_path() else {

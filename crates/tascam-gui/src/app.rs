@@ -11,7 +11,7 @@ use tascam_us16x08::{
 };
 
 use crate::config::{self, GuiConfig};
-use crate::{bridge, channel, output, routing, scenes};
+use crate::{bridge, channel, output, preset_tab, routing};
 
 /// Which editor the central panel shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,19 @@ pub(crate) enum Tab {
     Channel,
     Routing,
     Scenes,
+    Strips,
+}
+
+/// The two kinds of named, file-backed preset the GUI manages in a list tab: a
+/// whole-mixer *scene*, or a single-channel *strip* applied to the focused
+/// channel. They differ only in their directory and whether a load/save targets
+/// the whole mixer or one channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PresetKind {
+    /// A whole-mixer snapshot (the Scenes tab).
+    Scene,
+    /// One channel's strip, applied to the focused channel (the Strips tab).
+    Strip,
 }
 
 /// Meter repaint cadence (~30 Hz).
@@ -74,7 +87,9 @@ pub(crate) struct App {
     window: Option<[f32; 2]>,
     /// Name being typed for a new scene in the Scenes tab.
     pub(crate) scene_name: String,
-    /// A scene awaiting delete confirmation in the Scenes tab.
+    /// Name being typed for a new channel preset in the Strips tab.
+    pub(crate) strip_name: String,
+    /// A preset awaiting delete confirmation in a preset tab.
     pub(crate) pending_delete: Option<PathBuf>,
     status: String,
 }
@@ -111,6 +126,7 @@ impl App {
             zoom: cfg.zoom,
             window: cfg.window,
             scene_name: String::new(),
+            strip_name: String::new(),
             pending_delete: None,
             status: String::new(),
         };
@@ -459,17 +475,42 @@ impl App {
         (self.zoom, self.window)
     }
 
-    /// Save the current whole mixer as a scene named `name` in the scenes
-    /// directory. The name is sanitised into a file name; an existing scene of
-    /// the same name is overwritten.
-    pub(crate) fn save_scene(&mut self, name: &str) {
-        let Some(dir) = config::scenes_dir() else {
+    /// The text buffer for the new-preset name field of `kind`'s tab.
+    pub(crate) fn preset_name_mut(&mut self, kind: PresetKind) -> &mut String {
+        match kind {
+            PresetKind::Scene => &mut self.scene_name,
+            PresetKind::Strip => &mut self.strip_name,
+        }
+    }
+
+    /// The directory holding `kind`'s preset files.
+    pub(crate) fn preset_dir(kind: PresetKind) -> Option<PathBuf> {
+        match kind {
+            PresetKind::Scene => config::scenes_dir(),
+            PresetKind::Strip => config::strips_dir(),
+        }
+    }
+
+    /// Which channel a `kind` preset captures from / applies to: the whole mixer
+    /// (`None`) for a scene, or the focused channel for a strip.
+    fn preset_channel(&self, kind: PresetKind) -> Option<u32> {
+        match kind {
+            PresetKind::Scene => None,
+            PresetKind::Strip => Some(u32::from(self.selected)),
+        }
+    }
+
+    /// Save the current state as a preset named `name` in `kind`'s directory. The
+    /// name is sanitised into a file name; an existing preset of that name is
+    /// overwritten.
+    pub(crate) fn save_named_preset(&mut self, kind: PresetKind, name: &str) {
+        let Some(dir) = Self::preset_dir(kind) else {
             "save failed: no config directory".clone_into(&mut self.status);
             return;
         };
-        let file = sanitize_scene_name(name);
+        let file = sanitize_name(name);
         if file.is_empty() {
-            "save failed: empty scene name".clone_into(&mut self.status);
+            "save failed: empty preset name".clone_into(&mut self.status);
             return;
         }
         if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -477,23 +518,23 @@ impl App {
             return;
         }
         let path = dir.join(format!("{file}.json"));
-        self.save_preset(&path, None);
+        self.save_preset(&path, self.preset_channel(kind));
     }
 
-    /// Load a saved scene (whole mixer) from `path`.
-    pub(crate) fn load_scene(&mut self, path: &Path) {
-        self.load_preset(path, None);
+    /// Load a saved preset of `kind` from `path`.
+    pub(crate) fn load_named_preset(&mut self, kind: PresetKind, path: &Path) {
+        self.load_preset(path, self.preset_channel(kind));
     }
 
-    /// Overwrite an existing scene file with the current mixer, keeping its name.
-    pub(crate) fn update_scene(&mut self, path: &Path) {
-        self.save_preset(path, None);
+    /// Overwrite an existing preset file of `kind` with the current state.
+    pub(crate) fn update_named_preset(&mut self, kind: PresetKind, path: &Path) {
+        self.save_preset(path, self.preset_channel(kind));
     }
 
-    /// Delete a saved scene file.
-    pub(crate) fn delete_scene(&mut self, path: &Path) {
+    /// Delete a saved preset file.
+    pub(crate) fn delete_preset(&mut self, path: &Path) {
         self.status = match std::fs::remove_file(path) {
-            Ok(()) => format!("deleted {}", scene_label(path)),
+            Ok(()) => format!("deleted {}", preset_label(path)),
             Err(e) => format!("delete failed: {e}"),
         };
     }
@@ -505,6 +546,7 @@ impl App {
             ui.selectable_value(&mut self.tab, Tab::Channel, "Channel");
             ui.selectable_value(&mut self.tab, Tab::Routing, "Routing");
             ui.selectable_value(&mut self.tab, Tab::Scenes, "Scenes");
+            ui.selectable_value(&mut self.tab, Tab::Strips, "Channel presets");
             ui.separator();
             self.presets_menu(ui);
         });
@@ -617,7 +659,8 @@ impl eframe::App for App {
                 egui::ScrollArea::both().show(ui, |ui| match self.tab {
                     Tab::Channel => channel::show(self, ui),
                     Tab::Routing => routing::show(self, ui),
-                    Tab::Scenes => scenes::show(self, ui),
+                    Tab::Scenes => preset_tab::show(self, ui, PresetKind::Scene),
+                    Tab::Strips => preset_tab::show(self, ui, PresetKind::Strip),
                 });
             });
         } else {
@@ -697,10 +740,10 @@ fn levels_to_balance(left: i32, right: i32) -> (i32, i32) {
     (common, balance.clamp(0, 254))
 }
 
-/// The saved scenes (whole-mixer presets) in the scenes directory, sorted by
-/// name. Each is a `*.json` file saved from the Scenes tab.
-pub(crate) fn scene_paths() -> Vec<PathBuf> {
-    let Some(dir) = config::scenes_dir() else {
+/// The saved presets of `kind` in its directory, sorted by name. Each is a
+/// `*.json` file saved from the matching tab.
+pub(crate) fn preset_paths(kind: PresetKind) -> Vec<PathBuf> {
+    let Some(dir) = App::preset_dir(kind) else {
         return Vec::new();
     };
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -730,18 +773,18 @@ fn extract_links(value: &serde_json::Value) -> Option<[bool; 8]> {
     Some(links)
 }
 
-/// The display name of a scene file: its stem without the `.json` extension.
-pub(crate) fn scene_label(path: &Path) -> String {
+/// The display name of a preset file: its stem without the `.json` extension.
+pub(crate) fn preset_label(path: &Path) -> String {
     path.file_stem().map_or_else(
         || path.display().to_string(),
         |s| s.to_string_lossy().into_owned(),
     )
 }
 
-/// Turn a user-typed scene name into a safe file stem: keep letters, digits,
+/// Turn a user-typed preset name into a safe file stem: keep letters, digits,
 /// spaces, dashes and underscores; replace anything else (path separators,
 /// dots) with an underscore; trim surrounding whitespace.
-fn sanitize_scene_name(name: &str) -> String {
+fn sanitize_name(name: &str) -> String {
     name.trim()
         .chars()
         .map(|c| {
