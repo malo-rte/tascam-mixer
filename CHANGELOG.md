@@ -19,6 +19,12 @@ version.
   saved default preset (or, with none saved, reads the device as-is); when the
   card is already running at startup it just reads its current settings.
 
+### Changed
+
+- **CLI** — clearer `--help`: a short summary and command list with `-h`, fuller
+  per-command detail with `--help`, an examples section, and a readable breakdown
+  of the `set` value forms.
+
 ### Documentation
 
 - **Manual** — a recipe for applying the default preset automatically on connect
