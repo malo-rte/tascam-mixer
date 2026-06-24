@@ -41,6 +41,10 @@ pub(crate) struct App {
     /// Whether the device is currently reachable. When false, the app polls
     /// [`Self::try_reconnect`] instead of the device.
     connected: bool,
+    /// Whether we have ever read a real surface into the cache. False until the
+    /// first successful connection; it decides whether a (re)connect restores
+    /// the cached mix or applies the startup defaults.
+    primed: bool,
     /// Next time (seconds, eframe clock) to attempt a reconnect.
     next_reconnect: f64,
     /// Last-known control values, fed by the watcher and by our own writes.
@@ -61,9 +65,15 @@ pub(crate) struct App {
 }
 
 impl App {
-    /// Build the app around an opened device and seed the control cache.
-    /// `reopen` reconnects the same kind of backend after a USB replug.
-    pub(crate) fn new(device: Us16x08<Box<dyn Backend>>, mock: bool, reopen: Reopen) -> Self {
+    /// Build the app around a device. `connected` says whether the card was
+    /// actually open at startup (false means it was absent and `device` is a
+    /// placeholder); `reopen` reconnects the same backend after a USB replug.
+    pub(crate) fn new(
+        device: Us16x08<Box<dyn Backend>>,
+        mock: bool,
+        connected: bool,
+        reopen: Reopen,
+    ) -> Self {
         let cfg = config::load();
         let mut app = Self {
             device,
@@ -73,7 +83,8 @@ impl App {
                 "US-16x08 (ALSA)"
             },
             reopen,
-            connected: true,
+            connected,
+            primed: false,
             next_reconnect: 0.0,
             cache: HashMap::new(),
             watcher: Watcher::new(),
@@ -86,7 +97,13 @@ impl App {
             window: cfg.window,
             status: String::new(),
         };
-        app.sync_controls();
+        if connected {
+            // Card already running: read its current settings and use them.
+            app.sync_controls();
+            app.primed = true;
+        } else {
+            "device disconnected; waiting for it to return…".clone_into(&mut app.status);
+        }
         app
     }
 
@@ -258,8 +275,10 @@ impl App {
         self.status = format!("device disconnected ({err}); reconnecting…");
     }
 
-    /// Try to reopen the device. On success, restore the user's mix (the freshly
-    /// re-enumerated card powers up at its own defaults) and resume polling.
+    /// Try to reopen the device. On success, resume polling and bring the card
+    /// up to the right state: restore the cached mix if we had one (a replug
+    /// while running), or apply the startup defaults if this is the first
+    /// connection (the app started with no card).
     fn try_reconnect(&mut self) {
         match (self.reopen)() {
             Ok(device) => {
@@ -267,7 +286,12 @@ impl App {
                 self.watcher = Watcher::new();
                 self.connected = true;
                 self.next_watch = 0.0;
-                self.restore_mix();
+                if self.primed {
+                    self.restore_mix();
+                } else {
+                    self.apply_startup_defaults();
+                    self.primed = true;
+                }
                 "device reconnected".clone_into(&mut self.status);
             }
             Err(_) => {
@@ -287,6 +311,21 @@ impl App {
             // the following re-seed corrects the cache to match the hardware.
             let _ = self.device.set(control, index, value);
         }
+        self.sync_controls();
+    }
+
+    /// First connection when the app started with no card: there is nothing to
+    /// restore, so apply the shared default preset (if one is saved) and then
+    /// seed the cache from whatever the device now reports. With no default
+    /// preset saved, just read the device's current settings.
+    fn apply_startup_defaults(&mut self) {
+        if let Some(path) = config::default_preset_path() {
+            if path.exists() {
+                self.load_preset(&path, None);
+            }
+        }
+        // Always seed the cache from the device, whether a default was applied,
+        // missing, or failed to parse, so later restores have real values.
         self.sync_controls();
     }
 

@@ -14,6 +14,10 @@ version.
   disconnected" notice and a "reconnecting" status; it retries about once a
   second, and on replug reopens the card and re-applies the on-screen mix (which
   the re-enumerated device would otherwise have reset to its defaults).
+- **GUI** — the mixer also starts when the card is absent, showing the
+  disconnected notice until it appears. On that first connection it applies the
+  saved default preset (or, with none saved, reads the device as-is); when the
+  card is already running at startup it just reads its current settings.
 
 ## [0.1.0] - 2026-06-21
 

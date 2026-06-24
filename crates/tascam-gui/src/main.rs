@@ -31,9 +31,18 @@ fn open_device(mock: bool) -> Result<Us16x08<Box<dyn Backend>>> {
 
 fn main() -> Result<()> {
     let mock = std::env::args().skip(1).any(|a| a == "--mock");
-    let device = open_device(mock)?;
     // Lets the app reopen the device after a USB replug.
     let reopen: app::Reopen = Box::new(move || open_device(mock));
+    // Open the card now if we can. If it is absent, start disconnected with a
+    // placeholder backend (never read) and let the app connect when the card
+    // appears, applying the default preset then.
+    let (device, connected) = match reopen() {
+        Ok(device) => (device, true),
+        Err(_) => (
+            Us16x08::new(Box::new(MockBackend::new()) as Box<dyn Backend>),
+            false,
+        ),
+    };
 
     // Restore the saved window size before creating the window; an absent size
     // falls back to eframe's default. The app id is the Wayland app_id (the
@@ -50,7 +59,7 @@ fn main() -> Result<()> {
         "Tascam US-16x08 Mixer",
         options,
         Box::new(move |cc| {
-            let app = app::App::new(device, mock, reopen);
+            let app = app::App::new(device, mock, connected, reopen);
             // Apply the saved zoom; Ctrl +/- adjusts from here and Save default
             // remembers it.
             cc.egui_ctx.set_zoom_factor(app.zoom());

@@ -761,11 +761,18 @@ Meters do not move in the GUI:: Another program may be reading the meters. Close
 any running `tascamctl monitor` against the same device; run one meter reader at
 a time.
 
-The interface was unplugged:: The GUI keeps running. It shows a "reconnecting"
-status while the card is absent and reopens it automatically once it returns
-(about a second after the card re-enumerates). On reconnect it re-applies the mix
-shown on screen, since the device powers up at its own defaults. The `tascamctl`
-commands are one-shot and instead exit with an error if the card is gone.
+The interface was unplugged:: The GUI keeps running. It hides the controls behind
+a "Tascam US-16x08 is disconnected" notice while the card is absent and reopens it
+automatically once it returns (about a second after the card re-enumerates). On
+reconnect it re-applies the mix shown on screen, since the device powers up at its
+own defaults. The `tascamctl` commands are one-shot and instead exit with an error
+if the card is gone.
+
+The GUI was started with no interface attached:: It opens to the disconnected
+notice and waits. When the card appears it applies the saved default preset (see
+<<sec-gui-presets>>), or, if none is saved, simply reads the device's current
+settings. When the card is already attached at startup, the GUI reads its current
+settings and leaves them unchanged.
 
 A value will not go where expected:: Integer values are in display units and are
 clamped to each control's range (see <<sec-appendix-catalog>>). A bare leading `-`
