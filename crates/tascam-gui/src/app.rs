@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use eframe::egui;
 use tascam_us16x08::{
-    Backend, Control, Kind, Meters, NUM_CHANNELS, Preset, Scope, Us16x08, Value, Watcher,
+    Backend, Control, Kind, LoadTiming, Meters, NUM_CHANNELS, Preset, Scope, Us16x08, Value,
+    Watcher,
 };
 
 use crate::config::{self, GuiConfig};
@@ -27,6 +28,15 @@ const WATCH_INTERVAL_SECS: f64 = 0.5;
 /// How often to try reopening the device after it has gone away (e.g. the USB
 /// interface was unplugged). Slow enough not to spin while it is absent.
 const RECONNECT_INTERVAL_SECS: f64 = 1.0;
+/// Timing for a full-mixer load. `pace` spaces the per-control writes so the
+/// device's USB control channel is not overrun (sending ~280 back-to-back can
+/// drop some). `rounds`/`settle` restart the sequence if a write errors; the
+/// write-readiness gate means the first attempt usually succeeds.
+const LOAD_TIMING: LoadTiming = LoadTiming {
+    pace: Duration::from_millis(10),
+    rounds: 6,
+    settle: Duration::from_millis(50),
+};
 
 /// Reopens the device (real hardware or mock). Called to recover after the
 /// device disappears, so the closure can outlive any one connection.
@@ -280,38 +290,45 @@ impl App {
     /// while running), or apply the startup defaults if this is the first
     /// connection (the app started with no card).
     fn try_reconnect(&mut self) {
-        match (self.reopen)() {
-            Ok(device) => {
-                self.device = device;
-                self.watcher = Watcher::new();
-                self.connected = true;
-                self.next_watch = 0.0;
-                if self.primed {
-                    self.restore_mix();
-                } else {
-                    self.apply_startup_defaults();
-                    self.primed = true;
-                }
-                "device reconnected".clone_into(&mut self.status);
-            }
-            Err(_) => {
-                "device disconnected; waiting for it to return…".clone_into(&mut self.status);
-            }
+        let Ok(device) = (self.reopen)() else {
+            "device disconnected; waiting for it to return…".clone_into(&mut self.status);
+            return;
+        };
+        self.device = device;
+        // Trust the handle only once a control *write* round-trips. A card that
+        // has just re-enumerated answers reads while still silently dropping
+        // writes; restoring the mix then does nothing and the device sits muted.
+        // Stay disconnected and retry until writes actually land.
+        if !self.device.accepts_writes() {
+            self.connected = false;
+            "device returning…".clone_into(&mut self.status);
+            return;
+        }
+        self.watcher = Watcher::new();
+        self.connected = true;
+        self.next_watch = 0.0;
+        if self.primed {
+            self.restore_mix();
+        } else {
+            self.apply_startup_defaults();
+            self.primed = true;
+            "device reconnected".clone_into(&mut self.status);
         }
     }
 
-    /// Push every cached control value back to the device, then re-seed the
-    /// watcher and cache from what the device now reports. Used after a replug so
-    /// the restored card matches the mix shown in the UI.
+    /// Push the cached mix back to a just-reconnected device as one transaction:
+    /// master muted throughout, every write verified, restarting from the top on
+    /// any failure. Re-seed the cache afterwards so it matches the device exactly.
     fn restore_mix(&mut self) {
-        let entries: Vec<((Control, u32), Value)> =
-            self.cache.iter().map(|(&k, &v)| (k, v)).collect();
-        for ((control, index), value) in entries {
-            // A control the restored device does not expose is simply skipped;
-            // the following re-seed corrects the cache to match the hardware.
-            let _ = self.device.set(control, index, value);
-        }
+        let values: Vec<(Control, u32, Value)> =
+            self.cache.iter().map(|(&(c, i), &v)| (c, i, v)).collect();
+        let ok = self.device.restore_values_muted(&values, LOAD_TIMING);
         self.sync_controls();
+        self.status = if ok {
+            "device reconnected".to_owned()
+        } else {
+            "reconnected, but the mix could not be fully restored".to_owned()
+        };
     }
 
     /// First connection when the app started with no card: there is nothing to
@@ -352,7 +369,9 @@ impl App {
             .map_err(|e| e.to_string())
             .and_then(|text| serde_json::from_str::<Preset>(&text).map_err(|e| e.to_string()));
         match parsed {
-            Ok(preset) => match self.device.apply(&preset, channel) {
+            // Mute the master and verify each write, so a full load is silent
+            // while it applies and survives a device that is still settling.
+            Ok(preset) => match self.device.apply_muted(&preset, channel, LOAD_TIMING) {
                 Ok(report) => {
                     self.status = format!(
                         "loaded {} ({} applied, {} skipped)",

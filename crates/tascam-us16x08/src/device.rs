@@ -175,6 +175,37 @@ impl<B: Backend> Us16x08<B> {
         self.backend.set_int(name, 0, val)
     }
 
+    /// Whether the device currently accepts control *writes*, not just reads.
+    ///
+    /// A USB interface that has just re-enumerated answers meter and control
+    /// reads before it accepts writes; a mix applied during that window is
+    /// silently dropped, leaving the device at its (often muted) power-up state.
+    /// This flips the master mute to the opposite of its current value, checks
+    /// the change reads back, then restores the original value -- so a caller can
+    /// wait until writes truly land before restoring a mix. Returns `false` if
+    /// the round-trip cannot be confirmed (i.e. not ready yet).
+    ///
+    /// The master is left as it was found, so this is safe to call repeatedly
+    /// while polling for the device to come back.
+    pub fn accepts_writes(&mut self) -> bool {
+        if !self.is_present(Control::MasterMute) {
+            // Nothing safe to probe with; assume ready rather than block forever.
+            return true;
+        }
+        let Ok(original) = self.get(Control::MasterMute, 0) else {
+            return false;
+        };
+        let Value::Bool(was_muted) = original else {
+            return false;
+        };
+        let flipped = Value::Bool(!was_muted);
+        let confirmed = self.set(Control::MasterMute, 0, flipped).is_ok()
+            && matches!(self.get(Control::MasterMute, 0), Ok(v) if v == flipped);
+        // Restore the original state regardless of the outcome.
+        let _ = self.set(Control::MasterMute, 0, original);
+        confirmed
+    }
+
     /// Borrow the underlying backend (e.g. to call [`crate::AlsaBackend::wait`]).
     #[must_use]
     pub fn backend(&self) -> &B {

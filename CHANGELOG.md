@@ -7,6 +7,24 @@ version.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Reliable, silent full-mixer loads on a settling device.** Loading a whole
+  mixer (the GUI replug restore, *Load default* / *Load mixer*, and `tascamctl
+  load` / `default`) used to write each control once and ignore failures, so a
+  just-re-enumerated card — which answers reads while still silently dropping
+  writes — kept its power-up state (often muted), and the restore "did not always"
+  take or left the device silent. A full load now waits until a control write
+  actually round-trips, then applies the whole mixer as one transaction: mute the
+  master, write every control, and finally set the master mute to its loaded
+  value. If a write errors, the body restarts from muting the master; and the
+  master mute is *always* restored to its target at the end — even if the body
+  could not be fully written — so a failed or interrupted load is never left
+  silent. (A device that drops in and out on the USB bus can still interrupt a
+  load, but it will not be stuck muted.) Each control write is also paced (10 ms
+  apart) so sending the whole mixer back-to-back does not outrun the device's USB
+  control channel and silently drop values.
+
 ## [0.2.0] - 2026-06-24
 
 ### Added

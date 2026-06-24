@@ -10,11 +10,25 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use directories::ProjectDirs;
 use tascam_us16x08::{
-    Backend, Control, Kind, Meters, NUM_CHANNELS, NUM_OUTPUTS, Preset, Scope, Us16x08, Value,
-    Watcher, units,
+    Backend, Control, Kind, LoadTiming, Meters, NUM_CHANNELS, NUM_OUTPUTS, Preset, Scope, Us16x08,
+    Value, Watcher, units,
 };
 
 use crate::value::{format_value, parse_value};
+
+/// Timing for a preset load. `pace` spaces the per-control writes so the device
+/// is not overrun; `rounds`/`settle` restart the sequence on a failed write. A
+/// card re-enumerated moments earlier (e.g. by the udev auto-default rule)
+/// answers reads but refuses writes until it settles.
+const LOAD_TIMING: LoadTiming = LoadTiming {
+    pace: Duration::from_millis(10),
+    rounds: 6,
+    settle: Duration::from_millis(50),
+};
+/// How many times to poll for write-readiness before loading.
+const WRITABLE_POLLS: u32 = 40;
+/// Wait between write-readiness polls.
+const WRITABLE_SETTLE: Duration = Duration::from_millis(50);
 
 /// Print the full control catalog. Backend-independent.
 pub(crate) fn list() {
@@ -192,7 +206,12 @@ pub(crate) fn load<B: Backend>(
     let text = fs::read_to_string(path).with_context(|| format!("reading {path:?}"))?;
     let preset: Preset =
         serde_json::from_str(&text).with_context(|| format!("parsing {path:?}"))?;
-    let report = dev.apply(&preset, channel)?;
+    // When the udev rule fires this right after the card re-enumerates, the
+    // device answers reads but silently drops writes for a moment. Wait until a
+    // write round-trips, then apply with the master muted and every write
+    // verified and retried.
+    wait_until_writable(dev);
+    let report = dev.apply_muted(&preset, channel, LOAD_TIMING)?;
     eprintln!("applied {} control(s)", report.applied);
     if !report.skipped.is_empty() {
         eprintln!(
@@ -202,6 +221,17 @@ pub(crate) fn load<B: Backend>(
         );
     }
     Ok(())
+}
+
+/// Poll until the device accepts control writes (or the budget runs out), so a
+/// load right after re-enumeration does not silently apply to nothing.
+fn wait_until_writable<B: Backend>(dev: &mut Us16x08<B>) {
+    for _ in 0..WRITABLE_POLLS {
+        if dev.accepts_writes() {
+            return;
+        }
+        sleep(WRITABLE_SETTLE);
+    }
 }
 
 /// Path to the shared default-mixer preset, in the same config directory the
