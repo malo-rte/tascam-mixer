@@ -406,6 +406,69 @@ Loading before a default exists is an error that names the expected file. The
 file is shared with the GUI's *Save default* and *Load default* buttons (see
 <<sec-gui-presets>>).
 
+[[sec-cli-default-udev]]
+=== Applying the default automatically on connect
+
+With a `udev` rule you can have the default preset applied every time the
+interface is plugged in, with nothing running -- handy because the device powers
+up at its own factory defaults each time it is connected. The rule reacts to the
+card appearing and hands off to a small `systemd` service that runs `tascamctl
+default`. (Handing off to `systemd` matters: `udev` runs commands in a stripped
+environment and kills anything still running when the event finishes, so it is
+the wrong place to run the tool directly.)
+
+This complements the GUI's own behaviour: the running GUI already restores its
+on-screen mix on replug (see <<sec-appendix-trouble>>); this rule covers the case
+where no GUI is running.
+
+First make sure a default exists and note where `tascamctl` is installed:
+
+[source,bash]
+----
+tascamctl default --save                 # capture the current mixer as the default
+command -v tascamctl                      # e.g. /usr/local/bin/tascamctl
+----
+
+Create the `udev` rule `/etc/udev/rules.d/99-tascam-us16x08.rules`. It matches the
+card by its ALSA id (`US16x08`) and triggers the service when the control device
+appears, which is the point at which the card is ready to be opened:
+
+[source]
+----
+ACTION=="add", SUBSYSTEM=="sound", KERNEL=="controlC[0-9]*", \
+  ATTRS{id}=="US16x08", TAG+="systemd", \
+  ENV{SYSTEMD_WANTS}+="tascam-default.service"
+----
+
+Create the service `/etc/systemd/system/tascam-default.service`. Set `User=` to
+your login account: the command then reads *your* default preset from
+`~/.config/tascam-mixer/default-preset.json`, the same file the tools save. Adjust
+`ExecStart` to the path from `command -v` above:
+
+[source,ini]
+----
+[Unit]
+Description=Load the Tascam US-16x08 default mixer preset
+
+[Service]
+Type=oneshot
+User=YOUR_USERNAME
+ExecStart=/usr/local/bin/tascamctl default
+----
+
+The service is started on demand by the rule, so it is neither enabled nor given
+an `[Install]` section. Reload both subsystems to pick up the new files:
+
+[source,bash]
+----
+sudo udevadm control --reload
+sudo systemctl daemon-reload
+----
+
+Replug the interface to test. `journalctl -u tascam-default.service` shows whether
+the load ran and what it applied. If the open occasionally races the device
+becoming ready, add `ExecStartPre=/bin/sleep 1` to the service.
+
 [[sec-gui]]
 == Using the graphical mixer
 

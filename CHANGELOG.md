@@ -19,6 +19,11 @@ version.
   saved default preset (or, with none saved, reads the device as-is); when the
   card is already running at startup it just reads its current settings.
 
+### Documentation
+
+- **Manual** — a recipe for applying the default preset automatically on connect
+  via a `udev` rule and a `systemd` service that runs `tascamctl default`.
+
 ## [0.1.0] - 2026-06-21
 
 Initial release: a Rust rewrite of the Tascam US-16x08 DSP mixer, as a workspace
