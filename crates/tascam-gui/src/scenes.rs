@@ -63,15 +63,24 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
         return;
     }
 
+    let mut to_save: Option<PathBuf> = None;
     let mut to_load: Option<PathBuf> = None;
     let mut to_delete: Option<PathBuf> = None;
     egui::Grid::new("scenes-grid")
         .striped(true)
-        .num_columns(3)
+        .num_columns(4)
         .spacing([12.0, 6.0])
         .show(ui, |ui| {
             for path in &scenes {
                 ui.label(scene_label(path));
+                // Save: overwrite this scene with the current mixer.
+                if ui
+                    .button("Save")
+                    .on_hover_text("Overwrite this scene with the current mixer")
+                    .clicked()
+                {
+                    to_save = Some(path.clone());
+                }
                 if ui.button("Load").clicked() {
                     to_load = Some(path.clone());
                 }
@@ -82,6 +91,9 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
             }
         });
 
+    if let Some(path) = to_save {
+        app.update_scene(&path);
+    }
     if let Some(path) = to_load {
         app.load_scene(&path);
     }

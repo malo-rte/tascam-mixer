@@ -548,8 +548,9 @@ settings directory, with no fixed limit on how many.
 To save the current mixer, type a name and click *Save current mix* (or press
 Enter); the snapshot is written to a `<name>.json` file in the scenes directory.
 Saving with an existing name overwrites that scene. Each saved scene appears as a
-row with *Load*, which applies it to the whole mixer, and *Delete*, which removes
-the file after a confirmation.
+row with three buttons: *Save* overwrites that scene with the current mixer
+(updating it in place, keeping its name), *Load* applies it to the whole mixer,
+and *Delete* removes the file after a confirmation.
 
 A scene holds the same whole-mixer state as a mixer preset (master, routing, and
 all 16 channel strips), plus the stereo-link grouping, so loading it restores
@@ -684,7 +685,7 @@ A Lua-configured Hyprland uses the equivalent
 | Meter bridge (top) | 16 channel columns (number, level meter, mute) and the master level meters with a mute button, always visible. Click a number to focus that channel.
 | Toolbar | `Channel` / `Routing` / `Scenes` tab buttons and the `Presets` menu.
 | Channel editor (centre) | INPUT, EQ, and Compressor boxes for the focused channel or linked pair.
-| Scenes tab (centre) | A name field with `Save current mix`, and a list of saved scenes each with `Load` and `Delete`.
+| Scenes tab (centre) | A name field with `Save current mix`, and a list of saved scenes each with `Save` (overwrite), `Load`, and `Delete`.
 | Output panel (right) | Master fader, `DSP bypass` and `Buss out` switches, `Save default` / `Load default` buttons.
 | Status line (bottom) | The active device and the most recent error or result message.
 |===

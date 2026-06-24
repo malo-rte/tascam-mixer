@@ -485,6 +485,11 @@ impl App {
         self.load_preset(path, None);
     }
 
+    /// Overwrite an existing scene file with the current mixer, keeping its name.
+    pub(crate) fn update_scene(&mut self, path: &Path) {
+        self.save_preset(path, None);
+    }
+
     /// Delete a saved scene file.
     pub(crate) fn delete_scene(&mut self, path: &Path) {
         self.status = match std::fs::remove_file(path) {
