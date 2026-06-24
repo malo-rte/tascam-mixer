@@ -3,7 +3,7 @@
 :doc-status:    Draft
 :doc-date:      2026-06-18
 :doc-authors:   Mats Loman
-:applies-to-version: 0.1.0
+:applies-to-version: 0.2.0
 :revnumber:     {doc-version}
 :revdate:       {doc-date}
 :title-page:
@@ -39,7 +39,8 @@ panel, and an output-routing tab. Suited to interactive mixing.
 Both tools act on the same hardware controls and share the same preset and
 default-preset files, so they can be used interchangeably.
 
-This manual applies to the Tascam US-16x08 mixer tools version 0.1.0. It is for
+This manual applies to the Tascam US-16x08 mixer tools version
+{applies-to-version}. It is for
 anyone operating the interface on Linux. Read <<sec-glance>> first for the mental
 model, then the chapter for the tool you use (<<sec-cli>> or <<sec-gui>>). The
 reference chapters (<<sec-cli-ref>>, <<sec-gui-ref>>) and the verified control
