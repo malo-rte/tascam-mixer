@@ -7,6 +7,8 @@ version.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-24
+
 ### Fixed
 
 - **Reliable, silent full-mixer loads on a settling device.** Loading a whole
@@ -83,6 +85,7 @@ only, via the `snd-usb-audio` driver.
 - The tools drive the DSP mixer control surface only; they do not stream audio.
   Capture to the computer is taken pre-DSP (the dry input).
 
-[Unreleased]: https://github.com/malo-rte/tascam-mixer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/malo-rte/tascam-mixer/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/malo-rte/tascam-mixer/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/malo-rte/tascam-mixer/releases/tag/v0.1.0
