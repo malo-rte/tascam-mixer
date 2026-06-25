@@ -13,7 +13,7 @@ jobs:
     name: fmt / clippy / test / doc
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps (alsa feature + eframe/winit)
         run: |
           sudo apt-get update
@@ -37,7 +37,7 @@ jobs:
     name: build + test on MSRV (1.85)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps (alsa feature + eframe/winit)
         run: |
           sudo apt-get update
@@ -63,5 +63,5 @@ jobs:
     name: cargo-deny (advisories / licenses / sources)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
