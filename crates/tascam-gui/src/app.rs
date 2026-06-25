@@ -115,7 +115,7 @@ const RECONNECT_INTERVAL_SECS: f64 = 1.0;
 /// drop some). `rounds`/`settle` restart the sequence if a write errors; the
 /// write-readiness gate means the first attempt usually succeeds.
 const LOAD_TIMING: LoadTiming = LoadTiming {
-    pace: Duration::from_millis(10),
+    pace: Duration::from_millis(2),
     rounds: 6,
     settle: Duration::from_millis(50),
 };
