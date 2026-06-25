@@ -31,31 +31,37 @@ const MASTER_R: u32 = 17;
 const CLIP_THRESHOLD: f32 = 0.98;
 /// Seconds the clip indicator stays lit after a clip.
 const CLIP_HOLD: f64 = 1.5;
-/// How fast the held peak marker falls, in bar fractions per second.
-const PEAK_DECAY: f32 = 0.6;
+/// Seconds the held peak stays put before it starts to fall.
+const PEAK_HOLD: f64 = 2.0;
+/// How fast the held peak marker falls once the hold expires, in bar fractions
+/// per second.
+const PEAK_DECAY: f32 = 0.5;
 
 /// Per-meter peak-hold and clip state, advanced once per frame.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct PeakHold {
     /// Held peak as a 0..=1 bar fraction.
     peak: f32,
+    /// Clock time (eframe seconds) until which the peak is held before decaying.
+    hold_until: f64,
     /// Clock time (eframe seconds) until which the clip indicator shows.
     clip_until: f64,
 }
 
 impl PeakHold {
     /// Fold in the current bar `fraction` at time `now`, `dt` seconds after the
-    /// last update: latch a clip and let the held peak rise instantly but fall
-    /// slowly.
+    /// last update: latch a clip; let the held peak rise instantly, stay put for
+    /// [`PEAK_HOLD`], then fall slowly.
     fn observe(&mut self, fraction: f32, now: f64, dt: f32) {
         if fraction >= CLIP_THRESHOLD {
             self.clip_until = now + CLIP_HOLD;
         }
-        self.peak = if fraction >= self.peak {
-            fraction
-        } else {
-            (self.peak - PEAK_DECAY * dt).max(fraction)
-        };
+        if fraction >= self.peak {
+            self.peak = fraction;
+            self.hold_until = now + PEAK_HOLD;
+        } else if now >= self.hold_until {
+            self.peak = (self.peak - PEAK_DECAY * dt).max(fraction);
+        }
     }
 
     fn clipping(self, now: f64) -> bool {
