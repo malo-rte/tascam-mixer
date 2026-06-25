@@ -72,6 +72,7 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
 
     let mut to_save: Option<PathBuf> = None;
     let mut to_load: Option<PathBuf> = None;
+    let mut to_copy: Option<PathBuf> = None;
     let mut to_delete: Option<PathBuf> = None;
     let overwrite_hint = match kind {
         PresetKind::Scene => "Overwrite this scene with the current mixer",
@@ -79,9 +80,11 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
         PresetKind::Eq => "Overwrite this preset with the current EQ",
         PresetKind::Comp => "Overwrite this preset with the current compressor",
     };
+    // The per-channel kinds can be copied into the paste clipboard.
+    let copyable = kind.clipboard_group().is_some();
     egui::Grid::new("preset-grid")
         .striped(true)
-        .num_columns(4)
+        .num_columns(if copyable { 5 } else { 4 })
         .spacing([12.0, 6.0])
         .show(ui, |ui| {
             for path in &presets {
@@ -91,6 +94,14 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
                 }
                 if ui.button("Load").clicked() {
                     to_load = Some(path.clone());
+                }
+                if copyable
+                    && ui
+                        .button("Copy")
+                        .on_hover_text("Copy to the clipboard, then Paste onto a channel")
+                        .clicked()
+                {
+                    to_copy = Some(path.clone());
                 }
                 if ui.button("Delete").clicked() {
                     to_delete = Some(path.clone());
@@ -104,6 +115,9 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
     }
     if let Some(path) = to_load {
         app.load_named_preset(kind, &path);
+    }
+    if let Some(path) = to_copy {
+        app.copy_preset(kind, &path);
     }
     if let Some(path) = to_delete {
         app.pending_delete = Some(path);

@@ -24,6 +24,8 @@ version.
   channel's EQ or compressor section, like the channel-presets tab but per
   section. Stored as partial strip presets, so `tascamctl load` can apply one to
   a channel too.
+- **GUI** — a *Copy* button on each channel/EQ/compressor preset row that copies
+  the preset into the editor's copy/paste clipboard, ready to paste onto channels.
 - **GUI** — a *Reset channel* button that returns the whole focused channel to a
   neutral default (flat EQ, no compression, centre pan, fader fully down at
   -127 dB, switches off), alongside the existing per-section EQ and Compressor

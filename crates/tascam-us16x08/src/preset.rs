@@ -138,6 +138,30 @@ fn from_scalar(control: Control, scalar: &Scalar) -> Result<Value> {
     }
 }
 
+impl Preset {
+    /// Resolve a [`Preset::Strip`]'s controls into `(control, value)` pairs,
+    /// skipping keys this build does not recognise or values that do not fit
+    /// their control. A [`Preset::Mixer`] yields nothing -- it is not a single
+    /// strip.
+    ///
+    /// Useful for copying a saved strip (or a partial EQ / compressor strip) into
+    /// a paste buffer without touching a device.
+    #[must_use]
+    pub fn strip_values(&self) -> Vec<(Control, Value)> {
+        let Preset::Strip { controls, .. } = self else {
+            return Vec::new();
+        };
+        controls
+            .iter()
+            .filter_map(|(key, scalar)| {
+                let control = Control::from_key(key)?;
+                let value = from_scalar(control, scalar).ok()?;
+                Some((control, value))
+            })
+            .collect()
+    }
+}
+
 impl<B: Backend> Us16x08<B> {
     /// Capture one channel's per-channel controls as a [`Preset::Strip`].
     ///
@@ -684,6 +708,18 @@ mod tests {
         fn set_bool(&mut self, name: &str, index: u32, val: bool) -> Result<()> {
             self.inner.set_bool(name, index, val)
         }
+    }
+
+    #[test]
+    fn strip_values_resolves_controls() {
+        let mut a = dev();
+        a.set(Control::Pan, 3, Value::Int(200)).unwrap();
+        a.set(Control::EqLowVolume, 3, Value::Int(20)).unwrap();
+        let values = a.capture_strip(3).unwrap().strip_values();
+        assert!(values.contains(&(Control::Pan, Value::Int(200))));
+        assert!(values.contains(&(Control::EqLowVolume, Value::Int(20))));
+        // A mixer preset is not a single strip, so it yields nothing.
+        assert!(a.capture_mixer().unwrap().strip_values().is_empty());
     }
 
     #[test]

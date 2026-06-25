@@ -582,8 +582,10 @@ compressor) as strip presets stored in the settings directory, with no fixed
 limit. It works on the channel currently focused in the editor: *Save this
 channel* (or the per-row *Save*) captures that channel, and *Load* applies a
 preset to it. As with scenes, each saved preset has *Save* (overwrite), *Load*,
-and *Delete*. Because a strip preset is not tied to a channel, you can save from
-one channel and load onto another -- the quick way to copy a channel's settings.
+and *Delete*, plus a *Copy* button that copies the preset into the channel
+clipboard so it can be pasted onto channels in the editor (see <<sec-gui-editor>>).
+Because a strip preset is not tied to a channel, you can save from one channel and
+load onto another -- the quick way to copy a channel's settings.
 
 [[sec-gui-section-presets]]
 === The EQ and compressor presets tabs
@@ -594,6 +596,8 @@ bands and the enable switch); *Comp presets* saves and recalls a channel's
 compressor (its parameters and enable). Each captures from and applies to the
 focused channel, with the same *Save* / *Load* / *Delete* per row. They are handy
 for building a library of EQ or compressor settings to drop onto any channel.
+Each row also has a *Copy* button that copies the preset into the EQ or compressor
+clipboard, ready to *Paste* onto a channel from the editor.
 
 A section preset is stored as a channel strip preset that holds only that
 section's controls, so `tascamctl load` can apply one to a channel too -- it sets
@@ -727,7 +731,7 @@ A Lua-configured Hyprland uses the equivalent
 | Toolbar | `Channel` / `Routing` / `Scenes` / `Channel presets` / `EQ presets` / `Comp presets` tab buttons.
 | Channel editor (centre) | INPUT, EQ, and Compressor boxes for the focused channel or linked pair.
 | Scenes tab (centre) | A name field with `Save current mix`, and a list of saved scenes each with `Save` (overwrite), `Load`, and `Delete`.
-| Channel presets tab (centre) | A name field with `Save this channel`, and a list of saved channel presets each with `Save` (overwrite), `Load`, and `Delete`.
+| Channel presets tab (centre) | A name field with `Save this channel`, and a list of saved channel presets each with `Save` (overwrite), `Load`, `Copy` (to the clipboard), and `Delete`.
 | EQ / Comp presets tabs (centre) | As the channel presets tab, but for one channel's EQ or compressor section.
 | Output panel (right) | Master fader, `DSP bypass` and `Buss out` switches, `Save default` / `Load default` buttons.
 | Status line (bottom) | The active device and the most recent error or result message.

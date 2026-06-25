@@ -40,6 +40,20 @@ pub(crate) enum PresetKind {
     Comp,
 }
 
+impl PresetKind {
+    /// The copy/paste clipboard a preset of this kind can be copied into, so it
+    /// can be pasted onto a channel. `None` for a scene (a whole mixer is not a
+    /// single channel).
+    pub(crate) fn clipboard_group(self) -> Option<Group> {
+        match self {
+            PresetKind::Strip => Some(Group::Channel),
+            PresetKind::Eq => Some(Group::Eq),
+            PresetKind::Comp => Some(Group::Comp),
+            PresetKind::Scene => None,
+        }
+    }
+}
+
 /// A group of per-channel controls that can be copied from one channel and
 /// pasted onto another, via the in-app clipboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -624,6 +638,23 @@ impl App {
         self.write_named(kind, path);
     }
 
+    /// Copy a saved preset of `kind` into the matching copy/paste clipboard, so
+    /// it can be pasted onto channels. No-op for a scene (no channel clipboard).
+    pub(crate) fn copy_preset(&mut self, kind: PresetKind, path: &Path) {
+        let Some(group) = kind.clipboard_group() else {
+            return;
+        };
+        let values = match read_strip_values(path) {
+            Ok(values) => values,
+            Err(e) => {
+                self.status = format!("copy failed: {e}");
+                return;
+            }
+        };
+        *self.clipboard_mut(group) = Some(values);
+        self.status = format!("copied {} from {}", group.label(), preset_label(path));
+    }
+
     /// Write a preset of `kind` to `path`: a scene or full strip via
     /// [`Self::save_preset`]; an EQ or compressor preset as a strip holding only
     /// that section's controls.
@@ -945,6 +976,14 @@ fn extract_links(value: &serde_json::Value) -> Option<[bool; 8]> {
         *slot = item.as_bool()?;
     }
     Some(links)
+}
+
+/// Read a strip preset file and resolve it to `(control, value)` pairs for the
+/// paste clipboard. (EQ / compressor presets are partial strips.)
+fn read_strip_values(path: &Path) -> Result<Vec<(Control, Value)>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let preset: Preset = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    Ok(preset.strip_values())
 }
 
 /// The per-channel controls a copy/paste of `group` carries.
