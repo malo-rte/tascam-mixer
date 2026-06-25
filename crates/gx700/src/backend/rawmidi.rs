@@ -266,7 +266,9 @@ impl RawMidi {
                     // settled; or after a long silence (in case the last block
                     // was not recognised); or, with nothing yet, after the reply
                     // budget.
-                    let have_last = out.iter().any(|(addr, _)| addr.get(2) == Some(&LAST_SUB_BLOCK));
+                    let have_last = out
+                        .iter()
+                        .any(|(addr, _)| addr.get(2) == Some(&LAST_SUB_BLOCK));
                     if !out.is_empty() && have_last && idle >= DRAIN_QUIET_POLLS {
                         break;
                     }
