@@ -598,6 +598,10 @@ A section preset is stored as a channel strip preset that holds only that
 section's controls, so `tascamctl load` can apply one to a channel too -- it sets
 just the saved controls and leaves the rest of the channel untouched.
 
+Loading a channel, EQ, or compressor preset onto a channel that is part of a
+linked pair applies it to both channels of the pair, so the link stays
+consistent; the pair's hard-left/right panning is kept.
+
 [[sec-gui-link]]
 === Stereo link
 

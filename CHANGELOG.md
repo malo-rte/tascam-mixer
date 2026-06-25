@@ -36,6 +36,9 @@ version.
 
 ### Fixed
 
+- **GUI** — loading a channel, EQ, or compressor preset onto a linked channel now
+  applies it to both halves of the pair (keeping the pair hard-panned), instead
+  of changing only one side.
 - **GUI** — the stereo-link grouping is now saved inside every whole-mixer preset
   and scene (as an extra `links` field that `tascamctl` ignores), so loading a
   preset, scene, or the default restores which pairs are linked. Previously the

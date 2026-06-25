@@ -488,20 +488,50 @@ impl App {
                 return;
             }
         };
+        // A per-channel preset loaded onto a linked channel applies to both
+        // halves of the pair, so the link stays consistent.
+        let pair_low = match channel {
+            Some(ch) if self.linked(ch) => Some(ch & !1),
+            _ => None,
+        };
+        let targets: Vec<Option<u32>> = match pair_low {
+            Some(low) => vec![Some(low), Some(low + 1)],
+            None => vec![channel],
+        };
         // Mute the master and verify each write, so a full load is silent while
         // it applies and survives a device that is still settling.
-        match self.device.apply_muted(&preset, channel, LOAD_TIMING) {
-            Ok(report) => {
-                self.status = format!(
-                    "loaded {} ({} applied, {} skipped)",
-                    path.display(),
-                    report.applied,
-                    report.skipped.len()
-                );
-                self.sync_controls();
+        let mut applied = 0;
+        let mut skipped = 0;
+        let mut error = None;
+        for target in targets {
+            match self.device.apply_muted(&preset, target, LOAD_TIMING) {
+                Ok(report) => {
+                    applied = report.applied;
+                    skipped = report.skipped.len();
+                }
+                Err(e) => {
+                    error = Some(e.to_string());
+                    break;
+                }
             }
-            Err(e) => self.status = format!("load failed: {e}"),
         }
+        if let Some(e) = error {
+            self.status = format!("load failed: {e}");
+            return;
+        }
+        // Keep a linked pair hard-panned: a strip preset carries one channel's
+        // pan, which would otherwise collapse the stereo image onto one side.
+        if let Some(low) = pair_low {
+            self.write_one(Control::Pan, low, Value::Int(0));
+            self.write_one(Control::Pan, low + 1, Value::Int(254));
+        }
+        self.sync_controls();
+        self.status = format!(
+            "loaded {} ({} applied, {} skipped)",
+            path.display(),
+            applied,
+            skipped
+        );
     }
 
     /// Save the whole mixer as the shared default preset (read back by the CLI
