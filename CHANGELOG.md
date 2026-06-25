@@ -10,8 +10,9 @@ version.
 ### Added
 
 - **GUI** — meter peak-hold and a clip indicator: each level meter (channels and
-  master) shows a held peak marker that falls back slowly, and a red cap at the
-  top that latches briefly when the meter reaches full scale.
+  master) shows a held peak marker that holds, then falls back slowly; it turns
+  red when the held peak reached clipping, and a red cap latches at the top of the
+  meter when it hits full scale.
 - **GUI** — `tascam-mixer` now parses its arguments with clap, so `--version` and
   `--help` work (alongside the existing `--mock`).
 

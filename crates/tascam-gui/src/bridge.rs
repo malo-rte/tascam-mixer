@@ -211,14 +211,16 @@ pub(crate) fn meter_bar(ui: &mut egui::Ui, fraction: f32, peak: PeakHold, now: f
     let fill = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - height), rect.max);
     painter.rect_filled(fill, 2.0, egui::Color32::from_rgb(70, 200, 90));
 
-    // Held peak: a thin line that rises with the level and falls slowly.
+    // Held peak: a thin line that rises with the level and falls slowly. It is
+    // red when the held peak reached clipping, yellow otherwise.
     if peak.peak > 0.001 {
         let y = rect.bottom() - rect.height() * peak.peak;
-        painter.hline(
-            rect.x_range(),
-            y,
-            egui::Stroke::new(1.5, egui::Color32::from_rgb(235, 225, 90)),
-        );
+        let color = if peak.peak >= CLIP_THRESHOLD {
+            egui::Color32::from_rgb(235, 60, 60)
+        } else {
+            egui::Color32::from_rgb(235, 225, 90)
+        };
+        painter.hline(rect.x_range(), y, egui::Stroke::new(1.5, color));
     }
     // Clip: a red cap at the top, latched for a moment after a clip.
     if peak.clipping(now) {

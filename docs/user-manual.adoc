@@ -497,8 +497,9 @@ The meter bridge shows all 16 input channels and the master, always visible at
 the top. Each channel column has its name (if set, above the number, truncated
 with the full name on hover), a number label, a level meter, and *M* (mute) and
 *S* (solo) buttons. Each meter carries a held peak marker (a line that rises with
-the level and falls back slowly) and a red clip cap at the top that lights
-briefly when the meter reaches full scale. Click a channel's number to focus it in the editor below; the
+the level, holds, then falls back slowly; it turns red when the held peak
+reached clipping) and a red clip cap at the top that lights briefly when the
+meter reaches full scale. Click a channel's number to focus it in the editor below; the
 focused channel (or its linked pair) is highlighted. *S* solos the channel: while
 any channel is soloed, the others are muted, and clearing solo restores the mutes
 that were in place before. The master level meters and the master mute button sit
