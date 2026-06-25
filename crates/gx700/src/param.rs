@@ -87,6 +87,29 @@ impl Block {
         }
     }
 
+    /// The block whose [`Self::base`] is `base`, or `None` if none matches. Used
+    /// to label chain-order bytes.
+    #[must_use]
+    pub const fn from_base(base: u8) -> Option<Block> {
+        Some(match base {
+            0x00 => Block::LevelChain,
+            0x01 => Block::Compressor,
+            0x02 => Block::Wah,
+            0x03 => Block::Distortion,
+            0x04 => Block::Preamp,
+            0x05 => Block::Loop,
+            0x06 => Block::Equalizer,
+            0x07 => Block::SpeakerSim,
+            0x08 => Block::NoiseSuppressor,
+            0x09 => Block::Modulation,
+            0x0A => Block::Delay,
+            0x0B => Block::Chorus,
+            0x0C => Block::TremoloPan,
+            0x0D => Block::Reverb,
+            _ => return None,
+        })
+    }
+
     /// A human-readable block label, for listings.
     #[must_use]
     pub const fn label(self) -> &'static str {

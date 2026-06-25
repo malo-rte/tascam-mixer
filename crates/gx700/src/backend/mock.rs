@@ -60,6 +60,18 @@ impl Transport for MockTransport {
         Ok(out)
     }
 
+    fn request_blocks(&mut self, addr: &[u8], _size: usize) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        // Return every stored entry in the same area+patch (first two address
+        // bytes), mirroring how the hardware streams a whole patch's sub-blocks.
+        let prefix = addr.get(..2).unwrap_or(addr);
+        Ok(self
+            .store
+            .iter()
+            .filter(|(k, _)| k.starts_with(prefix))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect())
+    }
+
     fn program_change(&mut self, program: u8) -> Result<()> {
         self.program = program & 0x7f;
         Ok(())

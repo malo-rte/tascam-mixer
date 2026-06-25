@@ -198,6 +198,52 @@ impl RawMidi {
         }
         Err(Error::Timeout)
     }
+
+    /// Collect every DT1 the device streams, until it has been silent for a
+    /// drain-quiet window (after at least one message). Each is split into its
+    /// 4-byte address and the data that follows.
+    fn collect_dt1_stream(&mut self) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        const ADDR_LEN: usize = 4;
+        let mut framer = Framer::new();
+        let mut buf = [0u8; 256];
+        let mut out: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+        let mut idle = 0u32;
+        let mut waited = 0u32;
+        loop {
+            match self.input.io().read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    idle = 0;
+                    let chunk = buf.get(..n).unwrap_or(&[]);
+                    for msg in framer.push(chunk) {
+                        let Ok(parsed) = sysex::parse_roland(&msg) else {
+                            continue;
+                        };
+                        if parsed.command != DT1 {
+                            continue;
+                        }
+                        let split = parsed.body.len().min(ADDR_LEN);
+                        let (addr, data) = parsed.body.split_at(split);
+                        out.push((addr.to_vec(), data.to_vec()));
+                    }
+                }
+                _ => {
+                    idle = idle.saturating_add(1);
+                    waited = waited.saturating_add(1);
+                    if !out.is_empty() && idle >= DRAIN_QUIET_POLLS {
+                        break;
+                    }
+                    if out.is_empty() && waited >= REPLY_POLLS {
+                        break;
+                    }
+                    std::thread::sleep(POLL_INTERVAL);
+                }
+            }
+        }
+        if out.is_empty() {
+            return Err(Error::Timeout);
+        }
+        Ok(out)
+    }
 }
 
 impl Transport for RawMidi {
@@ -221,6 +267,21 @@ impl Transport for RawMidi {
         let mut out = self.read_dt1_reply(addr)?;
         out.resize(len, 0);
         Ok(out)
+    }
+
+    fn request_blocks(&mut self, addr: &[u8], size: usize) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.drain_input();
+        // Encode size as 7-bit bytes, big-endian, across the size field (the same
+        // width as the address). A single low byte would truncate e.g. 0x200 to 0.
+        let mut sz = vec![0u8; addr.len().max(1)];
+        let mut remaining = size;
+        for byte in sz.iter_mut().rev() {
+            *byte = u8::try_from(remaining & 0x7f).unwrap_or(0);
+            remaining >>= 7;
+        }
+        let msg = sysex::build_rq1(self.device_id, addr, &sz);
+        self.write_all(&msg)?;
+        self.collect_dt1_stream()
     }
 
     fn program_change(&mut self, program: u8) -> Result<()> {

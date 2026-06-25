@@ -4,8 +4,9 @@
 use std::fs;
 
 use anyhow::{Context, Result};
-use rackctl_gx700::{Gx700, Kind, Param, Transport, param};
+use rackctl_gx700::{Gx700, Kind, Param, RawPatch, Transport, param};
 
+use crate::config;
 use crate::value::{format_value, parse_value};
 
 /// Print the full parameter catalog. Backend-independent.
@@ -72,25 +73,77 @@ pub(crate) fn set<T: Transport>(dev: &mut Gx700<T>, key: &str, raw_value: &str) 
     Ok(())
 }
 
-/// Capture the patch buffer to a JSON file, or to standard output if `path` is
-/// `None`.
-pub(crate) fn dump<T: Transport>(dev: &mut Gx700<T>, file: Option<&str>) -> Result<()> {
-    let patch = dev.capture_patch()?;
-    let json = serde_json::to_string_pretty(&patch).context("serializing patch")?;
-    match file {
-        Some(file) => fs::write(file, json).with_context(|| format!("writing {file:?}"))?,
-        None => println!("{json}"),
-    }
+/// Print a patch in readable form: the current sound, or device slot `patch`.
+pub(crate) fn dump_device<T: Transport>(dev: &mut Gx700<T>, patch: Option<u16>) -> Result<()> {
+    let raw = read_from_device(dev, patch)?;
+    print!("{}", raw.describe());
     Ok(())
 }
 
-/// Load a JSON patch file and apply it to the device.
-pub(crate) fn load<T: Transport>(dev: &mut Gx700<T>, file: &str) -> Result<()> {
-    let text = fs::read_to_string(file).with_context(|| format!("reading {file:?}"))?;
-    let patch = serde_json::from_str(&text).with_context(|| format!("parsing {file:?}"))?;
-    let applied = dev.apply_patch(&patch)?;
-    eprintln!("applied {applied} parameter(s)");
+/// Print a saved patch file in readable form. Backend-free.
+pub(crate) fn dump_file(name: &str) -> Result<()> {
+    print!("{}", read_saved(name)?.describe());
     Ok(())
+}
+
+/// Save a whole patch (the current sound, or device slot `patch`) to disk as a
+/// lossless JSON file under the gx700 patches directory.
+pub(crate) fn save<T: Transport>(dev: &mut Gx700<T>, name: &str, slot: Option<u16>) -> Result<()> {
+    let raw = read_from_device(dev, slot)?;
+    let path = config::patch_path(name).context("could not determine the patches directory")?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let json = serde_json::to_string_pretty(&raw).context("serializing patch")?;
+    fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
+    eprintln!("saved {:?} to {}", raw.name, path.display());
+    Ok(())
+}
+
+/// Load a saved whole-patch file onto the device: the current sound, or (with
+/// `to_patch`) a user patch memory slot (which it overwrites).
+pub(crate) fn load<T: Transport>(
+    dev: &mut Gx700<T>,
+    name: &str,
+    to_patch: Option<u16>,
+) -> Result<()> {
+    let raw = read_saved(name)?;
+    let blocks = match to_patch {
+        Some(slot) => dev.write_patch(slot, &raw)?,
+        None => dev.write_current_patch(&raw)?,
+    };
+    let dest = to_patch.map_or_else(
+        || "the current sound".to_owned(),
+        |slot| format!("patch memory {slot}"),
+    );
+    eprintln!("loaded {:?} ({blocks} sub-blocks) into {dest}", raw.name);
+    Ok(())
+}
+
+/// Read the current sound, or device patch memory slot `patch`, as a [`RawPatch`].
+fn read_from_device<T: Transport>(dev: &mut Gx700<T>, patch: Option<u16>) -> Result<RawPatch> {
+    match patch {
+        Some(slot) => dev.read_patch(slot).map_err(Into::into),
+        None => dev.read_current_patch().map_err(Into::into),
+    }
+}
+
+/// Read and parse a saved patch file by name. Backend-free.
+fn read_saved(name: &str) -> Result<RawPatch> {
+    let path = config::patch_path(name).context("could not determine the patches directory")?;
+    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// List patches saved on disk (file stems). Backend-free.
+pub(crate) fn patches_disk() {
+    let names = config::saved_patches();
+    if names.is_empty() {
+        eprintln!("no saved patches");
+    }
+    for name in names {
+        println!("{name}");
+    }
 }
 
 /// Select a patch memory by Program Change.

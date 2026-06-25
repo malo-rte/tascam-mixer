@@ -32,6 +32,11 @@ pub trait Transport {
     /// Request `len` bytes from `addr` (an RQ1) and return the reply data.
     fn request(&mut self, addr: &[u8], len: usize) -> Result<Vec<u8>>;
 
+    /// Request a region (an RQ1 to a patch base) and return every DT1 the device
+    /// streams in reply, as `(address, data)` pairs. Used to read a whole patch,
+    /// which the GX-700 answers with one message per sub-block.
+    fn request_blocks(&mut self, addr: &[u8], size: usize) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
+
     /// Send a MIDI Program Change, selecting patch `program`.
     fn program_change(&mut self, program: u8) -> Result<()>;
 }
@@ -45,6 +50,9 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
     }
     fn request(&mut self, addr: &[u8], len: usize) -> Result<Vec<u8>> {
         (**self).request(addr, len)
+    }
+    fn request_blocks(&mut self, addr: &[u8], size: usize) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        (**self).request_blocks(addr, size)
     }
     fn program_change(&mut self, program: u8) -> Result<()> {
         (**self).program_change(program)

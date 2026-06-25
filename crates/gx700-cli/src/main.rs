@@ -1,6 +1,7 @@
 //! `rackctl-gx700` — command-line control for the BOSS GX-700 FX processor.
 
 mod commands;
+mod config;
 mod value;
 
 use std::process::ExitCode;
@@ -62,10 +63,13 @@ Examples:
   rackctl-gx700 info preamp-gain               Explain one parameter
   rackctl-gx700 --port hw:1,0 get preamp-gain  Read a value
   rackctl-gx700 --port hw:1,0 set dist-enable on  Turn a block on
-  rackctl-gx700 --port hw:1,0 dump patch.json  Save the patch buffer
-  rackctl-gx700 --port hw:1,0 patches          List user patch names
-  rackctl-gx700 --port hw:1,0 select 7         Select patch memory 7
-  rackctl-gx700 --port hw:1,0 recv             Print incoming `SysEx` as hex";
+  rackctl-gx700 --port hw:1,0 dump             Show the current sound (readable)
+  rackctl-gx700 --port hw:1,0 dump --patch 3   Show device patch memory 3
+  rackctl-gx700 --port hw:1,0 save \"My Tone\"    Save the current sound to disk
+  rackctl-gx700 --port hw:1,0 load \"My Tone\"    Load a saved patch (live)
+  rackctl-gx700 --port hw:1,0 patches          List device user-patch names
+  rackctl-gx700 patches --disk                 List patches saved on disk
+  rackctl-gx700 --port hw:1,0 select 7         Select patch memory 7";
 
 #[derive(Subcommand)]
 enum Command {
@@ -90,26 +94,46 @@ enum Command {
         /// The value to write (number, on/off, or enum index/label).
         value: String,
     },
-    /// Capture the patch buffer to a JSON file (or stdout if omitted).
+    /// Print a patch in readable form: the current sound, a device slot, or a
+    /// saved file.
     Dump {
-        /// Output file path; omit to print to standard output.
+        /// Read device patch memory slot N (1-200) instead of the current sound.
+        #[arg(long)]
+        patch: Option<u16>,
+        /// Read a saved patch by name (no device needed) instead.
+        #[arg(long)]
         file: Option<String>,
     },
-    /// Apply a JSON patch file to the device.
+    /// Save a whole patch to disk: the current sound, or device slot N.
+    Save {
+        /// Name to save under, in the gx700 patches directory.
+        name: String,
+        /// Save device patch memory slot N (1-200) instead of the current sound.
+        #[arg(long)]
+        patch: Option<u16>,
+    },
+    /// Load a saved whole-patch file onto the device.
     Load {
-        /// Input file path.
-        file: String,
+        /// Saved patch name to load.
+        name: String,
+        /// Write to USER patch memory slot N (1-100) instead of the current
+        /// sound. DESTRUCTIVE: overwrites that stored patch.
+        #[arg(long)]
+        to_patch: Option<u16>,
     },
     /// Select a patch memory by Program Change.
     Select {
         /// Patch program number (0-127).
         n: u8,
     },
-    /// List patch-memory slots and their names.
+    /// List patch-memory slots and their names (on the device, or saved on disk).
     Patches {
         /// List the 100 preset patches instead of the 100 user patches.
         #[arg(long)]
         preset: bool,
+        /// List patches saved on disk instead of on the device.
+        #[arg(long)]
+        disk: bool,
     },
     /// Print incoming `SysEx` messages as hex (a reverse-engineering aid).
     Recv,
@@ -194,10 +218,11 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
     match command {
         Command::Get { param } => commands::get(dev, &param),
         Command::Set { param, value } => commands::set(dev, &param, &value),
-        Command::Dump { file } => commands::dump(dev, file.as_deref()),
-        Command::Load { file } => commands::load(dev, &file),
+        Command::Dump { patch, .. } => commands::dump_device(dev, patch),
+        Command::Save { name, patch } => commands::save(dev, &name, patch),
+        Command::Load { name, to_patch } => commands::load(dev, &name, to_patch),
         Command::Select { n } => commands::select(dev, n),
-        Command::Patches { preset } => commands::patches(dev, preset),
+        Command::Patches { preset, .. } => commands::patches(dev, preset),
         // The backend-free and hardware-only commands are handled before a
         // device is opened; they never reach here.
         Command::Ports
@@ -224,6 +249,14 @@ fn run() -> Result<()> {
             print_completions(*shell);
             return Ok(());
         }
+        // Disk-only operations need no device.
+        Command::Patches { disk: true, .. } => {
+            commands::patches_disk();
+            return Ok(());
+        }
+        Command::Dump {
+            file: Some(name), ..
+        } => return commands::dump_file(name),
         _ => {}
     }
 

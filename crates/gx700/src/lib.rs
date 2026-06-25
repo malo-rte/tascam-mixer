@@ -54,6 +54,7 @@ pub use device::Gx700;
 pub use error::{Error, Result};
 pub use param::{Block, Kind, Param, Value};
 pub use patch::{
-    NAME_LEN, PATCH_VERSION, Patch, PatchHeader, Scalar, decode_name, encode_name, patch_base,
+    NAME_LEN, PATCH_VERSION, Patch, PatchHeader, RawPatch, Scalar, decode_name, encode_name,
+    patch_base,
 };
 pub use sysex::{Framer, RolandMessage};
