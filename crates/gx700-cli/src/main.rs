@@ -137,6 +137,8 @@ enum Command {
     },
     /// Print incoming `SysEx` messages as hex (a reverse-engineering aid).
     Recv,
+    /// Print every incoming MIDI message, decoded (a link monitor / debugger).
+    Monitor,
     /// Print a shell completion script for rackctl-gx700 to standard output.
     ///
     /// Redirect it to where your shell looks for completions, for example:
@@ -190,6 +192,20 @@ fn recv(_port: Option<&str>) -> Result<()> {
     anyhow::bail!("built without ALSA support; rebuild with the `alsa` feature")
 }
 
+/// Print decoded incoming MIDI, until interrupted. Hardware-only.
+#[cfg(feature = "alsa")]
+fn monitor(port: Option<&str>) -> Result<()> {
+    let port = port.ok_or_else(|| anyhow::anyhow!("monitor needs --port (see `ports`)"))?;
+    let mut listener = RawMidi::open(port)?;
+    listener.watch_midi()?;
+    Ok(())
+}
+
+#[cfg(not(feature = "alsa"))]
+fn monitor(_port: Option<&str>) -> Result<()> {
+    anyhow::bail!("built without ALSA support; rebuild with the `alsa` feature")
+}
+
 /// The selected backend, resolved once at startup.
 enum Device {
     Mock(Gx700<MockTransport>),
@@ -229,6 +245,7 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
         | Command::List
         | Command::Info { .. }
         | Command::Recv
+        | Command::Monitor
         | Command::Completions { .. } => Ok(()),
     }
 }
@@ -245,6 +262,7 @@ fn run() -> Result<()> {
         }
         Command::Info { param } => return commands::info(param),
         Command::Recv => return recv(cli.port.as_deref()),
+        Command::Monitor => return monitor(cli.port.as_deref()),
         Command::Completions { shell } => {
             print_completions(*shell);
             return Ok(());

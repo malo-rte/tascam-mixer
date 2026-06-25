@@ -142,6 +142,30 @@ impl RawMidi {
         }
     }
 
+    /// Print every incoming MIDI message, decoded to one line each, until
+    /// interrupted. A general listener (notes, CC, program change, pitch bend,
+    /// `SysEx`, real-time), for debugging the link.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if a read fails for a reason other than no data yet.
+    pub fn watch_midi(&mut self) -> Result<()> {
+        let mut decoder = crate::monitor::MidiDecoder::new();
+        let mut buf = [0u8; 256];
+        loop {
+            match self.input.io().read(&mut buf) {
+                Ok(0) => std::thread::sleep(POLL_INTERVAL),
+                Ok(n) => {
+                    let chunk = buf.get(..n).unwrap_or(&[]);
+                    for line in decoder.push(chunk) {
+                        println!("{line}");
+                    }
+                }
+                Err(e) if is_would_block(&e) => std::thread::sleep(POLL_INTERVAL),
+                Err(e) => return Err(io_err(&e)),
+            }
+        }
+    }
+
     /// Write a complete byte buffer to the output port.
     fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
         self.output.io().write_all(bytes).map_err(|e| io_err(&e))

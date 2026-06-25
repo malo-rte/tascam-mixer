@@ -44,6 +44,7 @@ mod device;
 mod error;
 mod patch;
 
+pub mod monitor;
 pub mod param;
 pub mod sysex;
 
@@ -52,6 +53,7 @@ pub use backend::RawMidi;
 pub use backend::{MockTransport, Transport};
 pub use device::Gx700;
 pub use error::{Error, Result};
+pub use monitor::MidiDecoder;
 pub use param::{Block, Kind, Param, Value};
 pub use patch::{
     NAME_LEN, PATCH_VERSION, Patch, PatchHeader, RawPatch, Scalar, decode_name, encode_name,
