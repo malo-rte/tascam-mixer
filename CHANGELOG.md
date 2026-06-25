@@ -7,6 +7,17 @@ version.
 
 ## [Unreleased]
 
+### Fixed
+
+- **GUI** — the continuous device reads (meters, and the periodic re-read of the
+  whole control surface) now run on a background thread instead of the UI thread.
+  Those ~280-control reads previously blocked the UI thread — which is also the
+  Wayland event loop — long enough that compositors (e.g. Hyprland) sometimes
+  flagged the window as "not responding," especially around a workspace switch.
+  The UI thread now shares the device with the reader thread and only touches it
+  for brief user-initiated writes and loads, so it stays responsive to the
+  compositor's keep-alive pings.
+
 ### Changed
 
 - **GUI** — copy/paste now uses one layered clipboard instead of separate

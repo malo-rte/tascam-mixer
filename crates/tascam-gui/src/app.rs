@@ -1,16 +1,20 @@
-//! The eframe application shell: device ownership, control-state cache, layout.
+//! The eframe application shell: shared device, control-state cache, layout.
+//!
+//! The continuous device reads (meters, surface watch) run on a background
+//! [`crate::poller`] thread, so the UI thread (the Wayland event loop) never
+//! blocks on USB for them. User-initiated writes and loads run here, locking the
+//! shared device briefly; reconnect is handled here too.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
-use tascam_us16x08::{
-    Backend, Control, Kind, LoadTiming, Meters, NUM_CHANNELS, Preset, Scope, Us16x08, Value,
-    Watcher,
-};
+use tascam_us16x08::{Control, Kind, LoadTiming, Meters, NUM_CHANNELS, Preset, Scope, Value};
 
 use crate::config::{self, GuiConfig};
+use crate::poller::{self, Poller, Report, SharedDevice, lock};
 use crate::{bridge, channel, output, preset_tab, routing};
 
 /// Which editor the central panel shows.
@@ -104,9 +108,6 @@ const COMP_GROUP: [Control; 6] = [
 
 /// Meter repaint cadence (~30 Hz).
 const METER_INTERVAL: Duration = Duration::from_millis(33);
-/// How often to re-read controls so external changes (front panel, another
-/// client) show up.
-const WATCH_INTERVAL_SECS: f64 = 0.5;
 /// How often to try reopening the device after it has gone away (e.g. the USB
 /// interface was unplugged). Slow enough not to spin while it is absent.
 const RECONNECT_INTERVAL_SECS: f64 = 1.0;
@@ -134,11 +135,14 @@ fn pace_write() {
 
 /// Reopens the device (real hardware or mock). Called to recover after the
 /// device disappears, so the closure can outlive any one connection.
-pub(crate) type Reopen = Box<dyn Fn() -> anyhow::Result<Us16x08<Box<dyn Backend>>>>;
+pub(crate) type Reopen = Box<dyn Fn() -> anyhow::Result<poller::Device>>;
 
-/// The running mixer application. Owns the device on the UI thread.
+/// The running mixer application. Shares the device with the background poller.
 pub(crate) struct App {
-    device: Us16x08<Box<dyn Backend>>,
+    /// The device, shared with the poller thread; locked briefly for each access.
+    device: SharedDevice,
+    /// Background reader of meters and the control surface (off the UI thread).
+    poller: Poller,
     source: &'static str,
     /// Reopen the backend after a disconnect (USB replug); see [`Reopen`].
     reopen: Reopen,
@@ -151,11 +155,9 @@ pub(crate) struct App {
     primed: bool,
     /// Next time (seconds, eframe clock) to attempt a reconnect.
     next_reconnect: f64,
-    /// Last-known control values, fed by the watcher and by our own writes.
+    /// Last-known control values, fed by the poller and by our own writes.
     cache: HashMap<(Control, u32), Value>,
-    watcher: Watcher,
     meters: Meters,
-    next_watch: f64,
     /// The channel shown in the editor.
     pub(crate) selected: u8,
     tab: Tab,
@@ -193,15 +195,13 @@ impl App {
     /// Build the app around a device. `connected` says whether the card was
     /// actually open at startup (false means it was absent and `device` is a
     /// placeholder); `reopen` reconnects the same backend after a USB replug.
-    pub(crate) fn new(
-        device: Us16x08<Box<dyn Backend>>,
-        mock: bool,
-        connected: bool,
-        reopen: Reopen,
-    ) -> Self {
+    pub(crate) fn new(device: poller::Device, mock: bool, connected: bool, reopen: Reopen) -> Self {
         let cfg = config::load();
+        let device: SharedDevice = Arc::new(Mutex::new(device));
+        let poller = Poller::spawn(Arc::clone(&device), connected);
         let mut app = Self {
             device,
+            poller,
             source: if mock {
                 "mock device"
             } else {
@@ -212,9 +212,7 @@ impl App {
             primed: false,
             next_reconnect: 0.0,
             cache: HashMap::new(),
-            watcher: Watcher::new(),
             meters: Meters::default(),
-            next_watch: 0.0,
             selected: 0,
             tab: Tab::Channel,
             links: cfg.links,
@@ -231,7 +229,8 @@ impl App {
             status: String::new(),
         };
         if connected {
-            // Card already running: read its current settings and use them.
+            // Card already running: read its current settings and use them. (The
+            // poller keeps it current from here.)
             app.sync_controls();
             app.primed = true;
         } else {
@@ -240,17 +239,22 @@ impl App {
         app
     }
 
-    /// Poll the watcher and fold any changes into the cache. The first call (an
-    /// un-primed watcher) reports the whole control surface, seeding the cache.
+    /// Read the whole present control surface into the cache, locking per control
+    /// so the poller is not blocked for the whole sweep. Used to seed the cache
+    /// at startup and after applying a preset.
     fn sync_controls(&mut self) {
-        match self.watcher.poll(&self.device) {
-            Ok(changes) => {
-                for change in changes {
-                    self.cache
-                        .insert((change.control, change.index), change.value);
+        for &control in Control::ALL {
+            if matches!(control.kind(), Kind::Meter) {
+                continue;
+            }
+            if !lock(&self.device).is_present(control) {
+                continue;
+            }
+            for index in 0..control.scope().count() {
+                if let Ok(value) = lock(&self.device).get(control, index) {
+                    self.cache.insert((control, index), value);
                 }
             }
-            Err(e) => self.status = format!("read error: {e}"),
         }
     }
 
@@ -277,7 +281,8 @@ impl App {
     }
 
     fn write_one(&mut self, control: Control, index: u32, value: Value) {
-        match self.device.set(control, index, value) {
+        let result = lock(&self.device).set(control, index, value);
+        match result {
             Ok(()) => {
                 self.cache.insert((control, index), value);
             }
@@ -485,21 +490,27 @@ impl App {
         self.peaks.get(index as usize).copied().unwrap_or_default()
     }
 
-    /// Poll meters and (at the watch cadence) controls. A device read failure
-    /// means the interface has gone away (USB unplug); flip to the disconnected
-    /// state so the app starts trying to reopen it instead of erroring at 30 Hz.
-    fn poll_device(&mut self, now: f64) {
-        match self.device.meters() {
-            Ok(m) => self.meters = m,
-            Err(e) => {
-                self.mark_disconnected(&e.to_string());
-                return;
+    /// Fold the poller's reports into the UI state: meter snapshots (with the
+    /// peak-hold step), surface changes (into the cache), and a lost device.
+    fn drain_poller(&mut self, now: f64) {
+        for report in self.poller.drain() {
+            match report {
+                Report::Meters(meters) => {
+                    self.meters = meters;
+                    bridge::observe_meters(
+                        &mut self.peaks,
+                        &self.meters,
+                        now,
+                        &mut self.meter_time,
+                    );
+                }
+                Report::Changes(changes) => {
+                    for (control, index, value) in changes {
+                        self.cache.insert((control, index), value);
+                    }
+                }
+                Report::Lost => self.mark_disconnected("device read failed"),
             }
-        }
-        bridge::observe_meters(&mut self.peaks, &self.meters, now, &mut self.meter_time);
-        if now >= self.next_watch {
-            self.sync_controls();
-            self.next_watch = now + WATCH_INTERVAL_SECS;
         }
     }
 
@@ -507,6 +518,7 @@ impl App {
     /// attempt. The cached control values are kept so the mix can be restored.
     fn mark_disconnected(&mut self, err: &str) {
         self.connected = false;
+        self.poller.set_enabled(false);
         self.next_reconnect = 0.0;
         self.meters = Meters::default();
         self.status = format!("device disconnected ({err}); reconnecting…");
@@ -521,19 +533,17 @@ impl App {
             "device disconnected; waiting for it to return…".clone_into(&mut self.status);
             return;
         };
-        self.device = device;
+        *lock(&self.device) = device;
         // Trust the handle only once a control *write* round-trips. A card that
         // has just re-enumerated answers reads while still silently dropping
         // writes; restoring the mix then does nothing and the device sits muted.
         // Stay disconnected and retry until writes actually land.
-        if !self.device.accepts_writes() {
+        if !lock(&self.device).accepts_writes() {
             self.connected = false;
             "device returning…".clone_into(&mut self.status);
             return;
         }
-        self.watcher = Watcher::new();
         self.connected = true;
-        self.next_watch = 0.0;
         if self.primed {
             self.restore_mix();
         } else {
@@ -541,6 +551,8 @@ impl App {
             self.primed = true;
             "device reconnected".clone_into(&mut self.status);
         }
+        // Resume background polling now that the device is back and seeded.
+        self.poller.set_enabled(true);
     }
 
     /// Push the cached mix back to a just-reconnected device as one transaction:
@@ -549,7 +561,7 @@ impl App {
     fn restore_mix(&mut self) {
         let values: Vec<(Control, u32, Value)> =
             self.cache.iter().map(|(&(c, i), &v)| (c, i, v)).collect();
-        let ok = self.device.restore_values_muted(&values, LOAD_TIMING);
+        let ok = lock(&self.device).restore_values_muted(&values, LOAD_TIMING);
         self.sync_controls();
         self.status = if ok {
             "device reconnected".to_owned()
@@ -590,8 +602,8 @@ impl App {
     /// ignores it), keeping the file a valid hardware preset.
     fn build_preset_json(&self, channel: Option<u32>) -> Result<String, String> {
         let preset = match channel {
-            Some(ch) => self.device.capture_strip(ch),
-            None => self.device.capture_mixer(),
+            Some(ch) => lock(&self.device).capture_strip(ch),
+            None => lock(&self.device).capture_mixer(),
         }
         .map_err(|e| e.to_string())?;
         let mut value = serde_json::to_value(&preset).map_err(|e| e.to_string())?;
@@ -650,7 +662,8 @@ impl App {
         let mut skipped = 0;
         let mut error = None;
         for target in targets {
-            match self.device.apply_muted(&preset, target, LOAD_TIMING) {
+            let outcome = lock(&self.device).apply_muted(&preset, target, LOAD_TIMING);
+            match outcome {
                 Ok(report) => {
                     applied = report.applied;
                     skipped = report.skipped.len();
@@ -810,8 +823,7 @@ impl App {
         let ch = u32::from(self.selected);
         let keys: std::collections::HashSet<&str> =
             group_controls(group).iter().map(|c| c.cli_key()).collect();
-        let result = self
-            .device
+        let result = lock(&self.device)
             .capture_strip(ch)
             .map_err(|e| e.to_string())
             .and_then(|preset| {
@@ -858,7 +870,7 @@ impl App {
             self.clipboard.clear();
         }
         for control in group_controls(group) {
-            if self.device.is_present(control) {
+            if lock(&self.device).is_present(control) {
                 if let Some(&value) = self.cache.get(&(control, ch)) {
                     self.clipboard.insert(control, value);
                 }
@@ -900,7 +912,7 @@ impl App {
     pub(crate) fn reset_channel(&mut self) {
         let ch = u32::from(self.selected);
         for &control in Control::ALL {
-            if control.scope() != Scope::Channel || !self.device.is_present(control) {
+            if control.scope() != Scope::Channel || !lock(&self.device).is_present(control) {
                 continue;
             }
             let value = match control.kind() {
@@ -935,9 +947,10 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let now = ctx.input(|i| i.time);
-        if self.connected {
-            self.poll_device(now);
-        } else if now >= self.next_reconnect {
+        // The poller (background thread) does the continuous device reads; fold
+        // its reports in. Reconnect, when disconnected, is handled here.
+        self.drain_poller(now);
+        if !self.connected && now >= self.next_reconnect {
             self.try_reconnect();
             self.next_reconnect = now + RECONNECT_INTERVAL_SECS;
         }

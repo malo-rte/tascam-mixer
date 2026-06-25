@@ -41,7 +41,9 @@ pub trait Backend {
 
 /// Lets a `Us16x08<Box<dyn Backend>>` hold either backend chosen at runtime
 /// (e.g. mock vs hardware behind a command-line flag) without a wrapper enum.
-impl Backend for Box<dyn Backend> {
+/// Generic over the boxed type, so it also covers `Box<dyn Backend + Send>`
+/// (which a multi-threaded host needs to move/share the device).
+impl<B: Backend + ?Sized> Backend for Box<B> {
     fn get_int(&self, name: &str, index: u32) -> Result<i32> {
         (**self).get_int(name, index)
     }

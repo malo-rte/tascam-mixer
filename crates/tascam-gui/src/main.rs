@@ -6,6 +6,7 @@ mod channel;
 mod config;
 mod curves;
 mod output;
+mod poller;
 mod preset_tab;
 mod routing;
 
@@ -25,8 +26,9 @@ struct Cli {
     mock: bool,
 }
 
-/// Open the device as a boxed backend: the in-memory mock, or real hardware.
-fn open_device(mock: bool) -> Result<Us16x08<Box<dyn Backend>>> {
+/// Open the device as a boxed, `Send` backend (so it can be shared with the
+/// poller thread): the in-memory mock, or real hardware.
+fn open_device(mock: bool) -> Result<poller::Device> {
     if mock {
         return Ok(Us16x08::new(Box::new(MockBackend::new())));
     }
@@ -50,7 +52,7 @@ fn main() -> Result<()> {
     let (device, connected) = match reopen() {
         Ok(device) => (device, true),
         Err(_) => (
-            Us16x08::new(Box::new(MockBackend::new()) as Box<dyn Backend>),
+            Us16x08::new(Box::new(MockBackend::new()) as Box<dyn Backend + Send>),
             false,
         ),
     };
