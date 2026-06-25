@@ -23,6 +23,9 @@ pub(crate) struct GuiConfig {
     /// to use the default size. Restored on startup and on `Load default`.
     #[serde(default)]
     pub window: Option<[f32; 2]>,
+    /// User-given names for the 16 input channels (GUI-only), empty when unset.
+    #[serde(default = "default_names")]
+    pub names: [String; 16],
 }
 
 impl Default for GuiConfig {
@@ -31,12 +34,17 @@ impl Default for GuiConfig {
             links: [false; 8],
             zoom: DEFAULT_ZOOM,
             window: None,
+            names: default_names(),
         }
     }
 }
 
 fn default_zoom() -> f32 {
     DEFAULT_ZOOM
+}
+
+fn default_names() -> [String; 16] {
+    std::array::from_fn(|_| String::new())
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -95,5 +103,31 @@ pub(crate) fn save(config: &GuiConfig) {
     }
     if let Ok(text) = serde_json::to_string_pretty(config) {
         let _ = std::fs::write(&path, text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+    use super::GuiConfig;
+
+    #[test]
+    fn config_without_names_loads_with_empty_defaults() {
+        // A config written before channel names existed must still load.
+        let json = r#"{"links":[false,false,false,false,false,false,false,false],"zoom":1.5}"#;
+        let cfg: GuiConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.names.len(), 16);
+        assert!(cfg.names.iter().all(String::is_empty));
+    }
+
+    #[test]
+    fn names_round_trip_through_json() {
+        let mut cfg = GuiConfig::default();
+        cfg.names[0] = "Kick".to_owned();
+        cfg.names[15] = "Vox".to_owned();
+        let text = serde_json::to_string(&cfg).unwrap();
+        let back: GuiConfig = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.names[0], "Kick");
+        assert_eq!(back.names[15], "Vox");
     }
 }

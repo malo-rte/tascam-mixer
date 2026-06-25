@@ -72,6 +72,19 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
             app.selected = u8::try_from(ch).unwrap_or(0);
         }
 
+        // The user-given name, truncated to the column. A single line always
+        // (a space when unset) keeps every column's meter at the same height.
+        let name = app.channel_name(ch);
+        let shown = if name.is_empty() {
+            " ".to_owned()
+        } else {
+            short(name, 6)
+        };
+        let label = ui.small(shown);
+        if !name.is_empty() {
+            label.on_hover_text(name);
+        }
+
         let level = app.meters().channel_db(ch).unwrap_or(0);
         meter_bar(ui, fraction(level));
 
@@ -84,6 +97,16 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
             ui.small("link");
         }
     });
+}
+
+/// Shorten a channel name to at most `max` characters, with an ellipsis if it
+/// was cut, so it fits a narrow bridge column.
+fn short(name: &str, max: usize) -> String {
+    if name.chars().count() <= max {
+        return name.to_owned();
+    }
+    let kept: String = name.chars().take(max.saturating_sub(1)).collect();
+    format!("{kept}\u{2026}")
 }
 
 /// Normalise a scaled meter sample to a 0..=1 bar fraction.

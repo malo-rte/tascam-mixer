@@ -7,6 +7,12 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- **GUI** — channel names: name each of the 16 input channels (e.g. "Kick",
+  "Vox") in the INPUT box. Names are GUI-only, remembered between sessions, and
+  shown in the meter bridge.
+
 ## [0.4.0] - 2026-06-25
 
 ### Added

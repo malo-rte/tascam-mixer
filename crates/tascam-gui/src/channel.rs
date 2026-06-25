@@ -110,6 +110,23 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
             } else {
                 ui.heading(format!("INPUT {}", selected + 1));
             }
+
+            // Editable channel name (GUI-only). Edits the displayed channel (the
+            // lower one of a linked pair).
+            ui.horizontal(|ui| {
+                ui.label("Name");
+                let mut name = app.channel_name(ch).to_owned();
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut name)
+                            .hint_text("unnamed")
+                            .desired_width(INPUT_WIDTH - 52.0),
+                    )
+                    .changed()
+                {
+                    app.set_channel_name(ch, name);
+                }
+            });
             ui.separator();
 
             // Switches: stereo link on its own row (long label), phase and mute

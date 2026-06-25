@@ -149,6 +149,8 @@ pub(crate) struct App {
     tab: Tab,
     /// Stereo-link state for the eight channel pairs (GUI-only).
     links: [bool; 8],
+    /// User-given names for the 16 input channels (GUI-only).
+    names: [String; 16],
     /// Persisted interface zoom factor, saved with the default preset.
     zoom: f32,
     /// Persisted window inner size (logical points), saved with the default.
@@ -193,6 +195,7 @@ impl App {
             selected: 0,
             tab: Tab::Channel,
             links: cfg.links,
+            names: cfg.names,
             zoom: cfg.zoom,
             window: cfg.window,
             preset_names: HashMap::new(),
@@ -315,13 +318,29 @@ impl App {
         }
     }
 
-    /// Persist the GUI-only state (stereo links, zoom, and window size).
+    /// Persist the GUI-only state (stereo links, channel names, zoom, and window
+    /// size).
     fn save_config(&self) {
         config::save(&GuiConfig {
             links: self.links,
             zoom: self.zoom,
             window: self.window,
+            names: self.names.clone(),
         });
+    }
+
+    /// The user-given name for an input channel, or `""` if unset.
+    pub(crate) fn channel_name(&self, channel: u32) -> &str {
+        self.names.get(channel as usize).map_or("", String::as_str)
+    }
+
+    /// Set (and persist) the user-given name for an input channel.
+    pub(crate) fn set_channel_name(&mut self, channel: u32, name: String) {
+        let Some(slot) = self.names.get_mut(channel as usize) else {
+            return;
+        };
+        *slot = name;
+        self.save_config();
     }
 
     /// The persisted interface zoom factor, applied at startup.
@@ -575,6 +594,7 @@ impl App {
         // The stereo-link grouping is part of the saved setup too, so the UI
         // interprets the restored faders/pans the same way they were saved.
         self.links = cfg.links;
+        self.names = cfg.names;
         match config::default_preset_path() {
             Some(path) => self.load_preset(&path, None),
             None => "load failed: no config directory".clone_into(&mut self.status),

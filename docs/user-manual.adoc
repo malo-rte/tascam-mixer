@@ -494,10 +494,11 @@ controls is in <<sec-gui-ref>>.
 === The meter bridge
 
 The meter bridge shows all 16 input channels and the master, always visible at
-the top. Each channel column has a number label, a level meter, and a mute
-button. Click a channel's number to focus it in the editor below; the focused
-channel (or its linked pair) is highlighted. The master level meters and the
-master mute button sit at the right of the bridge.
+the top. Each channel column has a number label, its name (if set, truncated with
+the full name on hover), a level meter, and a mute button. Click a channel's
+number to focus it in the editor below; the focused channel (or its linked pair)
+is highlighted. The master level meters and the master mute button sit at the
+right of the bridge.
 
 [[sec-gui-editor]]
 === The channel editor
@@ -505,9 +506,12 @@ master mute button sit at the right of the bridge.
 The editor shows the focused channel, or one combined strip when the channel's
 pair is linked. It has three boxes side by side.
 
-INPUT:: The channel's stereo-link checkbox, phase and mute switches, a vertical
-volume fader with its level meter, and a pan slider along the bottom. When the
-pair is linked, the pan slider becomes a balance (see <<sec-gui-link>>).
+INPUT:: An editable *Name* field for the channel (a GUI-only label such as "Kick"
+or "Vox", remembered between sessions and shown in the meter bridge), the
+channel's stereo-link checkbox, phase and mute switches, a vertical volume fader
+with its level meter, and a pan slider along the bottom. When the pair is linked,
+the pan slider becomes a balance (see <<sec-gui-link>>) and the name edits the
+lower channel of the pair.
 
 EQ:: A `Reset` button and an enable checkbox in the title row, a response curve
 showing the combined effect of the four bands, and below it the bands as a Gain /
