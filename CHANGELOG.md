@@ -7,6 +7,24 @@ version.
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-06-25
+
+### Fixed
+
+- **CI** — the cargo-deny supply-chain check now passes end to end. The 0.7.2
+  config fix only let cargo-deny start running; doing so surfaced real policy
+  gaps, now resolved: the CLI and GUI are marked `publish = false` (they are
+  applications with a workspace path dependency, which `allow-wildcard-paths`
+  only exempts for unpublished crates); `BSL-1.0` is allowed and `MPL-2.0` plus
+  the egui font licenses are scoped to per-crate exceptions (keeping the global
+  policy copyleft-free); and the unmaintained-only advisory RUSTSEC-2024-0436
+  (`paste`, transitive via eframe) is ignored with a documented reason.
+
+### Changed
+
+- **Dev** — the dev container now ships cargo-deny, so `run-all-checks.sh`
+  exercises the supply-chain gate locally instead of silently skipping it.
+
 ## [0.7.2] - 2026-06-25
 
 ### Fixed
@@ -241,7 +259,8 @@ only, via the `snd-usb-audio` driver.
 - The tools drive the DSP mixer control surface only; they do not stream audio.
   Capture to the computer is taken pre-DSP (the dry input).
 
-[Unreleased]: https://github.com/malo-rte/rackctl/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/malo-rte/rackctl/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/malo-rte/rackctl/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/malo-rte/rackctl/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/malo-rte/rackctl/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/malo-rte/rackctl/compare/v0.6.0...v0.7.0
