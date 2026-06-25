@@ -181,10 +181,11 @@ pub(crate) struct App {
     preset_names: HashMap<PresetKind, String>,
     /// A preset awaiting delete confirmation in a preset tab.
     pub(crate) pending_delete: Option<PathBuf>,
-    /// Copy/paste clipboards for the channel, EQ, and compressor groups.
-    clip_channel: Option<Vec<(Control, Value)>>,
-    clip_eq: Option<Vec<(Control, Value)>>,
-    clip_comp: Option<Vec<(Control, Value)>>,
+    /// Single copy/paste clipboard of per-channel control values. Each Copy
+    /// replaces the part it handles (whole channel, or just the EQ / compressor
+    /// section); each Paste applies the part it handles. So a copied channel can
+    /// be tweaked section by section, then pasted onto many channels.
+    clipboard: HashMap<Control, Value>,
     status: String,
 }
 
@@ -226,9 +227,7 @@ impl App {
             window: cfg.window,
             preset_names: HashMap::new(),
             pending_delete: None,
-            clip_channel: None,
-            clip_eq: None,
-            clip_comp: None,
+            clipboard: HashMap::new(),
             status: String::new(),
         };
         if connected {
@@ -766,8 +765,9 @@ impl App {
         self.write_named(kind, path);
     }
 
-    /// Copy a saved preset of `kind` into the matching copy/paste clipboard, so
-    /// it can be pasted onto channels. No-op for a scene (no channel clipboard).
+    /// Copy a saved preset of `kind` into the copy/paste clipboard, so it can be
+    /// pasted onto channels. A channel/strip preset replaces the clipboard; an EQ
+    /// or compressor preset overlays just that section. No-op for a scene.
     pub(crate) fn copy_preset(&mut self, kind: PresetKind, path: &Path) {
         let Some(group) = kind.clipboard_group() else {
             return;
@@ -779,7 +779,15 @@ impl App {
                 return;
             }
         };
-        *self.clipboard_mut(group) = Some(values);
+        let allowed = group_controls(group);
+        if matches!(group, Group::Channel) {
+            self.clipboard.clear();
+        }
+        for (control, value) in values {
+            if allowed.contains(&control) {
+                self.clipboard.insert(control, value);
+            }
+        }
         self.status = format!("copied {} from {}", group.label(), preset_label(path));
     }
 
@@ -832,46 +840,46 @@ impl App {
         };
     }
 
-    /// The clipboard slot for `group`.
-    fn clipboard_mut(&mut self, group: Group) -> &mut Option<Vec<(Control, Value)>> {
-        match group {
-            Group::Channel => &mut self.clip_channel,
-            Group::Eq => &mut self.clip_eq,
-            Group::Comp => &mut self.clip_comp,
-        }
-    }
-
-    /// Whether `group`'s clipboard holds a copy ready to paste.
+    /// Whether the clipboard holds anything `group` can paste -- i.e. at least
+    /// one of `group`'s controls was copied. The Paste button is disabled
+    /// otherwise, so a never-copied section is never pasted.
     pub(crate) fn has_clip(&self, group: Group) -> bool {
-        match group {
-            Group::Channel => self.clip_channel.is_some(),
-            Group::Eq => self.clip_eq.is_some(),
-            Group::Comp => self.clip_comp.is_some(),
-        }
+        group_controls(group)
+            .iter()
+            .any(|control| self.clipboard.contains_key(control))
     }
 
     /// Copy `group`'s controls from the focused channel into the clipboard.
+    /// Copying the whole channel replaces the clipboard; copying a section
+    /// overlays just that part, leaving the rest of a previous copy intact.
     pub(crate) fn copy_group(&mut self, group: Group) {
         let ch = u32::from(self.selected);
-        let mut values = Vec::new();
+        if matches!(group, Group::Channel) {
+            self.clipboard.clear();
+        }
         for control in group_controls(group) {
             if self.device.is_present(control) {
                 if let Some(&value) = self.cache.get(&(control, ch)) {
-                    values.push((control, value));
+                    self.clipboard.insert(control, value);
                 }
             }
         }
-        *self.clipboard_mut(group) = Some(values);
         self.status = format!("copied {} from channel {}", group.label(), ch + 1);
     }
 
-    /// Paste `group`'s copied controls onto the focused channel (and its pair,
-    /// when linked, via [`Self::set`]). No-op if the clipboard is empty.
+    /// Paste the part of the clipboard `group` handles onto the focused channel
+    /// (and its pair, when linked, via [`Self::set`]). Only controls actually in
+    /// the clipboard are written -- never-copied controls are left untouched, so
+    /// nothing uninitialised is pasted.
     pub(crate) fn paste_group(&mut self, group: Group) {
         let ch = u32::from(self.selected);
-        let Some(values) = self.clipboard_mut(group).clone() else {
+        let values: Vec<(Control, Value)> = group_controls(group)
+            .into_iter()
+            .filter_map(|control| self.clipboard.get(&control).map(|&value| (control, value)))
+            .collect();
+        if values.is_empty() {
             return;
-        };
+        }
         for (control, value) in values {
             self.set(control, ch, value);
             pace_write();

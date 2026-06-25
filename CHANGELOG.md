@@ -7,6 +7,15 @@ version.
 
 ## [Unreleased]
 
+### Changed
+
+- **GUI** — copy/paste now uses one layered clipboard instead of separate
+  channel/EQ/compressor buffers. *Copy channel* puts the whole strip on it; *Copy*
+  in the EQ or Compressor box overlays just that section. Each *Paste* applies only
+  the part it handles, and only controls that were actually copied are written. So
+  you can copy a channel, overlay another channel's EQ, and paste the combination
+  onto many channels.
+
 ### Added
 
 - **GUI** — meter peak-hold and a clip indicator: each level meter (channels and
