@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=Tascam US-16x08 Mixer
+Name=Rackctl US-16x08 Mixer
 GenericName=Audio Mixer
 Comment=Control the Tascam US-16x08 USB interface's built-in DSP mixer
 Exec=rackctl-us16x08-gui
