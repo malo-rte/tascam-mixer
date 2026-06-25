@@ -45,23 +45,23 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
     ui.separator();
 
     // A pending delete for this tab's directory shows a confirmation bar first.
-    if let Some(path) = app.pending_delete.clone() {
-        if path.parent() == App::preset_dir(kind).as_deref() {
-            ui.horizontal(|ui| {
-                ui.colored_label(
-                    egui::Color32::from_rgb(220, 120, 60),
-                    format!("Delete \u{201c}{}\u{201d}?", preset_label(&path)),
-                );
-                if ui.button("Delete").clicked() {
-                    app.delete_preset(&path);
-                    app.pending_delete = None;
-                }
-                if ui.button("Cancel").clicked() {
-                    app.pending_delete = None;
-                }
-            });
-            ui.separator();
-        }
+    if let Some(path) = app.pending_delete.clone()
+        && path.parent() == App::preset_dir(kind).as_deref()
+    {
+        ui.horizontal(|ui| {
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 120, 60),
+                format!("Delete \u{201c}{}\u{201d}?", preset_label(&path)),
+            );
+            if ui.button("Delete").clicked() {
+                app.delete_preset(&path);
+                app.pending_delete = None;
+            }
+            if ui.button("Cancel").clicked() {
+                app.pending_delete = None;
+            }
+        });
+        ui.separator();
     }
 
     let presets = preset_paths(kind);

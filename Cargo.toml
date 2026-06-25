@@ -5,13 +5,12 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.7.3"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/malo-rte/rackctl"
 authors = ["Mats Loman <mats.loman@rte.se>"]
 
 [workspace.dependencies]
-rackctl-us16x08 = { path = "crates/us16x08" }
 rackctl-gx700 = { path = "crates/gx700", default-features = false }
 thiserror = "2"
 alsa = "0.9"

@@ -16,6 +16,7 @@ use ::alsa::ctl::Ctl;
 use ::alsa::rawmidi::{Iter as RawmidiIter, Rawmidi};
 
 use super::Transport;
+use super::lock::PortLock;
 use crate::error::{Error, Result};
 use crate::sysex::{self, DT1, Framer};
 
@@ -52,6 +53,9 @@ pub struct RawMidi {
     output: Rawmidi,
     input: Rawmidi,
     device_id: u8,
+    /// Advisory lock excluding other rackctl processes from this port; held for
+    /// the lifetime of the connection and released when it (or the process) ends.
+    _lock: PortLock,
 }
 
 impl std::fmt::Debug for RawMidi {
@@ -109,9 +113,14 @@ impl RawMidi {
     /// and output.
     ///
     /// # Errors
+    /// [`Error::PortBusy`] if another rackctl process already holds this port;
     /// [`Error::PortNotFound`] if the address contains an interior NUL;
     /// [`Error::Transport`] if ALSA cannot open the input or output stream.
     pub fn open(port: &str) -> Result<Self> {
+        // Take the advisory lock first: if another rackctl process owns the port,
+        // fail fast with a clear error rather than opening it and corrupting both
+        // sides' reply streams.
+        let lock = PortLock::acquire(port)?;
         let cname = CString::new(port).map_err(|_| Error::PortNotFound(port.to_owned()))?;
         let output = Rawmidi::open(&cname, Direction::Playback, false).map_err(transport_err)?;
         // Open the input non-blocking so reads can poll for a timeout.
@@ -120,6 +129,7 @@ impl RawMidi {
             output,
             input,
             device_id: DEFAULT_DEVICE_ID,
+            _lock: lock,
         })
     }
 

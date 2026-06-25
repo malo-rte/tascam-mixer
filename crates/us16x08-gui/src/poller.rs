@@ -117,7 +117,7 @@ fn run(device: &SharedDevice, running: &AtomicBool, enabled: &AtomicBool, tx: &S
             return; // UI gone
         }
         ticks = ticks.wrapping_add(1);
-        if ticks % WATCH_EVERY_TICKS == 0 {
+        if ticks.is_multiple_of(WATCH_EVERY_TICKS) {
             let changes = watch(device, &mut snapshot);
             if !changes.is_empty() && tx.send(Report::Changes(changes)).is_err() {
                 return;

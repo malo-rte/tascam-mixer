@@ -458,11 +458,10 @@ impl App {
             if matches!(control.scope(), Scope::Channel)
                 && !matches!(control.kind(), Kind::Meter)
                 && control != Control::Pan
+                && let Some(&value) = self.cache.get(&(control, low))
             {
-                if let Some(&value) = self.cache.get(&(control, low)) {
-                    self.write_one(control, low + 1, value);
-                    pace_write();
-                }
+                self.write_one(control, low + 1, value);
+                pace_write();
             }
         }
         self.hard_pan_pair(low);
@@ -575,10 +574,10 @@ impl App {
     /// seed the cache from whatever the device now reports. With no default
     /// preset saved, just read the device's current settings.
     fn apply_startup_defaults(&mut self) {
-        if let Some(path) = config::default_preset_path() {
-            if path.exists() {
-                self.load_preset(&path, None);
-            }
+        if let Some(path) = config::default_preset_path()
+            && path.exists()
+        {
+            self.load_preset(&path, None);
         }
         // Always seed the cache from the device, whether a default was applied,
         // missing, or failed to parse, so later restores have real values.
@@ -607,11 +606,11 @@ impl App {
         }
         .map_err(|e| e.to_string())?;
         let mut value = serde_json::to_value(&preset).map_err(|e| e.to_string())?;
-        if channel.is_none() {
-            if let Some(object) = value.as_object_mut() {
-                let links = serde_json::to_value(self.links).map_err(|e| e.to_string())?;
-                object.insert("links".to_owned(), links);
-            }
+        if channel.is_none()
+            && let Some(object) = value.as_object_mut()
+        {
+            let links = serde_json::to_value(self.links).map_err(|e| e.to_string())?;
+            object.insert("links".to_owned(), links);
         }
         serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
     }
@@ -633,11 +632,11 @@ impl App {
         };
         // Restore the stereo-link grouping a whole-mixer preset carries, before
         // applying, so the UI interprets the restored faders/pans the same way.
-        if channel.is_none() {
-            if let Some(links) = extract_links(&value) {
-                self.links = links;
-                self.save_config();
-            }
+        if channel.is_none()
+            && let Some(links) = extract_links(&value)
+        {
+            self.links = links;
+            self.save_config();
         }
         let preset: Preset = match serde_json::from_value(value) {
             Ok(preset) => preset,
@@ -870,10 +869,10 @@ impl App {
             self.clipboard.clear();
         }
         for control in group_controls(group) {
-            if lock(&self.device).is_present(control) {
-                if let Some(&value) = self.cache.get(&(control, ch)) {
-                    self.clipboard.insert(control, value);
-                }
+            if lock(&self.device).is_present(control)
+                && let Some(&value) = self.cache.get(&(control, ch))
+            {
+                self.clipboard.insert(control, value);
             }
         }
         self.status = format!("copied {} from channel {}", group.label(), ch + 1);

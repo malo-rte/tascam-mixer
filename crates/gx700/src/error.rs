@@ -18,6 +18,14 @@ pub enum Error {
     #[error("MIDI port not found: {0}")]
     PortNotFound(String),
 
+    /// Another rackctl process already holds the advisory lock for this port.
+    /// Only one accessor may drive a MIDI interface at a time: two readers split
+    /// the device's reply stream between them, so neither receives a complete
+    /// message (rust-coding-rules notwithstanding, this is a hardware truth, not
+    /// a software limit — see `docs/midi-arbitration.adoc`).
+    #[error("MIDI port {0} is in use by another rackctl process")]
+    PortBusy(String),
+
     /// A parameter key did not resolve to any cataloged parameter.
     #[error("unknown parameter {0:?}")]
     UnknownParam(String),

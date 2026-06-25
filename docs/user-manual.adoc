@@ -230,7 +230,7 @@ Both tools are Rust binaries built from the project workspace.
 [[sec-build]]
 === Building from source
 
-Prerequisites: a Rust toolchain (edition 2024, 1.85 or later) and the ALSA
+Prerequisites: a Rust toolchain (edition 2024, 1.95 or later) and the ALSA
 development headers, which the default build links against.
 
 . Install the ALSA headers. On Debian or Ubuntu: `sudo apt-get install

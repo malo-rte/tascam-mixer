@@ -171,10 +171,10 @@ impl Backend for AlsaBackend {
     fn elem_names(&self) -> Vec<String> {
         let mut names = Vec::new();
         for elem in self.hctl.elem_iter() {
-            if let Ok(id) = elem.get_id() {
-                if let Ok(name) = id.get_name() {
-                    names.push(name.to_owned());
-                }
+            if let Ok(id) = elem.get_id()
+                && let Ok(name) = id.get_name()
+            {
+                names.push(name.to_owned());
             }
         }
         names.sort_unstable();

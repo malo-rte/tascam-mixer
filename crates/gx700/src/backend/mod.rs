@@ -14,6 +14,8 @@ mod mock;
 pub use mock::MockTransport;
 
 #[cfg(feature = "alsa")]
+mod lock;
+#[cfg(feature = "alsa")]
 mod rawmidi;
 #[cfg(feature = "alsa")]
 pub use rawmidi::RawMidi;

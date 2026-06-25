@@ -108,7 +108,7 @@ cargo test -p rackctl-us16x08 --no-default-features
 `clippy -D warnings` and `cargo test` over both feature sets, `rustdoc -D warnings`,
 and — when installed — `cargo deny`, `shellcheck`, and `shfmt`. It runs every check
 and reports all failures, exiting non-zero if any fails. CI
-(`.github/workflows/ci.yml`) additionally builds and tests on the MSRV (1.85).
+(`.github/workflows/ci.yml`) additionally builds and tests on the MSRV (1.95).
 
 == Documentation
 

@@ -130,10 +130,10 @@ fn to_scalar(control: Control, value: Value) -> Scalar {
         Value::Bool(b) => Scalar::Bool(b),
         Value::Int(i) => Scalar::Int(i64::from(i)),
         Value::Enum(i) => {
-            if let Kind::Enum { values, .. } = control.kind() {
-                if let Some(label) = usize::try_from(i).ok().and_then(|n| values.get(n)) {
-                    return Scalar::Text((*label).to_owned());
-                }
+            if let Kind::Enum { values, .. } = control.kind()
+                && let Some(label) = usize::try_from(i).ok().and_then(|n| values.get(n))
+            {
+                return Scalar::Text((*label).to_owned());
             }
             Scalar::Int(i64::from(i))
         }

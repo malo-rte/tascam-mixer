@@ -23,10 +23,10 @@ pub fn display(param: Param, value: Value) -> String {
 
 /// The label for an enum `index`, or the bare index if out of range / not an enum.
 fn enum_label(param: Param, index: i32) -> String {
-    if let Kind::Enum { values, .. } = param.kind() {
-        if let Some(label) = usize::try_from(index).ok().and_then(|i| values.get(i)) {
-            return (*label).to_owned();
-        }
+    if let Kind::Enum { values, .. } = param.kind()
+        && let Some(label) = usize::try_from(index).ok().and_then(|i| values.get(i))
+    {
+        return (*label).to_owned();
     }
     index.to_string()
 }

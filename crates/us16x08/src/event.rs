@@ -93,10 +93,8 @@ impl Watcher {
             }
         }
         // Surface a hard failure (device gone) but tolerate isolated misreads.
-        if !read_any {
-            if let Some(e) = last_err {
-                return Err(e);
-            }
+        if !read_any && let Some(e) = last_err {
+            return Err(e);
         }
         Ok(changes)
     }

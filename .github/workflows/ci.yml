@@ -34,7 +34,7 @@ jobs:
         run: ./run-all-checks.sh
 
   msrv:
-    name: build + test on MSRV (1.85)
+    name: build + test on MSRV (1.95)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -52,7 +52,7 @@ jobs:
             libxcb-xfixes0-dev
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85.0"
+          toolchain: "1.95.0"
       - uses: Swatinem/rust-cache@v2
       - name: Build and test
         run: |
