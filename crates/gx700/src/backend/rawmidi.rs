@@ -38,6 +38,15 @@ const REPLY_POLLS: u32 = 500;
 /// whole-patch reply, so a single gap does not end the drain early.
 const DRAIN_QUIET_POLLS: u32 = 35;
 
+/// Silence (~300 ms) that ends a whole-patch collection even if the final
+/// sub-block was not recognised: a generous fallback past the longer gaps the
+/// device leaves before large sub-blocks (e.g. Modulation).
+const STREAM_QUIET_POLLS: u32 = 300;
+
+/// Sub-block offset of the last block in a patch (Reverb); once collected, the
+/// patch stream is complete.
+const LAST_SUB_BLOCK: u8 = 0x0D;
+
 /// A live connection to a GX-700 over ALSA rawmidi.
 pub struct RawMidi {
     output: Rawmidi,
@@ -253,7 +262,15 @@ impl RawMidi {
                 _ => {
                     idle = idle.saturating_add(1);
                     waited = waited.saturating_add(1);
-                    if !out.is_empty() && idle >= DRAIN_QUIET_POLLS {
+                    // Done once the final sub-block has arrived and briefly
+                    // settled; or after a long silence (in case the last block
+                    // was not recognised); or, with nothing yet, after the reply
+                    // budget.
+                    let have_last = out.iter().any(|(addr, _)| addr.get(2) == Some(&LAST_SUB_BLOCK));
+                    if !out.is_empty() && have_last && idle >= DRAIN_QUIET_POLLS {
+                        break;
+                    }
+                    if !out.is_empty() && idle >= STREAM_QUIET_POLLS {
                         break;
                     }
                     if out.is_empty() && waited >= REPLY_POLLS {
