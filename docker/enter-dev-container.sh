@@ -63,6 +63,27 @@ else
 	echo "Note: /dev/bus/usb not present on host. YubiKey work will not be possible." >&2
 fi
 
+# ALSA sound-device pass-through (MIDI to the US-16x08 / GX-700, and audio cards).
+# Mirrors the USB block: bind-mounting /dev/snd propagates hotplug, so an
+# interface plugged in after the container starts becomes visible; the cgroup
+# rule grants r/w on ALSA character devices (major 116), which Docker's default
+# device cgroup otherwise denies.
+SND_FLAGS=()
+if [[ -d /dev/snd ]]; then
+	SND_FLAGS+=(
+		--volume "/dev/snd:/dev/snd${MOUNT_SUFFIX}"
+		--device-cgroup-rule "c 116:* rwm"
+	)
+	# /dev/snd nodes are group-owned by `audio` (mode 0660); add that gid so
+	# opening them does not hit EACCES.
+	if command -v getent >/dev/null 2>&1; then
+		AUDIO_GID="$(getent group audio 2>/dev/null | cut -d: -f3 || true)"
+		[[ -n "${AUDIO_GID}" ]] && SND_FLAGS+=(--group-add "${AUDIO_GID}")
+	fi
+else
+	echo "Note: /dev/snd not present on host. MIDI/audio device work will not be possible." >&2
+fi
+
 build_container() {
 	local image="$1"
 
@@ -102,6 +123,7 @@ run_container() {
 		"${RUST_FLAGS[@]}" \
 		"${SSH_FLAGS[@]}" \
 		"${USB_FLAGS[@]}" \
+		"${SND_FLAGS[@]}" \
 		"${tz_flags[@]}" \
 		"${locale_flags[@]}" \
 		--volume "${REPO_DIR}:${REPO_DIR_CONTAINER}${MOUNT_SUFFIX}" \
