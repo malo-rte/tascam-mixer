@@ -1,0 +1,179 @@
+= Rackctl — MIDI interface arbitration
+:toc: left
+:icons: font
+:source-highlighter: rouge
+
+This document explains why a MIDI interface must have a *single owner* at a time,
+how Rackctl enforces that today (an advisory lock), and the design for the
+*arbitration daemon* that will replace the lock once more than one app needs the
+same device concurrently.
+
+It is suite-wide: every planned Rackctl device after the US-16x08 (BOSS GX-700,
+Digitech GSP-series, Marshall JMP-1, TC G-System, …) is MIDI-controlled and shares
+this problem and this solution.
+
+== The problem: one wire, request/reply, no transaction ids
+
+A MIDI device is reached over a single bidirectional port. Rackctl's read model is
+request/reply: send an RQ1 (or the device-specific "dump") and read the stream of
+reply messages the device sends back on the *same* port.
+
+Two independent failure modes stack on top of each other:
+
+[discrete]
+=== 1. Byte-stream contention (transport level)
+
+If two processes read the same port at once, the operating system hands each
+arriving chunk to whichever reader is scheduled first. The device's reply is split
+between the two readers; neither assembles a complete message, and *both* time out.
+On ALSA rawmidi the second opener may instead just get `EBUSY`. Either way it looks
+exactly like a stalled or dead interface -- but it is pure contention.
+
+NOTE: This is not hypothetical. During GX-700 bring-up, every apparent "the
+US-16x08 keeps dying under bulk reads" event was traced to a second reader on
+`hw:1,0` (a stray CLI run alongside another). With a sole reader, both full
+100-patch banks read end to end with zero timeouts.
+
+[discrete]
+=== 2. Transaction interleave (protocol level)
+
+Even with perfect byte multiplexing (e.g. via ALSA's sequencer, which *can* share a
+port across clients), the Roland/BOSS protocol carries *no transaction id*. If two
+clients each send an RQ1 and read, the device answers both on the shared
+subscription and neither can tell which reply is theirs. A single physical device
+can therefore only serve *one* RQ1/DT1 conversation at a time.
+
+The important consequence:
+
+[IMPORTANT]
+====
+The real requirement is *per-device serialization of whole transactions*, not just
+"don't open the fd twice." ALSA's sequencer solves (1) but not (2). A lock or a
+daemon that serializes transactions solves both.
+====
+
+== Today: an advisory lock (shipped)
+
+`crates/gx700/src/backend/lock.rs` (`PortLock`) takes an exclusive advisory
+`flock` on a per-port lockfile under `$XDG_RUNTIME_DIR/rackctl/midi-<port>.lock`
+(falling back to the system temp dir). `RawMidi::open` acquires it *before* opening
+the ALSA streams, so a contended port fails fast with `Error::PortBusy` instead of
+corrupting both sides' reply streams.
+
+Properties:
+
+* *Crash-safe* -- the lock lives on the open file descriptor, so the kernel
+  releases it when the process exits, even on a crash. No stale lock to clean up.
+* *Coarse* -- it is whole-session mutual exclusion. While one app holds the port,
+  another gets `PortBusy`; there is no sharing.
+* *Advisory* -- it only excludes other Rackctl processes that take the same lock.
+  It does not stop unrelated tools (`amidi`, a DAW) from opening the port. Those
+  remain the user's responsibility.
+
+This is the right tool while the access pattern is "one app at a time" (a CLI run,
+or a single GUI). It costs ~one small module and no long-running process.
+
+NOTE: ALSA rawmidi already requires Rust 1.95 across the workspace; std file
+locking (`File::try_lock`, stable since 1.89) backs `PortLock` with no extra
+dependency and no `unsafe`.
+
+== Tomorrow: the arbitration daemon (design, not yet built)
+
+The lock cannot let a GUI hold a device open *and* a CLI poke in at the same time
+-- the second caller is simply refused. The first time that is genuinely wanted is
+the *GX-700 GUI era*: a patch editor kept open while ad-hoc CLI commands run. That
+is the trigger to build the daemon; building it earlier risks guessing the wire
+protocol wrong.
+
+=== Scope: a dumb SysEx-transaction broker
+
+The daemon owns each MIDI port and arbitrates *transactions*. It deliberately knows
+*nothing* about device semantics -- no parameter catalog, no patch layout. All of
+that stays in the per-device crates. The daemon understands only:
+
+* ports (open / enumerate / hold),
+* "send these bytes" (a DT1 / fire-and-forget), and
+* "do this request: send these bytes, collect the reply stream until idle, return
+  it" (an RQ1 transaction),
+
+serialized per device. This keeps it reusable across the whole device roadmap,
+since every device reduces to the same transaction shape behind a different codec.
+
+=== It is a `Transport`, so it reuses the existing seam
+
+The library already routes all device access through one trait
+(`crates/gx700/src/backend/mod.rs`):
+
+[source,rust]
+----
+pub trait Transport {
+    fn send(&mut self, addr: &[u8], data: &[u8]) -> Result<()>;
+    fn request(&mut self, addr: &[u8], len: usize) -> Result<Vec<u8>>;
+    fn request_blocks(&mut self, addr: &[u8], size: usize)
+        -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
+    fn program_change(&mut self, program: u8) -> Result<()>;
+}
+----
+
+That trait *is* the daemon's wire protocol surface. So the daemon adds exactly one
+new implementor and changes nothing else:
+
+[cols="1,3"]
+|===
+| `MockTransport`  | in-memory, no hardware (tests, CI) -- exists
+| `RawMidi`        | direct ALSA rawmidi, exclusive via `PortLock` -- exists
+| `DaemonClient`   | forwards `send`/`request`/… over a Unix socket; the daemon
+                     serializes per device -- *new*
+|===
+
+The daemon itself drives `RawMidi` internally. Apps choose `DaemonClient` when a
+daemon is reachable and fall back to `RawMidi` otherwise, so *the daemon stays
+optional*: with no daemon running, apps work exactly as today (exclusive, via the
+lock). This is the same shared MIDI transport slated for the `rackctl-core`
+extraction (Stage 3 of the GX-700 plan); the daemon is its natural home.
+
+=== Wire protocol (sketch)
+
+* *Transport:* a Unix-domain socket at `$XDG_RUNTIME_DIR/rackctl/midid.sock`
+  (per-user; `0600`). No network surface.
+* *Framing:* length-prefixed messages; a small request/response enum
+  (`OpenPort`, `Send`, `Request`, `RequestBlocks`, `ProgramChange`, plus
+  `ListPorts`). Each response correlates to one request id.
+* *Serialization:* the daemon holds one worker per open port and runs transactions
+  from a queue, so concurrent clients are interleaved at *transaction* granularity,
+  never mid-reply.
+* *Lifetime:* a client connection that opened a port releases its interest on
+  disconnect; the daemon closes a port with no remaining interest. The daemon takes
+  the same `PortLock` as a direct `RawMidi`, so a daemon and a stray direct opener
+  still cannot collide.
+* *Versioning:* a `Hello { version }` handshake; the daemon refuses clients it
+  cannot speak to, so daemon/client skew fails loudly rather than corrupting a
+  stream.
+
+=== Supervision
+
+A *user* systemd unit (`rackctl-midid.service`), socket-activated so it starts on
+first use and needs no always-on process. Logs to the journal. Not a system
+service -- it owns only the invoking user's MIDI access.
+
+=== Explicit non-goals
+
+* No device knowledge in the daemon (codecs and catalogs stay in device crates).
+* No audio, no routing, no meter bridge -- this is control-plane MIDI only.
+* Not a replacement for ALSA's sequencer; it sits *above* the raw port to add the
+  transaction serialization the sequencer does not provide.
+
+== Decision record
+
+[cols="1,4"]
+|===
+| *Now*   | Ship `PortLock` (advisory `flock`). Fixes the contention bug for one
+            small module; correct for the one-app-at-a-time access pattern.
+| *Later* | Build the broker daemon as a `DaemonClient` `Transport` + a
+            socket-activated user service, when the GX-700 GUI makes
+            concurrent-live access real, alongside the `rackctl-core` extraction.
+| *Why split* | A daemon is a real subsystem (lifecycle, IPC, supervision, version
+                skew). The lock covers the present need at a fraction of the cost
+                and does not block the daemon later -- the daemon takes the same
+                lock.
+|===
