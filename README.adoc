@@ -140,3 +140,10 @@ library. With thanks to its author.
 
 Licensed under the MIT License; see link:LICENSE[LICENSE]. tascam-gtk is likewise
 MIT-licensed, © onkelDead.
+
+== Trademarks
+
+Tascam is a trademark of TEAC Corporation, and US-16x08 is a TEAC product
+designation. This is an independent, unofficial project; it is not affiliated
+with, authorized by, sponsored by, or endorsed by TEAC Corporation. These names
+are used only descriptively, to identify the hardware that these tools control.

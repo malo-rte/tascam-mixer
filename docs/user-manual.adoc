@@ -46,6 +46,14 @@ model, then the chapter for the tool you use (<<sec-cli>> or <<sec-gui>>). The
 reference chapters (<<sec-cli-ref>>, <<sec-gui-ref>>) and the verified control
 catalog (<<sec-appendix-catalog>>) are for looking up exact details.
 
+[NOTE]
+====
+Tascam is a trademark of TEAC Corporation, and US-16x08 is a TEAC product
+designation. This is an independent, unofficial project, not affiliated with or
+endorsed by TEAC Corporation; the names are used only to identify the hardware
+these tools control.
+====
+
 [[sec-scope]]
 == Scope
 
