@@ -20,18 +20,24 @@ pub(crate) enum Tab {
     Routing,
     Scenes,
     Strips,
+    Eq,
+    Comp,
 }
 
-/// The two kinds of named, file-backed preset the GUI manages in a list tab: a
-/// whole-mixer *scene*, or a single-channel *strip* applied to the focused
-/// channel. They differ only in their directory and whether a load/save targets
-/// the whole mixer or one channel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The kinds of named, file-backed preset the GUI manages in a list tab. A
+/// *scene* is the whole mixer; the others are applied to the focused channel: a
+/// *strip* is the whole channel, while *EQ* and *compressor* are just that
+/// section. They differ only in their directory and what they capture/apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PresetKind {
     /// A whole-mixer snapshot (the Scenes tab).
     Scene,
     /// One channel's strip, applied to the focused channel (the Strips tab).
     Strip,
+    /// One channel's EQ section (the EQ presets tab).
+    Eq,
+    /// One channel's compressor section (the Comp presets tab).
+    Comp,
 }
 
 /// A group of per-channel controls that can be copied from one channel and
@@ -133,10 +139,8 @@ pub(crate) struct App {
     zoom: f32,
     /// Persisted window inner size (logical points), saved with the default.
     window: Option<[f32; 2]>,
-    /// Name being typed for a new scene in the Scenes tab.
-    pub(crate) scene_name: String,
-    /// Name being typed for a new channel preset in the Strips tab.
-    pub(crate) strip_name: String,
+    /// Name being typed for a new preset, per preset tab.
+    preset_names: HashMap<PresetKind, String>,
     /// A preset awaiting delete confirmation in a preset tab.
     pub(crate) pending_delete: Option<PathBuf>,
     /// Copy/paste clipboards for the channel, EQ, and compressor groups.
@@ -177,8 +181,7 @@ impl App {
             links: cfg.links,
             zoom: cfg.zoom,
             window: cfg.window,
-            scene_name: String::new(),
-            strip_name: String::new(),
+            preset_names: HashMap::new(),
             pending_delete: None,
             clip_channel: None,
             clip_eq: None,
@@ -532,10 +535,7 @@ impl App {
 
     /// The text buffer for the new-preset name field of `kind`'s tab.
     pub(crate) fn preset_name_mut(&mut self, kind: PresetKind) -> &mut String {
-        match kind {
-            PresetKind::Scene => &mut self.scene_name,
-            PresetKind::Strip => &mut self.strip_name,
-        }
+        self.preset_names.entry(kind).or_default()
     }
 
     /// The directory holding `kind`'s preset files.
@@ -543,15 +543,17 @@ impl App {
         match kind {
             PresetKind::Scene => config::scenes_dir(),
             PresetKind::Strip => config::strips_dir(),
+            PresetKind::Eq => config::eq_dir(),
+            PresetKind::Comp => config::comp_dir(),
         }
     }
 
-    /// Which channel a `kind` preset captures from / applies to: the whole mixer
-    /// (`None`) for a scene, or the focused channel for a strip.
+    /// Which channel a `kind` preset applies to: the whole mixer (`None`) for a
+    /// scene, or the focused channel for the per-channel kinds.
     fn preset_channel(&self, kind: PresetKind) -> Option<u32> {
         match kind {
             PresetKind::Scene => None,
-            PresetKind::Strip => Some(u32::from(self.selected)),
+            PresetKind::Strip | PresetKind::Eq | PresetKind::Comp => Some(u32::from(self.selected)),
         }
     }
 
@@ -573,17 +575,59 @@ impl App {
             return;
         }
         let path = dir.join(format!("{file}.json"));
-        self.save_preset(&path, self.preset_channel(kind));
+        self.write_named(kind, &path);
     }
 
-    /// Load a saved preset of `kind` from `path`.
+    /// Load a saved preset of `kind` from `path` (a scene, full strip, or a
+    /// partial strip holding only the EQ or compressor controls).
     pub(crate) fn load_named_preset(&mut self, kind: PresetKind, path: &Path) {
         self.load_preset(path, self.preset_channel(kind));
     }
 
     /// Overwrite an existing preset file of `kind` with the current state.
     pub(crate) fn update_named_preset(&mut self, kind: PresetKind, path: &Path) {
-        self.save_preset(path, self.preset_channel(kind));
+        self.write_named(kind, path);
+    }
+
+    /// Write a preset of `kind` to `path`: a scene or full strip via
+    /// [`Self::save_preset`]; an EQ or compressor preset as a strip holding only
+    /// that section's controls.
+    fn write_named(&mut self, kind: PresetKind, path: &Path) {
+        match kind {
+            PresetKind::Scene | PresetKind::Strip => {
+                self.save_preset(path, self.preset_channel(kind));
+            }
+            PresetKind::Eq => self.save_group_preset(path, Group::Eq),
+            PresetKind::Comp => self.save_group_preset(path, Group::Comp),
+        }
+    }
+
+    /// Capture the focused channel's strip, keep only `group`'s controls, and
+    /// write it as a (partial) strip preset. Loading it applies just that section.
+    fn save_group_preset(&mut self, path: &Path, group: Group) {
+        let ch = u32::from(self.selected);
+        let keys: std::collections::HashSet<&str> =
+            group_controls(group).iter().map(|c| c.cli_key()).collect();
+        let result = self
+            .device
+            .capture_strip(ch)
+            .map_err(|e| e.to_string())
+            .and_then(|preset| {
+                let Preset::Strip { version, controls } = preset else {
+                    return Err("expected a strip preset".to_owned());
+                };
+                let controls = controls
+                    .into_iter()
+                    .filter(|(key, _)| keys.contains(key.as_str()))
+                    .collect();
+                let filtered = Preset::Strip { version, controls };
+                serde_json::to_string_pretty(&filtered).map_err(|e| e.to_string())
+            })
+            .and_then(|json| std::fs::write(path, json).map_err(|e| e.to_string()));
+        self.status = match result {
+            Ok(()) => format!("saved {}", path.display()),
+            Err(e) => format!("save failed: {e}"),
+        };
     }
 
     /// Delete a saved preset file.
@@ -673,6 +717,8 @@ impl App {
             ui.selectable_value(&mut self.tab, Tab::Routing, "Routing");
             ui.selectable_value(&mut self.tab, Tab::Scenes, "Scenes");
             ui.selectable_value(&mut self.tab, Tab::Strips, "Channel presets");
+            ui.selectable_value(&mut self.tab, Tab::Eq, "EQ presets");
+            ui.selectable_value(&mut self.tab, Tab::Comp, "Comp presets");
         });
     }
 }
@@ -747,6 +793,8 @@ impl eframe::App for App {
                     Tab::Routing => routing::show(self, ui),
                     Tab::Scenes => preset_tab::show(self, ui, PresetKind::Scene),
                     Tab::Strips => preset_tab::show(self, ui, PresetKind::Strip),
+                    Tab::Eq => preset_tab::show(self, ui, PresetKind::Eq),
+                    Tab::Comp => preset_tab::show(self, ui, PresetKind::Comp),
                 });
             });
         } else {

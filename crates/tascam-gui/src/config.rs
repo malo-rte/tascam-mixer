@@ -63,6 +63,17 @@ pub(crate) fn strips_dir() -> Option<PathBuf> {
     ProjectDirs::from("de", "paraair", "tascam-mixer").map(|dirs| dirs.config_dir().join("strips"))
 }
 
+/// Directory holding the user's saved EQ presets, under the config directory.
+pub(crate) fn eq_dir() -> Option<PathBuf> {
+    ProjectDirs::from("de", "paraair", "tascam-mixer").map(|dirs| dirs.config_dir().join("eq"))
+}
+
+/// Directory holding the user's saved compressor presets, under the config
+/// directory.
+pub(crate) fn comp_dir() -> Option<PathBuf> {
+    ProjectDirs::from("de", "paraair", "tascam-mixer").map(|dirs| dirs.config_dir().join("comp"))
+}
+
 /// Load the saved config, falling back to defaults on any error.
 pub(crate) fn load() -> GuiConfig {
     let Some(path) = config_path() else {

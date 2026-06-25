@@ -20,6 +20,10 @@ version.
 - **GUI** — copy/paste between channels: *Copy channel* / *Paste channel* above
   the editor for the whole strip, and *Copy* / *Paste* in the EQ and Compressor
   title rows for just that section. Pasting onto a linked pair applies to both.
+- **GUI** — *EQ presets* and *Comp presets* tabs: save and recall a single
+  channel's EQ or compressor section, like the channel-presets tab but per
+  section. Stored as partial strip presets, so `tascamctl load` can apply one to
+  a channel too.
 - **GUI** — a *Reset channel* button that returns the whole focused channel to a
   neutral default (flat EQ, no compression, centre pan, fader fully down at
   -127 dB, switches off), alongside the existing per-section EQ and Compressor

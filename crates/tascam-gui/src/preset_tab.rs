@@ -27,6 +27,8 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
         let label = match kind {
             PresetKind::Scene => "Save current mix",
             PresetKind::Strip => "Save this channel",
+            PresetKind::Eq => "Save this EQ",
+            PresetKind::Comp => "Save this compressor",
         };
         if ui.button(label).clicked() || entered {
             save = true;
@@ -74,6 +76,8 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
     let overwrite_hint = match kind {
         PresetKind::Scene => "Overwrite this scene with the current mixer",
         PresetKind::Strip => "Overwrite this preset with the current channel",
+        PresetKind::Eq => "Overwrite this preset with the current EQ",
+        PresetKind::Comp => "Overwrite this preset with the current compressor",
     };
     egui::Grid::new("preset-grid")
         .striped(true)
@@ -118,6 +122,22 @@ fn heading(app: &App, ui: &mut egui::Ui, kind: PresetKind) {
             ui.label(format!(
                 "Save and recall one channel's settings. Save captures channel {}, \
                  and Load applies a preset to it.",
+                app.selected + 1
+            ));
+        }
+        PresetKind::Eq => {
+            ui.heading("EQ presets");
+            ui.label(format!(
+                "Save and recall a channel's EQ section. Save captures channel {}'s EQ, \
+                 and Load applies a preset to it.",
+                app.selected + 1
+            ));
+        }
+        PresetKind::Comp => {
+            ui.heading("Compressor presets");
+            ui.label(format!(
+                "Save and recall a channel's compressor. Save captures channel {}'s \
+                 compressor, and Load applies a preset to it.",
                 app.selected + 1
             ));
         }
