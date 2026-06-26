@@ -26,7 +26,8 @@ MIDI System Exclusive, and selects patch memories with Program Change. It edits 
 the control surface; it does not stream audio.
 
 Parameters are addressed by a short key (run `list` to see them all). Values are \
-raw 7-bit device units for now; display-unit conversion is deferred to Stage 2.",
+raw device units, shown with display units where known (e.g. output level as a \
+percentage).",
     after_help = EXAMPLES,
     propagate_version = true,
     styles = HELP_STYLES

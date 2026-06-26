@@ -18,11 +18,13 @@
 This manual describes how to control the BOSS GX-700 guitar effects processor
 from Linux using the command-line tool `rackctl-gx700`.
 
-This is an early manual: it currently focuses on *managing patches* -- backing
-them up and restoring them. The full set of commands (reading and writing
-individual parameters, listing the catalog, monitoring MIDI) is discoverable with
-`rackctl-gx700 --help` and `rackctl-gx700 <command> --help`, and will be
-documented here over time.
+Read <<sec-install>> to build and install the tool and <<sec-connecting>> to wire
+up and find the unit. After that, <<sec-patches>> covers browsing and recalling
+patches, <<sec-editing>> covers changing a sound's parameters, and
+<<sec-scenes-backups>> covers saving and restoring patches to your computer.
+<<sec-monitor>> is a diagnostic aid, and the reference chapters
+(<<sec-cli-ref>>, <<sec-troubleshooting>>, <<sec-glossary>>) are for looking up
+details. Every command is also self-documenting with `--help`.
 
 [NOTE]
 ====
@@ -43,6 +45,63 @@ meters; it is edited entirely over MIDI.
 USB-MIDI interface (for example, the MIDI ports of a Tascam US-16x08). It can read
 and write individual effect parameters, select patches, and -- the subject of this
 manual -- save and restore whole patches and whole banks to your computer.
+
+[[sec-install]]
+== Installing the tools
+
+[[sec-install-prereq]]
+=== Prerequisites
+
+* A Linux system with ALSA (any modern kernel).
+* A *USB-MIDI interface* with 5-pin DIN MIDI in and out, to bridge the computer to
+  the GX-700 (for example, the MIDI ports of a Tascam US-16x08).
+* To build from source: a Rust toolchain (edition 2024, 1.95 or later) and the
+  ALSA development headers, which the default build links against. On Debian or
+  Ubuntu: `sudo apt-get install libasound2-dev`.
+
+[[sec-install-build]]
+=== Building from source
+
+Build the command-line tool from the workspace root:
+
+[source,console]
+----
+$ cargo build --release -p rackctl-gx700-cli
+----
+
+The binary is `target/release/rackctl-gx700`. Copy it onto your `PATH` (for
+example `~/.local/bin/`), or run it in place. This manual writes it simply as
+`rackctl-gx700`.
+
+NOTE: The Nix flake in this repository currently packages the *US-16x08* tools; the
+GX-700 CLI is built with `cargo` as above.
+
+[[sec-install-mock]]
+=== Running without hardware
+
+Every command accepts a global `--mock` flag (used instead of `--port`) that runs
+against an in-memory device with no interface attached. It is handy for trying the
+commands, reading the catalog, and seeing the on-disk file layout. The mock starts
+fresh each run, so it does not persist edits between commands.
+
+[source,console]
+----
+$ rackctl-gx700 --mock list            # the parameter catalog
+$ rackctl-gx700 --mock dump             # a (default) patch, in readable form
+----
+
+[[sec-install-completions]]
+=== Shell completions
+
+`rackctl-gx700 completions <shell>` prints a completion script to standard output
+for `bash`, `elvish`, `fish`, `powershell`, or `zsh`. Redirect it where your shell
+looks for completions, for example:
+
+[source,console]
+----
+$ rackctl-gx700 completions bash | sudo tee /usr/share/bash-completion/completions/rackctl-gx700
+$ rackctl-gx700 completions fish > ~/.config/fish/completions/rackctl-gx700.fish
+----
 
 [[sec-connecting]]
 == Connecting to the GX-700
@@ -524,3 +583,157 @@ you want one portable file that captures the device as a whole.
 * *Try it without hardware.* Add `--mock` (and drop `--port`) to exercise any of
   these commands against an in-memory device and see exactly which files are
   written.
+
+[[sec-monitor]]
+== Monitoring MIDI
+
+Two commands print what arrives on the MIDI port. They are diagnostic aids -- for
+confirming the cabling and for seeing what the unit sends. Both need `--port` and
+run until you interrupt them with kbd:[Ctrl+C].
+
+`monitor` decodes every incoming MIDI message to one readable line:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 monitor
+ch1  Program     6
+ch1  CC          ctrl 7 val 100
+SysEx [F0 41 00 79 12 00 00 04 02 64 ...]
+----
+
+It decodes note on/off, control change, program change, pitch bend, aftertouch, and
+system real-time messages, and shows System Exclusive as hex.
+
+`recv` prints only incoming System Exclusive messages, as raw hex -- a
+reverse-engineering aid for reading exactly what the unit emits:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 recv
+F0 41 00 79 12 00 00 04 01 03 ...
+----
+
+Use these to confirm the *return* path works (GX-700 MIDI OUT -> interface MIDI IN)
+and to capture the patch data the unit streams.
+
+[NOTE]
+====
+The GX-700 does *not* transmit individual parameter edits over MIDI -- it transmits
+only when it sends a bulk dump (for example, in reply to a read). So turning a knob
+on the front panel shows nothing in `monitor`, while reading a patch shows the whole
+dump. See `docs/gx700-sysex-protocol.adoc` for the details.
+====
+
+`monitor` and `recv` hold the port like any other command, so the one-program-at-a-
+time rule (<<sec-connecting>>) applies: do not run them alongside another GX-700
+command.
+
+[[sec-cli-ref]]
+== Command-line reference
+
+[[sec-cli-ref-global]]
+=== Global options
+
+[cols="1,3",options="header"]
+|===
+| Option | Meaning
+| `--port <hw:CARD,DEV>` | The ALSA rawmidi port of the USB-MIDI interface (see `ports`). Required by every command that talks to the hardware.
+| `--mock`               | Use an in-memory mock device instead of hardware; use this *instead of* `--port`.
+| `-h`, `--help`         | Print help (top level, or for a `<command>`).
+| `-V`, `--version`      | Print the version.
+|===
+
+A command that talks to the device needs exactly one of `--port` or `--mock`.
+
+[[sec-cli-ref-commands]]
+=== Commands
+
+The *Needs* column shows what a command requires: _device_ (a unit via `--port`, or
+`--mock`), _disk_ (only local files), or _none_ (built-in, no device or files).
+
+[cols="2,4,1",options="header"]
+|===
+| Command | Summary | Needs
+| `ports`                          | List the ALSA rawmidi ports on the system. | none
+| `list`                           | List every parameter (key, block, kind, address). | none
+| `info <param>`                   | Show one parameter's block, kind, range, and enum values. | none
+| `get <param>`                    | Read a parameter's current value. | device
+| `set <param> <value>`            | Write a value to a parameter (current sound). | device
+| `dump [--patch N \| --file NAME]` | Print a patch readably: current sound, slot `N`, or a saved file. | device / disk
+| `save <name> [--patch N]`        | Save a patch (current sound, or slot `N`) to disk. | device
+| `backup [--preset]`              | Save a whole bank as per-patch files. | device
+| `scene save <name>`              | Save all 100 user patches as one scene file. | device
+| `scene restore <name> --yes`     | Restore a scene to the device (overwrites all user patches). | device
+| `scene list`                     | List scenes saved on disk. | disk
+| `load <name> [--to-patch N]`     | Load a saved patch file to the current sound or slot `N`. | device
+| `select <n>`                     | Recall a patch by Program Change `n` (0--127). | device
+| `patches [--preset] [--disk]`    | List patch slots (device user/preset bank, or saved on disk). | device / disk
+| `recv`                           | Print incoming SysEx as hex. | device
+| `monitor`                        | Print every incoming MIDI message, decoded. | device
+| `completions <shell>`            | Print a shell completion script. | none
+|===
+
+[[sec-cli-ref-exit]]
+=== Exit codes
+
+[cols="1,5",options="header"]
+|===
+| Code | Meaning
+| 0 | Success.
+| 1 | Runtime error: no such port, port busy, reply timeout, value out of range, file error.
+| 2 | Usage error: bad arguments (reported by the argument parser).
+|===
+
+[[sec-troubleshooting]]
+== Troubleshooting
+
+`ports` shows nothing / `no rawmidi ports found`::
+No USB-MIDI interface is visible to ALSA. Check it is connected and recognised
+(`arecord -l` / `amidi -l` should list it), then re-run `ports`.
+
+`MIDI port hw:1,0 is in use by another rackctl process`::
+Another `rackctl-gx700` already holds the port. Only one program may use the
+interface at a time (see <<sec-connecting>>). Wait for the other command -- a
+backup, scene save, or restore can take a few minutes -- to finish.
+
+`timed out waiting for a device reply`::
+The unit did not answer. Check, in order: both MIDI cables (interface OUT ->
+GX-700 IN *and* GX-700 OUT -> interface IN); that `--port` is the right interface;
+that no other program is reading the port; that the GX-700 is powered on. If the
+interface itself has stalled after heavy use, power-cycle it.
+
+`set` changes nothing audible::
+The GX-700 receives on its MIDI channel (omni by default); confirm the channel /
+device id if you have changed it. Remember that `set` edits the *current sound*, so
+make sure that is what you are listening to (recall a patch with `select` first).
+
+Listing or backing up a bank is slow::
+Expected. Each patch is a complete read, and reads are paced to keep the interface
+stable; a full bank is therefore a couple of minutes.
+
+Intermittent timeouts or garbled reads::
+Almost always two programs using the port at once -- the device's reply gets split
+between them. Make sure only one `rackctl-gx700` (or other MIDI tool) is using the
+interface.
+
+[[sec-glossary]]
+== Glossary
+
+Patch:: One complete GX-700 sound -- every effect block and its settings, plus a
+name and the effect-chain order. The unit holds 200.
+
+Current sound:: The temporary buffer -- what the unit is playing right now. `get`,
+`set`, and `dump` (with no slot) act on it.
+
+User / preset bank:: The 100 user patches (`U001`..`U100`), which you can overwrite,
+and the 100 factory preset patches (`P001`..`P100`), which are read-only.
+
+Scene:: A named snapshot of all 100 user patches, saved as a single file.
+
+System Exclusive (SysEx):: The category of MIDI message the GX-700 is controlled
+with. DT1 is the Roland "write" command and RQ1 the "read" request.
+
+Program Change:: The MIDI message that recalls a patch memory.
+
+USB-MIDI interface:: The hardware that bridges the computer's USB to the GX-700's
+5-pin DIN MIDI.
