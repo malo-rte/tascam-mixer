@@ -148,6 +148,18 @@ enum Command {
         /// Destination user patch slot (1-100).
         to: u16,
     },
+    /// Show or reorder the signal chain (effect-block order) of a saved patch.
+    ///
+    /// Operates on a patch file on disk, no device needed. After reordering, load
+    /// the patch with `load --to-patch` (in BULK LOAD mode) to apply it on the unit.
+    Chain {
+        /// Saved patch name (in the gx700 patches directory).
+        name: String,
+        /// New order: a comma-separated permutation of all 13 block tokens
+        /// (comp,wah,dist,preamp,loop,eq,speaker,ns,mod,delay,chorus,tremolo,reverb).
+        #[arg(long, value_delimiter = ',')]
+        set: Option<Vec<String>>,
+    },
     /// Select a patch memory by Program Change.
     Select {
         /// Patch program number (0-127).
@@ -303,6 +315,7 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
         | Command::Info { .. }
         | Command::Recv
         | Command::Monitor
+        | Command::Chain { .. }
         | Command::Completions { .. } => Ok(()),
     }
 }
@@ -338,6 +351,7 @@ fn run() -> Result<()> {
         Command::Dump {
             file: Some(name), ..
         } => return commands::dump_file(name),
+        Command::Chain { name, set } => return commands::chain(name, set.as_deref()),
         _ => {}
     }
 

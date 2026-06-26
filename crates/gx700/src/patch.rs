@@ -163,6 +163,48 @@ impl RawPatch {
         }
         out
     }
+
+    /// The signal-chain order: the 13 effect-type bytes from the Level/Chain
+    /// block (offsets `1..=13`), each a block id `01`=Compressor .. `0D`=Reverb,
+    /// giving the order of the effect blocks in the signal path. Empty if the
+    /// Level/Chain block is missing or too short.
+    #[must_use]
+    pub fn chain(&self) -> Vec<u8> {
+        self.header().1
+    }
+
+    /// Reorder the signal chain. `order` must be a permutation of the 13 block
+    /// ids `1..=13` (`01`=Compressor .. `0D`=Reverb) -- every block exactly once,
+    /// none repeated or omitted. Rewrites the Level/Chain block in place.
+    ///
+    /// # Errors
+    /// [`Error::Patch`] if `order` is not such a permutation, or the Level/Chain
+    /// block is missing or too short to hold the chain.
+    pub fn set_chain(&mut self, order: &[u8]) -> Result<()> {
+        let mut sorted = order.to_vec();
+        sorted.sort_unstable();
+        if sorted != (1u8..=13).collect::<Vec<u8>>() {
+            return Err(Error::Patch(
+                "chain must be a permutation of the 13 block ids 01..0D \
+                 (each exactly once, none repeated or omitted)"
+                    .to_owned(),
+            ));
+        }
+        let hex = self
+            .blocks
+            .get(&0x00)
+            .ok_or_else(|| Error::Patch("patch has no Level/Chain block".to_owned()))?;
+        let mut bytes = from_hex(hex)?;
+        let Some(slot) = bytes.get_mut(1..14) else {
+            return Err(Error::Patch(format!(
+                "Level/Chain block too short ({} bytes) to hold the chain",
+                bytes.len()
+            )));
+        };
+        slot.copy_from_slice(order);
+        self.blocks.insert(0x00, to_hex(&bytes));
+        Ok(())
+    }
 }
 
 /// Format a raw device byte for one parameter in display units.
@@ -452,6 +494,37 @@ mod tests {
         assert_eq!(patch_base(200), Some([0x01, 0x63, 0x00, 0x00]));
         assert_eq!(patch_base(0), None);
         assert_eq!(patch_base(201), None);
+    }
+
+    #[test]
+    fn chain_reads_and_reorders() {
+        let mut blocks = BTreeMap::new();
+        blocks.insert(
+            0x00u8,
+            "32 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 4A 41 5A 5A 20 54 4F 4E 45 20 20 20"
+                .to_owned(),
+        );
+        let mut patch = RawPatch {
+            version: PATCH_VERSION,
+            name: "JAZZ TONE".to_owned(),
+            blocks,
+        };
+        assert_eq!(patch.chain(), (1u8..=13).collect::<Vec<u8>>());
+
+        // Valid reorder: swap Modulation (9) and Delay (10).
+        let order = vec![1, 2, 3, 4, 5, 6, 7, 8, 10, 9, 11, 12, 13];
+        patch.set_chain(&order).unwrap();
+        assert_eq!(patch.chain(), order);
+        // Output level and name bytes are untouched.
+        assert!(patch.describe().contains("JAZZ TONE"));
+
+        // Rejected: duplicate/omission and wrong length.
+        assert!(
+            patch
+                .set_chain(&[1, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+                .is_err()
+        );
+        assert!(patch.set_chain(&[1, 2, 3]).is_err());
     }
 
     #[test]

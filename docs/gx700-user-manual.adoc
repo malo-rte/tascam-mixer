@@ -295,6 +295,54 @@ you have saved it (with `save`, `backup`, or `scene save`). To copy *into* a pre
 slot is not possible -- the factory bank is read-only.
 ====
 
+[[sec-patches-chain]]
+=== Reordering the signal chain
+
+A patch's *signal chain* is the order its effect blocks sit in the signal path.
+`chain` shows or reorders that order. It works on a *saved patch file* (on disk, no
+device); after reordering, `load` the file to apply it on the unit.
+
+Show a saved patch's chain:
+
+[source,console]
+----
+$ rackctl-gx700 chain "my-lead"
+ 1. Compressor [comp]
+ 2. Wah [wah]
+ 3. Distortion [dist]
+ 4. Preamp [preamp]
+ 5. Loop [loop]
+ 6. Equalizer [eq]
+ 7. Speaker Sim [speaker]
+ 8. Noise Suppressor [ns]
+ 9. Modulation [mod]
+10. Delay [delay]
+11. Chorus [chorus]
+12. Tremolo/Pan [tremolo]
+13. Reverb [reverb]
+----
+
+Reorder it with `--set`, giving a comma-separated list of all 13 block tokens (the
+`[token]` shown above) in the order you want. For example, to put Delay *before*
+Modulation:
+
+[source,console]
+----
+$ rackctl-gx700 chain "my-lead" --set comp,wah,dist,preamp,loop,eq,speaker,ns,delay,chorus,mod,tremolo,reverb
+----
+
+The list must be a *permutation of all 13 blocks* -- each exactly once, none
+repeated or omitted (a wrong list is rejected). All 13 blocks always stay in the
+chain; to take one out of the sound, turn its `*-enable` off (see <<sec-editing>>)
+rather than removing it here. `--set` saves the edited patch back to its file; then
+write it to the unit:
+
+[source,console]
+----
+# put the GX-700 in BULK LOAD mode (see <<sec-bulk-load>>), then:
+$ rackctl-gx700 --port hw:1,0 load "my-lead" --to-patch 42
+----
+
 [[sec-patches-banks]]
 === User and preset banks
 
@@ -726,6 +774,7 @@ The *Needs* column shows what a command requires: _device_ (a unit via `--port`,
 | `scene list`                     | List scenes saved on disk. | disk
 | `load <name> [--to-patch N]`     | Load a saved patch file to the current sound or slot `N`. | device
 | `copy <from> <to>`               | Copy a stored patch to another user slot on the device (overwrites). | device
+| `chain <name> [--set …]`         | Show or reorder the signal chain (block order) of a saved patch. | disk
 | `select <n>`                     | Recall a patch by Program Change `n` (0--127). | device
 | `patches [--preset] [--disk]`    | List patch slots (device user/preset bank, or saved on disk). | device / disk
 | `recv`                           | Print incoming SysEx as hex. | device

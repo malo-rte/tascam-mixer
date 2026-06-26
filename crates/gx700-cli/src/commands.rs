@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
-use rackctl_gx700::{Gx700, Kind, Param, RawPatch, Scene, Transport, param};
+use anyhow::{Context, Result, anyhow, bail};
+use rackctl_gx700::{Block, Gx700, Kind, Param, RawPatch, Scene, Transport, param};
 
 use crate::config;
 use crate::value::{format_value, parse_value};
@@ -224,6 +224,83 @@ pub(crate) fn load<T: Transport>(
     );
     eprintln!("loaded {:?} ({blocks} sub-blocks) into {dest}", raw.name);
     Ok(())
+}
+
+/// Show or reorder the signal chain of a saved patch (on disk, no device). With
+/// `set`, reorders the blocks and saves the patch; then load it with
+/// `load --to-patch` (in BULK LOAD mode) to apply it on the unit.
+pub(crate) fn chain(name: &str, set: Option<&[String]>) -> Result<()> {
+    let mut raw = read_saved(name)?;
+    if let Some(tokens) = set {
+        let mut order = Vec::with_capacity(tokens.len());
+        for t in tokens {
+            order.push(chain_block_id(t).ok_or_else(|| {
+                anyhow!(
+                    "unknown block {t:?}; use the 13 tokens: \
+                     comp wah dist preamp loop eq speaker ns mod delay chorus tremolo reverb"
+                )
+            })?);
+        }
+        raw.set_chain(&order).context("setting the signal chain")?;
+        let path = write_patch_file(name, &raw)?;
+        eprintln!("updated the chain of {name:?}; saved to {}", path.display());
+    }
+    print_chain(&raw);
+    Ok(())
+}
+
+/// Print a patch's signal chain as a numbered list of block labels and tokens.
+fn print_chain(raw: &RawPatch) {
+    let chain = raw.chain();
+    if chain.is_empty() {
+        eprintln!("(no Level/Chain block in this patch)");
+        return;
+    }
+    for (i, &b) in chain.iter().enumerate() {
+        let label =
+            Block::from_base(b).map_or_else(|| format!("?{b:#04X}"), |blk| blk.label().to_owned());
+        println!("{:>2}. {label} [{}]", i + 1, chain_token(b));
+    }
+}
+
+/// Map a chain block token (CLI input) to its effect-type byte (`01`..`0D`).
+fn chain_block_id(token: &str) -> Option<u8> {
+    Some(match token.to_ascii_lowercase().as_str() {
+        "comp" | "compressor" => 0x01,
+        "wah" => 0x02,
+        "dist" | "distortion" => 0x03,
+        "preamp" => 0x04,
+        "loop" => 0x05,
+        "eq" | "equalizer" => 0x06,
+        "speaker" | "spsim" | "sp" => 0x07,
+        "ns" | "noise" => 0x08,
+        "mod" | "modulation" => 0x09,
+        "delay" => 0x0A,
+        "chorus" => 0x0B,
+        "tremolo" | "trem" | "pan" => 0x0C,
+        "reverb" => 0x0D,
+        _ => return None,
+    })
+}
+
+/// The canonical short token for a chain block id, for display.
+fn chain_token(id: u8) -> &'static str {
+    match id {
+        0x01 => "comp",
+        0x02 => "wah",
+        0x03 => "dist",
+        0x04 => "preamp",
+        0x05 => "loop",
+        0x06 => "eq",
+        0x07 => "speaker",
+        0x08 => "ns",
+        0x09 => "mod",
+        0x0A => "delay",
+        0x0B => "chorus",
+        0x0C => "tremolo",
+        0x0D => "reverb",
+        _ => "?",
+    }
 }
 
 /// Read the current sound, or device patch memory slot `patch`, as a [`RawPatch`].
