@@ -57,6 +57,32 @@ that guides the user into BULK LOAD mode and stores the adjusted patches as a ba
 That keeps the per-patch BULK LOAD dance out of the everyday loop -- you do it once,
 at the end.
 
+=== Why the balancer touches only `output-level`
+
+A patch is a chain of gain stages, and several of them carry a "level"/"volume":
+
+* `output-level` -- the patch's *final* master output (Level/Chain `00`).
+* Preamp -- `preamp-volume`, `preamp-master`, `preamp-gain` (the dominant loudness
+  driver for amp/distortion patches).
+* Per-effect output levels -- `comp-level`, `wah-level`, `dist-level`, `ns-level`,
+  `eq-level`, `loop-send-level`/`loop-return-level`, `speaker-mic-level`/`-direct-level`,
+  `delay-effect-level`/`-direct-level` (+ tap levels), `chorus-effect-level`,
+  `reverb-effect-level`/`-direct-level`.
+* EQ band gains -- `eq-low-gain` / `-mid-gain` / `-high-gain` (`0..40`, 20 ≈ 0 dB).
+
+The balancer deliberately adjusts *only* `output-level`, because it rescales the
+*whole* patch uniformly -- it changes loudness *without re-voicing the sound*. Every
+other level sits *inside* the signal chain, so moving it changes the tone or the
+internal mix (more preamp master = more drive **and** volume, an EQ boost colours as
+it lifts, etc.). That is sound-design, not balancing.
+
+Consequence: two patches at the same `output-level` can still differ in perceived
+loudness (their internal gain staging differs), but `output-level` is the correct,
+tone-preserving knob to even them out. The one case it cannot cover is making a patch
+*louder than its design* once `output-level` is already at 100% -- for that you would
+reach into `preamp-master` / `preamp-volume`, which belongs in the *effect editor*
+(below), not the balancer.
+
 == Other candidate features (from the Stage 4 plan)
 
 * *Effect-chain editor* -- per-block enable + parameter widgets for the 14 effect
