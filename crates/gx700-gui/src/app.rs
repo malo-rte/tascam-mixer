@@ -365,7 +365,8 @@ impl App {
     }
 
     /// Store every pending change (name + level) to memory in one batch (the
-    /// "Write changes to unit" button). Stops at the first failure with guidance.
+    /// "Write changes to unit" button). Attempts every dirty row even if some fail,
+    /// committing each success so its row clears, and reports any failures.
     fn write_all(&mut self) {
         let dirty: Vec<u16> = self
             .rows
@@ -378,6 +379,8 @@ impl App {
             return;
         }
         let mut stored = 0usize;
+        let mut failed: Vec<u16> = Vec::new();
+        let mut last_err = String::new();
         for slot in &dirty {
             self.ensure_loaded(*slot);
             match self.store_one(*slot) {
@@ -386,15 +389,23 @@ impl App {
                     stored = stored.saturating_add(1);
                 }
                 Err(msg) => {
-                    self.status = msg;
-                    break;
+                    failed.push(*slot);
+                    last_err = msg;
                 }
             }
         }
-        if stored == dirty.len() {
-            self.status = format!("stored {stored} patch change(s)");
-        }
         self.save_cache();
+        self.status = if failed.is_empty() {
+            format!("stored {stored} patch change(s)")
+        } else {
+            // Lead with the cause (often "not in BULK LOAD mode"); list the slots.
+            let slots: Vec<String> = failed.iter().map(|s| format!("U{s:03}")).collect();
+            format!(
+                "stored {stored}, {} failed ({}) — {last_err}",
+                failed.len(),
+                slots.join(", ")
+            )
+        };
     }
 
     fn save_cache(&self) {
