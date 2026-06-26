@@ -8,9 +8,11 @@ Roadmap for the *graphical patch editor* for the BOSS GX-700 (Rackctl Stage 4),
 
 *Status:* the **patch librarian + level balancer** (the headline feature below) is
 **implemented** -- a one-screen list of all 100 user patches with one-click
-audition and inline output-level balancing, plus a "balance live, write once" store
-that guides the user into BULK LOAD mode. The rest of this document records the
-remaining ideas and how they map onto the existing building blocks.
+audition and inline output-level balancing. Each row has *Save* (store just that
+patch) and *Revert* (drop the edit back to the on-unit value), plus a batch "Write
+levels to unit" that stores every pending change; all guide the user into BULK LOAD
+mode. The rest of this document records the remaining ideas and how they map onto
+the existing building blocks.
 
 NOTE: BOSS and Roland are trademarks of Roland Corporation. This is an independent,
 unofficial project, not affiliated with Roland.
