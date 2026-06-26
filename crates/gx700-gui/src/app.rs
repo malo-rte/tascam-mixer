@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
-use rackctl_gx700::{NAME_LEN, Param, RawPatch, Value, decode_name, encode_name};
+use rackctl_gx700::{NAME_LEN, Param, RawPatch, Value};
 
 use crate::config::{self, CachedRow, GuiConfig};
 use crate::device::{self, Device, SharedDevice};
@@ -35,15 +35,18 @@ struct PatchRow {
     full: Option<RawPatch>,
     /// A live-edited level not yet written to memory.
     pending_level: Option<u8>,
+    /// A staged whole-patch replacement (from Paste or Clear) not yet written.
+    /// When set, it — not `full` — is the basis for the next store.
+    pending_patch: Option<RawPatch>,
     /// Set when the bank read for this slot was skipped after exhausting retries;
     /// its name/level are stale (or empty). Cleared once a read succeeds.
     failed: bool,
 }
 
 impl PatchRow {
-    /// Whether the row has unsaved edits (a level or a name change).
+    /// Whether the row has unsaved edits (a level, name, or whole-patch change).
     fn dirty(&self) -> bool {
-        self.pending_level.is_some() || self.name_edit != self.name
+        self.pending_level.is_some() || self.name_edit != self.name || self.pending_patch.is_some()
     }
 }
 
@@ -55,6 +58,9 @@ enum Action {
     SetName(u16, String),
     SaveRow(u16),
     RevertRow(u16),
+    CopyRow(u16),
+    PasteRow(u16),
+    ClearRow(u16),
     Refresh,
     Retry,
     OpenBulkPrompt,
@@ -111,6 +117,8 @@ pub(crate) struct App {
     progress: u16,
     rows: Vec<PatchRow>,
     now_playing: Option<u16>,
+    /// The copied patch and its source slot, set by Copy and stamped by Paste.
+    clipboard: Option<(u16, RawPatch)>,
     bulk_prompt: bool,
     status: String,
     zoom: f32,
@@ -129,6 +137,7 @@ impl App {
                 chain: Vec::new(),
                 full: None,
                 pending_level: None,
+                pending_patch: None,
                 failed: false,
             })
             .collect();
@@ -152,6 +161,7 @@ impl App {
             progress: 0,
             rows,
             now_playing: None,
+            clipboard: None,
             bulk_prompt: false,
             status: if connected {
                 "reading patch bank…".to_owned()
@@ -192,16 +202,32 @@ impl App {
         }
     }
 
-    /// After a successful store, commit the edits: the level and the (normalized,
-    /// device-encoded) name become the stored values, clearing the dirty state.
+    /// The patch a store would write for `slot`: the staged whole-patch (from
+    /// Paste or Clear) or the loaded patch, with the row's edited name and level
+    /// overlaid. `None` if nothing is loaded for the row yet.
+    fn effective_patch(&self, slot: u16) -> Option<RawPatch> {
+        let row = self.row(slot)?;
+        let mut patch = row.pending_patch.clone().or_else(|| row.full.clone())?;
+        let level = row.pending_level.unwrap_or(row.stored_level);
+        let _ = patch.set_output_level(level);
+        let _ = patch.set_name(&row.name_edit);
+        Some(patch)
+    }
+
+    /// After a successful store, commit the edits: the written patch becomes the
+    /// row's stored state, clearing every pending change (and the dirty flag).
     fn commit_row(&mut self, slot: u16) {
+        let Some(patch) = self.effective_patch(slot) else {
+            return;
+        };
         if let Some(row) = self.row_mut(slot) {
-            if let Some(level) = row.pending_level.take() {
-                row.stored_level = level;
-            }
-            let normalized = decode_name(&encode_name(&row.name_edit));
-            row.name.clone_from(&normalized);
-            row.name_edit = normalized;
+            row.stored_level = patch.output_level();
+            row.name.clone_from(&patch.name);
+            row.name_edit.clone_from(&patch.name);
+            row.chain = patch.chain();
+            row.full = Some(patch);
+            row.pending_level = None;
+            row.pending_patch = None;
         }
     }
 
@@ -233,35 +259,23 @@ impl App {
         }
     }
 
-    /// Write `slot`'s patch into the current sound so it can be heard.
+    /// Write `slot`'s patch (including any staged Paste/Clear/level edits) into the
+    /// current sound so it can be heard.
     fn audition(&mut self, slot: u16) {
         if !self.connected {
             return;
         }
-        if self.row(slot).is_some_and(|r| r.full.is_none()) {
-            let read = device::lock(&self.device).read_patch(slot);
-            match read {
-                Ok(patch) => {
-                    if let Some(row) = self.row_mut(slot) {
-                        row.full = Some(patch);
-                    }
-                }
-                Err(e) => {
-                    self.status = format!("read U{slot:03}: {e}");
-                    return;
-                }
+        self.ensure_loaded(slot);
+        let Some(patch) = self.effective_patch(slot) else {
+            return;
+        };
+        let written = device::lock(&self.device).write_current_patch(&patch);
+        match written {
+            Ok(_) => {
+                self.now_playing = Some(slot);
+                self.status = format!("auditioning U{slot:03} {:?}", patch.name);
             }
-        }
-        let patch = self.row(slot).and_then(|r| r.full.clone());
-        if let Some(patch) = patch {
-            let written = device::lock(&self.device).write_current_patch(&patch);
-            match written {
-                Ok(_) => {
-                    self.now_playing = Some(slot);
-                    self.status = format!("auditioning U{slot:03} {:?}", patch.name);
-                }
-                Err(e) => self.status = format!("audition U{slot:03}: {e}"),
-            }
+            Err(e) => self.status = format!("audition U{slot:03}: {e}"),
         }
     }
 
@@ -280,11 +294,10 @@ impl App {
                 return;
             }
         }
+        // The level is overlaid by `effective_patch` at store/audition time, so we
+        // only record it as pending here.
         if let Some(row) = self.row_mut(slot) {
             row.pending_level = Some(level);
-            if let Some(full) = row.full.as_mut() {
-                let _ = full.set_output_level(level);
-            }
         }
     }
 
@@ -292,19 +305,9 @@ impl App {
     /// read-back. `Ok` on success; `Err(message)` if the patch isn't loaded or the
     /// unit isn't in BULK LOAD mode (the write is silently ignored there).
     fn store_one(&self, slot: u16) -> Result<(), String> {
-        let Some(row) = self.row(slot) else {
-            return Err(format!("U{slot:03}: no such patch"));
-        };
-        let Some(mut patch) = row.full.clone() else {
+        let Some(patch) = self.effective_patch(slot) else {
             return Err(format!("U{slot:03}: patch not loaded — audition it first"));
         };
-        let level = row.pending_level.unwrap_or(row.stored_level);
-        if patch.set_output_level(level).is_err() {
-            return Err(format!("U{slot:03}: patch has no level block"));
-        }
-        if patch.set_name(&row.name_edit).is_err() {
-            return Err(format!("U{slot:03}: patch has no name block"));
-        }
         let write = device::lock(&self.device).write_patch(slot, &patch);
         if let Err(e) = write {
             return Err(format!("write U{slot:03}: {e}"));
@@ -341,27 +344,81 @@ impl App {
         }
     }
 
-    /// Revert one patch's name and level back to the values stored on the unit
-    /// (per-row Revert button), updating the cached patch and live sound if playing.
+    /// Revert one patch's edits (name, level, and any staged Paste/Clear) back to
+    /// the state stored on the unit (per-row Revert button), re-previewing if it's
+    /// the patch currently playing.
     fn revert_row(&mut self, slot: u16) {
-        let Some((stored_level, stored_name)) =
-            self.row(slot).map(|r| (r.stored_level, r.name.clone()))
-        else {
+        let Some(stored_name) = self.row(slot).map(|r| r.name.clone()) else {
             return;
         };
         if let Some(row) = self.row_mut(slot) {
             row.pending_level = None;
+            row.pending_patch = None;
             row.name_edit = stored_name;
-            if let Some(full) = row.full.as_mut() {
-                let _ = full.set_output_level(stored_level);
-            }
         }
-        if self.now_playing == Some(slot)
-            && let Some(param) = Param::from_key("output-level")
-        {
-            let _ = device::lock(&self.device).set(param, Value::Int(i32::from(stored_level)));
+        // The original patch is still in `full`, so re-audition restores the sound.
+        if self.now_playing == Some(slot) {
+            self.audition(slot);
         }
         self.status = format!("reverted U{slot:03}");
+    }
+
+    /// Copy `slot`'s patch (including any staged edits) into the clipboard.
+    fn copy_row(&mut self, slot: u16) {
+        self.ensure_loaded(slot);
+        match self.effective_patch(slot) {
+            Some(patch) => {
+                self.status = format!("copied U{slot:03} {:?}", patch.name);
+                self.clipboard = Some((slot, patch));
+            }
+            None => self.status = format!("U{slot:03}: nothing to copy — read the bank first"),
+        }
+    }
+
+    /// Paste the clipboard patch into `slot` as a staged change (the original stays
+    /// in `full` so Revert restores it), previewing it if the row is playing.
+    fn paste_row(&mut self, slot: u16) {
+        let Some((from, patch)) = self.clipboard.clone() else {
+            "clipboard is empty — Copy a patch first".clone_into(&mut self.status);
+            return;
+        };
+        let name = patch.name.clone();
+        let level = patch.output_level();
+        self.ensure_loaded(slot);
+        if let Some(row) = self.row_mut(slot) {
+            row.name_edit.clone_from(&name);
+            row.pending_level = Some(level);
+            row.pending_patch = Some(patch);
+        }
+        if self.now_playing == Some(slot) {
+            self.audition(slot);
+        }
+        self.status = format!("pasted U{from:03} into U{slot:03} — Save to store");
+    }
+
+    /// Clear `slot` to an empty patch (name "Empty", level 0, all effects bypassed)
+    /// as a staged change, previewing it if the row is playing.
+    fn clear_row(&mut self, slot: u16) {
+        self.ensure_loaded(slot);
+        let Some(mut patch) = self.effective_patch(slot) else {
+            self.status = format!("U{slot:03}: read the bank first");
+            return;
+        };
+        if let Err(e) = patch.initialize() {
+            self.status = format!("U{slot:03}: cannot clear — {e}");
+            return;
+        }
+        let name = patch.name.clone();
+        let level = patch.output_level();
+        if let Some(row) = self.row_mut(slot) {
+            row.name_edit.clone_from(&name);
+            row.pending_level = Some(level);
+            row.pending_patch = Some(patch);
+        }
+        if self.now_playing == Some(slot) {
+            self.audition(slot);
+        }
+        self.status = format!("cleared U{slot:03} to Empty — Save to store");
     }
 
     /// Store every pending change (name + level) to memory in one batch (the
@@ -484,8 +541,10 @@ impl App {
                             actions.push(Action::SetLevel(row.slot, level));
                         }
 
-                        // Column 4: Save/Revert, enabled only when the row has an
-                        // unsaved edit (their state is the "modified" indicator).
+                        // Column 4: per-row actions. Save/Revert are enabled only
+                        // when the row has an unsaved edit (their state is the
+                        // "modified" indicator); Copy/Clear need a connection, Paste
+                        // also needs something on the clipboard.
                         ui.horizontal(|ui| {
                             ui.add_enabled_ui(self.connected && row.dirty(), |ui| {
                                 let save = action_button(ui, "Save", ActionKind::Commit)
@@ -503,6 +562,39 @@ impl App {
                                     actions.push(Action::RevertRow(row.slot));
                                 }
                             });
+                            ui.separator();
+                            ui.add_enabled_ui(self.connected, |ui| {
+                                if action_button(ui, "Copy", ActionKind::Read)
+                                    .on_hover_text("copy this patch to the clipboard")
+                                    .clicked()
+                                {
+                                    actions.push(Action::CopyRow(row.slot));
+                                }
+                            });
+                            ui.add_enabled_ui(self.connected && self.clipboard.is_some(), |ui| {
+                                let hover = match &self.clipboard {
+                                    Some((from, p)) => {
+                                        format!("paste U{from:03} {:?} here (then Save)", p.name)
+                                    }
+                                    None => "Copy a patch first".to_owned(),
+                                };
+                                if action_button(ui, "Paste", ActionKind::Neutral)
+                                    .on_hover_text(hover)
+                                    .clicked()
+                                {
+                                    actions.push(Action::PasteRow(row.slot));
+                                }
+                            });
+                            ui.add_enabled_ui(self.connected, |ui| {
+                                if action_button(ui, "Clear", ActionKind::Caution)
+                                    .on_hover_text(
+                                        "reset to an empty patch (name \"Empty\", level 0, effects off), then Save",
+                                    )
+                                    .clicked()
+                                {
+                                    actions.push(Action::ClearRow(row.slot));
+                                }
+                            });
                         });
                         ui.end_row();
                     }
@@ -517,6 +609,9 @@ impl App {
             Action::SetName(slot, name) => self.set_name_edit(slot, name),
             Action::SaveRow(slot) => self.save_row(slot),
             Action::RevertRow(slot) => self.revert_row(slot),
+            Action::CopyRow(slot) => self.copy_row(slot),
+            Action::PasteRow(slot) => self.paste_row(slot),
+            Action::ClearRow(slot) => self.clear_row(slot),
             Action::Refresh => self.start_load(),
             Action::Retry => self.retry(),
             Action::OpenBulkPrompt => self.bulk_prompt = true,

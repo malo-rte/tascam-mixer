@@ -257,6 +257,35 @@ impl RawPatch {
         self.name = decode_name(&encoded);
         Ok(())
     }
+
+    /// Reset this patch to an empty/initialized state: every effect block
+    /// bypassed (each block's enable flag, the first byte of the block, cleared),
+    /// the signal chain in default order, output level `0`, and the name
+    /// `"Empty"`. The blocks keep their remaining bytes, so the result stays a
+    /// valid patch the device accepts; only the enables, chain, level, and name
+    /// change.
+    ///
+    /// # Errors
+    /// [`Error::Patch`] if the Level/Chain block is missing or too short to hold
+    /// the chain, level, or name.
+    pub fn initialize(&mut self) -> Result<()> {
+        // Bypass every effect block (bases 0x01..=0x0D); the enable flag is the
+        // first byte of each block.
+        for base in 1u8..=13 {
+            let Some(hex) = self.blocks.get(&base) else {
+                continue;
+            };
+            let mut bytes = from_hex(hex)?;
+            if let Some(first) = bytes.first_mut() {
+                *first = 0;
+            }
+            self.blocks.insert(base, to_hex(&bytes));
+        }
+        self.set_chain(&(1u8..=13).collect::<Vec<u8>>())?;
+        self.set_output_level(0)?;
+        self.set_name("Empty")?;
+        Ok(())
+    }
 }
 
 /// Format a raw device byte for one parameter in display units.
@@ -621,6 +650,36 @@ mod tests {
         // Level and chain are untouched by a name change.
         assert_eq!(patch.output_level(), 0x32);
         assert_eq!(patch.chain(), (1u8..=13).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn initialize_blanks_the_patch() {
+        let mut blocks = BTreeMap::new();
+        // Level/Chain: level 0x32, chain reordered (10 before 9), name "JAZZ TONE".
+        blocks.insert(
+            0x00u8,
+            "32 01 02 03 04 05 06 07 08 0A 09 0B 0C 0D 4A 41 5A 5A 20 54 4F 4E 45 20 20 20"
+                .to_owned(),
+        );
+        // Two effect blocks with their enable byte (offset 0) set on.
+        blocks.insert(0x01u8, "01 10 20".to_owned()); // Compressor enabled
+        blocks.insert(0x04u8, "01 7F 40 0A".to_owned()); // Preamp enabled
+        let mut patch = RawPatch {
+            version: PATCH_VERSION,
+            name: "JAZZ TONE".to_owned(),
+            blocks,
+        };
+
+        patch.initialize().unwrap();
+
+        assert_eq!(patch.name, "Empty");
+        assert_eq!(patch.output_level(), 0);
+        // Chain reset to the default order.
+        assert_eq!(patch.chain(), (1u8..=13).collect::<Vec<u8>>());
+        // Every effect block's enable byte is cleared; the rest is kept.
+        let block = |base: &u8| from_hex(patch.blocks.get(base).unwrap()).unwrap();
+        assert_eq!(block(&0x01), vec![0x00, 0x10, 0x20]);
+        assert_eq!(block(&0x04), vec![0x00, 0x7F, 0x40, 0x0A]);
     }
 
     #[test]
