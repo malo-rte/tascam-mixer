@@ -468,10 +468,35 @@ completeness; these are *not* part of a stored patch.
 64 entries (`#1`..`#64`), each a 2-byte (nibble MSB+LSB) patch number `1`-`200`, at
 offsets `00`,`01` (#1) through `7E`,`7F` (#64).
 
+.Table-19 — Sound Change Request (SCR)
+A single byte `00H` written to area `04 7F 7F 7F` (offset `00`); it commits a bulk
+write to the temporary buffer (the "apply" trigger after a `04 00 00 00` temp-buffer
+write). See `gx700-sysex-protocol.adoc`.
+
+.Table-20 — Display data (the front-panel LCD, read-only)
+Area `10 00 00 00`: line 1 = characters at offsets `00`..`0F`, line 2 at `10`..`1F`
+(2 × 16 chars, codes per Table-1.4). Not part of a patch, and the tested firmware
+does *not* answer an RQ1 here, so it cannot actually be read back.
+
+== Coverage — all of the MI PDF accounted for
+
+The MIDI Implementation PDF (`GX-700_MI.pdf`, 14 pages) is fully accounted for
+across this document and `gx700-sysex-protocol.adoc`:
+
+[cols="1,4",options="header"]
+|===
+| PDF page(s) | Where it lives
+| 1, 2, 12, 13, 14 | Covers / blank
+| 3, 10, 11 | MIDI message + transfer protocol (recognized Control Change `01H-1FH`/`40H-5FH` and Program Change, DT1/RQ1, Model ID `79H`, Device ID = channel−1, address-block map, one-way/handshake transfer) — **`gx700-sysex-protocol.adoc`**
+| 4–8 | Patch parameter tables 1–18 — **this document** (blocks + value tables)
+| 9 | Table-19 (Sound Change Request), Table-20 (Display Data) — above + protocol doc
+|===
+
 == Status
 
 The block layouts (offsets, sizes, encodings) and every per-block enum are
-**complete and fixture-validated**. The shared value tables above are fully
-transcribed. The one caveat is the tail of the Target-Type list (ids `91`..`133`) —
-see the note there. The full table is now the authoritative reference; the MI PDF
-need not be re-read.
+**complete and fixture-validated**; the shared value tables are fully transcribed
+(Tables 1–18), and Tables 19–20 plus the page-3 message/transfer spec are captured
+here and in the protocol doc. Patch *data* needs no further OCR. Remaining caveats:
+the Target-Type tail (ids `91`..`133`, see its note) may be ±1, and Display Data
+(Table-20) is documented by layout only since the unit will not stream it.
