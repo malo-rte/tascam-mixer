@@ -1,6 +1,7 @@
 //! The OUTPUT panel: master meters/fader/mute and the global DSP switches.
 
 use eframe::egui;
+use rackctl_ui::{ActionKind, action_button};
 use rackctl_us16x08::{Control, Value};
 
 use crate::app::App;
@@ -42,7 +43,7 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     // config directory, also reachable via `rackctl-us16x08 default`. The interface
     // zoom and window size are saved and restored alongside it as part of the
     // user's setup.
-    if ui.button("Save default").clicked() {
+    if action_button(ui, "Save default", ActionKind::Commit).clicked() {
         let ctx = ui.ctx();
         let zoom = ctx.zoom_factor();
         // screen_rect is in egui points (scaled by zoom); the window inner size
@@ -50,7 +51,7 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
         let size = ctx.screen_rect().size() * zoom;
         app.save_default(zoom, [size.x, size.y]);
     }
-    if ui.button("Load default").clicked() {
+    if action_button(ui, "Load default", ActionKind::Read).clicked() {
         let (zoom, window) = app.load_default();
         let ctx = ui.ctx();
         ctx.set_zoom_factor(zoom);

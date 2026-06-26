@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use eframe::egui;
 use rackctl_gx700::{NAME_LEN, Param, RawPatch, Value};
+use rackctl_ui::{ActionKind, action_button};
 
 use crate::config::{self, CachedRow, GuiConfig};
 use crate::device::{self, Device, SharedDevice};
@@ -66,46 +67,6 @@ enum Action {
     OpenBulkPrompt,
     CloseBulkPrompt,
     WriteAll,
-}
-
-/// Semantic category of a button, mapped to a fill colour so the GUI signals an
-/// action's *consequence* (commit vs. read vs. discard) consistently everywhere.
-#[derive(Clone, Copy)]
-enum ActionKind {
-    /// Persists edits to the device (Save, Write changes). Green.
-    Commit,
-    /// Pulls data in; changes nothing (Refresh, Reconnect). Blue.
-    Read,
-    /// Discards unsaved work, reversible by re-reading (Revert). Amber.
-    Caution,
-    /// No consequence (Cancel, Close). The egui default, no tint.
-    Neutral,
-}
-
-impl ActionKind {
-    /// Muted dark-theme fill, or `None` to keep the default button colour.
-    fn fill(self) -> Option<egui::Color32> {
-        match self {
-            ActionKind::Commit => Some(egui::Color32::from_rgb(46, 120, 75)),
-            ActionKind::Read => Some(egui::Color32::from_rgb(45, 95, 145)),
-            ActionKind::Caution => Some(egui::Color32::from_rgb(155, 110, 30)),
-            ActionKind::Neutral => None,
-        }
-    }
-}
-
-/// Add a button whose fill encodes its [`ActionKind`]. Returns the `Response` so
-/// callers can chain `.on_hover_text(..)` / test `.clicked()`.
-fn action_button(
-    ui: &mut egui::Ui,
-    label: impl Into<egui::WidgetText>,
-    kind: ActionKind,
-) -> egui::Response {
-    let mut button = egui::Button::new(label);
-    if let Some(fill) = kind.fill() {
-        button = button.fill(fill);
-    }
-    ui.add(button)
 }
 
 pub(crate) struct App {

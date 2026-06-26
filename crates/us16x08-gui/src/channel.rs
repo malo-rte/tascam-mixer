@@ -12,6 +12,7 @@
 
 use eframe::egui;
 use egui_plot::{Axis, AxisHints, Line, LineStyle, Plot, PlotPoint, PlotPoints, Polygon, Text};
+use rackctl_ui::{ActionKind, action_button};
 use rackctl_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value, units};
 
 use crate::app::{App, Group};
@@ -70,8 +71,7 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     // Whole-channel actions: copy/paste this strip, or reset it to defaults.
     ui.horizontal(|ui| {
         copy_paste(app, ui, Group::Channel, "Copy channel", "Paste channel");
-        if ui
-            .button("Reset channel")
+        if action_button(ui, "Reset channel", ActionKind::Caution)
             .on_hover_text("Reset the whole channel to a neutral default")
             .clicked()
         {
@@ -89,11 +89,14 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
 /// A Copy button and a Paste button (disabled until something is copied) for a
 /// per-channel control group, writing through to the focused channel on paste.
 fn copy_paste(app: &mut App, ui: &mut egui::Ui, group: Group, copy: &str, paste: &str) {
-    if ui.button(copy).clicked() {
+    if action_button(ui, copy, ActionKind::Read).clicked() {
         app.copy_group(group);
     }
     if ui
-        .add_enabled(app.has_clip(group), egui::Button::new(paste))
+        .add_enabled_ui(app.has_clip(group), |ui| {
+            action_button(ui, paste, ActionKind::Neutral)
+        })
+        .inner
         .clicked()
     {
         app.paste_group(group);
@@ -487,7 +490,7 @@ fn title_row(
                 app.set(enable, ch, Value::Bool(enabled));
             }
             // Placed after the checkbox so it sits to its left in this layout.
-            if ui.button("Reset").clicked() {
+            if action_button(ui, "Reset", ActionKind::Caution).clicked() {
                 reset_controls(app, reset, ch);
             }
         });

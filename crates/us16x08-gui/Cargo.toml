@@ -21,6 +21,7 @@ alsa = ["rackctl-us16x08/alsa"]
 
 [dependencies]
 rackctl-us16x08 = { path = "../us16x08", default-features = false }
+rackctl-ui = { path = "../ui-common" }
 clap.workspace = true
 eframe.workspace = true
 egui.workspace = true

@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 
 use eframe::egui;
+use rackctl_ui::{ActionKind, action_button};
 
 use crate::app::{App, PresetKind, preset_label, preset_paths};
 
@@ -30,7 +31,7 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
             PresetKind::Eq => "Save this EQ",
             PresetKind::Comp => "Save this compressor",
         };
-        if ui.button(label).clicked() || entered {
+        if action_button(ui, label, ActionKind::Commit).clicked() || entered {
             save = true;
         }
     });
@@ -53,11 +54,11 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
                 egui::Color32::from_rgb(220, 120, 60),
                 format!("Delete \u{201c}{}\u{201d}?", preset_label(&path)),
             );
-            if ui.button("Delete").clicked() {
+            if action_button(ui, "Delete", ActionKind::Destructive).clicked() {
                 app.delete_preset(&path);
                 app.pending_delete = None;
             }
-            if ui.button("Cancel").clicked() {
+            if action_button(ui, "Cancel", ActionKind::Neutral).clicked() {
                 app.pending_delete = None;
             }
         });
@@ -89,21 +90,23 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
         .show(ui, |ui| {
             for path in &presets {
                 ui.label(preset_label(path));
-                if ui.button("Save").on_hover_text(overwrite_hint).clicked() {
+                if action_button(ui, "Save", ActionKind::Commit)
+                    .on_hover_text(overwrite_hint)
+                    .clicked()
+                {
                     to_save = Some(path.clone());
                 }
-                if ui.button("Load").clicked() {
+                if action_button(ui, "Load", ActionKind::Read).clicked() {
                     to_load = Some(path.clone());
                 }
                 if copyable
-                    && ui
-                        .button("Copy")
+                    && action_button(ui, "Copy", ActionKind::Read)
                         .on_hover_text("Copy to the clipboard, then Paste onto a channel")
                         .clicked()
                 {
                     to_copy = Some(path.clone());
                 }
-                if ui.button("Delete").clicked() {
+                if action_button(ui, "Delete", ActionKind::Destructive).clicked() {
                     to_delete = Some(path.clone());
                 }
                 ui.end_row();
