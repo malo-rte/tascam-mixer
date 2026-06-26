@@ -381,15 +381,21 @@ impl App {
                         }
 
                         // Column 2: editable patch name (egui keeps the cursor by
-                        // widget id, so a per-frame clone of the buffer is fine).
+                        // widget id, so a per-frame clone of the buffer is fine). Use
+                        // a fixed allocation: inside a Grid, TextEdit::desired_width
+                        // gets clamped to the (initially tiny) available width and
+                        // the column sticks at a sliver, so add_sized it instead.
                         let mut name = row.name_edit.clone();
                         let edit = egui::TextEdit::singleline(&mut name)
                             .hint_text("—")
-                            .char_limit(NAME_LEN)
-                            // ~160pt comfortably holds a 12-char name; smaller than
-                            // this lets the whole row fit in narrower windows.
-                            .desired_width(160.0);
-                        if ui.add_enabled(self.connected, edit).changed() {
+                            .char_limit(NAME_LEN);
+                        let name_size = [180.0, ui.spacing().interact_size.y];
+                        let name_changed = ui
+                            .add_enabled_ui(self.connected, |ui| {
+                                ui.add_sized(name_size, edit).changed()
+                            })
+                            .inner;
+                        if name_changed {
                             actions.push(Action::SetName(row.slot, name));
                         }
 
