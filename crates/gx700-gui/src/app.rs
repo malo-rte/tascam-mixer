@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
-use rackctl_gx700::{Param, RawPatch, Value, decode_name, encode_name};
+use rackctl_gx700::{NAME_LEN, Param, RawPatch, Value, decode_name, encode_name};
 
 use crate::config::{self, CachedRow, GuiConfig};
 use crate::device::{self, Device, SharedDevice};
@@ -385,7 +385,8 @@ impl App {
                         let mut name = row.name_edit.clone();
                         let edit = egui::TextEdit::singleline(&mut name)
                             .hint_text("—")
-                            .desired_width(120.0);
+                            .char_limit(NAME_LEN)
+                            .desired_width(200.0);
                         if ui.add_enabled(self.connected, edit).changed() {
                             actions.push(Action::SetName(row.slot, name));
                         }
