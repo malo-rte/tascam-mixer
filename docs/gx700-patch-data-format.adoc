@@ -1,0 +1,398 @@
+= BOSS GX-700 — patch data format (per-block parameter map)
+:toc: left
+:icons: font
+
+The complete byte-level layout of a GX-700 patch: the 14 sub-blocks and every
+parameter offset within them. Transcribed from the *GX-700 MIDI Implementation*
+(`docs/external-specs/GX-700_MI.pdf`, Tables 1–14) and **cross-validated** against a
+real 100-patch bank capture (`crates/gx700/tests/fixtures/bank/`) — every block's
+size and the Level/Chain assign layout were confirmed byte-for-byte against that
+data.
+
+This document is the authoritative reference so the PDFs do not need to be
+re-OCR'd. It is the basis for the typed patch model and for completing
+`crates/gx700/src/param.rs`.
+
+NOTE: BOSS and Roland are trademarks of Roland Corporation. This is an
+independent, unofficial project. The PDF itself is not redistributed (copyright);
+only this derived parameter map is committed.
+
+== Conventions
+
+A patch is **14 sub-blocks**, addressed `00 00 XX 00` where `XX` is the block id
+`00`..`0D`. The 4th address byte is the **parameter offset within the block**. All
+data bytes are 7-bit (`0vvv vvvv`), MIDI-safe.
+
+.Block ids and sizes (bytes), confirmed identical across all 100 captured patches
+[cols="1,3,1",options="header"]
+|===
+| Id | Block | Size
+| `00` | Level/Chain (output level, chain order, name, 4 control assigns) | 66
+| `01` | Compressor   | 8
+| `02` | Wah          | 13
+| `03` | Distortion   | 6
+| `04` | Preamp       | 10
+| `05` | Loop         | 4
+| `06` | Equalizer    | 7
+| `07` | Speaker Simulator | 5
+| `08` | Noise Suppressor  | 5
+| `09` | Modulation   | 77
+| `0A` | Delay        | 21
+| `0B` | Chorus       | 9
+| `0C` | Tremolo/Pan  | 5
+| `0D` | Reverb       | 9
+|===
+
+Total ≈ 245 bytes. Each block begins with an **EFFECT ON/OFF** byte
+(`0`=off, `1`=on); to bypass an effect you clear this byte (the chain order is
+unchanged). A whole patch is written back as 14 separate sub-block DT1 messages.
+
+.Encoding notations used in the DATA column of the MI tables
+[cols="1,4",options="header"]
+|===
+| Notation | Meaning
+| `0vvv vvvv` | a plain 7-bit value (`v`)
+| `0000 000n` | a 1-bit flag (`n`) — typically an on/off or 2-way mode
+| `0000 0nnn` / `0000 nnnn` | a small enum (`n`) — index into a value table
+| `0000 dddd` (MSB) + `0000 dddd` (LSB) | an **8-bit** value split into two nibbles: `value = (MSB << 4) \| LSB`
+| `0ddd dddd` (MSB) + `0ddd dddd` (LSB) | a **14-bit** value split into two 7-bit bytes: `value = (MSB << 7) \| LSB`
+|===
+
+Value ranges are written as `rawRange (displayRange)`, e.g. `00H-64H (0-100)` means
+raw `0x00..0x64` displayed as `0..100`, and `00H-28H (-20dB +20dB)` means raw
+`0x00..0x28` (0..40) displayed as −20..+20 dB.
+
+== `00` — Level/Chain (66 bytes)
+
+The patch header: master output level, the 13-byte signal-chain order, the 12-char
+name, and four control assigns.
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Output level | `0vvv vvvv` | `00H-64H` (0-100)
+| `01`..`0D` | Chain 1st..13th | `0000 nnnn` | effect-type id, a permutation of `01`..`0D` (Table-1.1; `01`=Comp .. `0D`=Reverb)
+| `0E`..`19` | Name char 1..12 | `0vvv vvvv` | `16H-7FH` (Table-1.4); printable ASCII `20H-7EH` in practice (e.g. `57H`='W')
+| `1A`..`23` | Assign 1 | — | 10 bytes, see below
+| `24`..`2D` | Assign 2 | — | 10 bytes
+| `2E`..`37` | Assign 3 | — | 10 bytes
+| `38`..`41` | Assign 4 | — | 10 bytes
+|===
+
+Each **control assign** is 10 bytes (offset relative to the assign's start):
+
+[cols="1,3,2,3",options="header"]
+|===
+| +off | Field | Encoding | Value
+| `+0`,`+1` | Target | nibble MSB+LSB → 8-bit | Target type (Table-1.2)
+| `+2`,`+3` | Min | 7-bit MSB+LSB → 14-bit | follows the target parameter's min/max range
+| `+4`,`+5` | Max | 7-bit MSB+LSB → 14-bit | "
+| `+6` | Source | `0vvv vvvv` | `00H-43H` (Table-1.3): 0=fixed, expression/control pedals, CC#s
+| `+7` | Mode | `0000 000n` | 0:NORMAL 1:TOGGLE
+| `+8` | Act Lo | `0ddd dddd` | 0-127
+| `+9` | Act Hi | `0ddd dddd` | 0-127
+|===
+
+NOTE: Verified against fixture `U001` (block `0`): output level `53H`=83, chain
+`01..0D`, name "Whatever", then four assigns each ending `... 00 64 src 00 00 7F`
+(min=0, max=100), the last assign byte at offset `41H` = byte 66.
+
+== `01` — Compressor (8 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Effect type | `0000 000n` | 0:COMPRESSOR 1:LIMITER
+| `02` | Comp sustain | `0vvv vvvv` | `00H-64H` (0-100)
+| `03` | Comp attack | `0vvv vvvv` | `00H-64H` (0-100)
+| `04` | Limit threshold | `0vvv vvvv` | `00H-64H` (0-100)
+| `05` | Limit release | `0vvv vvvv` | `00H-64H` (0-100)
+| `06` | Comp/limit tone | `0vvv vvvv` | `00H-64H` (-50 +50)
+| `07` | Comp/limit level | `0vvv vvvv` | `00H-64H` (0-100)
+|===
+
+== `02` — Wah (13 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Effect mode | `0000 00nn` | 0:PEDAL WAH 1:ON-PEDAL WAH 2:AUTO WAH
+| `02` | Pedal freq | `0vvv vvvv` | `00H-64H` (0-100)
+| `03` | Auto polarity | `0000 000n` | 0:DOWN 1:UP
+| `04` | Auto sens | `0vvv vvvv` | `00H-64H` (0-100)
+| `05` | Auto manual | `0vvv vvvv` | `00H-64H` (0-100)
+| `06` | Peak | `0vvv vvvv` | `00H-64H` (0-100)
+| `07` | Pedal source | `0vvv vvvv` | 0:FIXED 1:EXP PEDAL 2:FC-200EXP 3:CC#1 .. 33:CC#31, 34:CC#64 .. 65:CC#95
+| `08` | Pedal min | `0vvv vvvv` | `00H-64H` (0-100)
+| `09` | Pedal max | `0vvv vvvv` | `00H-64H` (0-100)
+| `0A` | Auto rate | `0vvv vvvv` | `00H-64H` (0-100)
+| `0B` | Auto depth | `0vvv vvvv` | `00H-64H` (0-100)
+| `0C` | Level | `0vvv vvvv` | `00H-64H` (0-100)
+|===
+
+== `03` — Distortion (6 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Effect type | `0000 nnnn` | 0:VINTAGE OD 1:TURBO OD 2:BLUES 3:DISTORTION 4:TURBO DS 5:METAL 6:FUZZ
+| `02` | Drive | `0vvv vvvv` | `00H-64H` (0-100)
+| `03` | Bass | `0vvv vvvv` | `00H-64H` (0-100)
+| `04` | Treble | `0vvv vvvv` | `00H-64H` (0-100)
+| `05` | Level | `0vvv vvvv` | `00H-64H` (0-100)
+|===
+
+== `04` — Preamp (10 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Effect type | `0000 nnnn` | 0:JC-120 1:CLEAN TWIN 2:MATCH DRIVE 3:BG LEAD 4:MS1959(I) 5:MS1959(II) 6:MS1959(I+II) 7:SLDN LEAD 8:METAL 5150
+| `02` | Volume | `0vvv vvvv` | `00H-64H` (0-100)
+| `03` | Bass | `0vvv vvvv` | `00H-64H` (0-100)
+| `04` | Middle | `0vvv vvvv` | `00H-64H` (0-100)
+| `05` | Treble | `0vvv vvvv` | `00H-64H` (0-100)
+| `06` | Presence | `0vvv vvvv` | `00H-64H` (0-100)
+| `07` | Master | `0vvv vvvv` | `00H-64H` (0-100)
+| `08` | Bright | `0000 000n` | 0:OFF 1:ON
+| `09` | Gain | `0000 00nn` | 0:LOW 1:MID 2:HIGH
+|===
+
+== `05` — Loop (4 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Return level | `0vvv vvvv` | `00H-64H` (0-100)
+| `02` | Send level | `0vvv vvvv` | `00H-64H` (0-100)
+| `03` | Mode | `0000 000n` | 0:SERIES 1:PARALLEL
+|===
+
+== `06` — Equalizer (7 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Low gain | `0vvv vvvv` | `00H-28H` (-20dB +20dB)
+| `02` | Mid frequency | `0vvv vvvv` | `00H-14H` (Table-7.1: 100Hz-10.0kHz)
+| `03` | Mid gain | `0vvv vvvv` | `00H-28H` (-20dB +20dB)
+| `04` | Mid Q | `0000 0nnn` | 0-5 (Table-7.2: 0.5/1/2/4/8/16)
+| `05` | High gain | `0vvv vvvv` | `00H-28H` (-20dB +20dB)
+| `06` | Level | `0vvv vvvv` | `00H-28H` (-20dB +20dB)
+|===
+
+== `07` — Speaker Simulator (5 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Speaker type | `0000 nnnn` | `00H-0BH` (Table-8.1)
+| `02` | Mic setting | `0vvv vvvv` | 1-3 (mic distance/position)
+| `03` | Mic level | `0vvv vvvv` | `00H-64H` (0-100)
+| `04` | Direct level | `0vvv vvvv` | `00H-64H` (0-100)
+|===
+
+== `08` — Noise Suppressor (5 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Threshold | `0vvv vvvv` | `00H-64H` (0-100)
+| `02` | Release | `0vvv vvvv` | `00H-64H` (0-100)
+| `03` | Detect | `0000 000n` | 0:GUITAR IN 1:NS IN
+| `04` | Level | `0vvv vvvv` | `00H-64H` (0-100)
+|===
+
+== `09` — Modulation (77 bytes)
+
+The largest block: one of seven modulation effects (Table-10.1) plus the
+Pitch-Shifter/Harmonist voice parameters and the 36-byte harmonist scale map.
+Many fields are shared between effect types (the description names every type the
+field applies to).
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Effect type | `0000 0nnn` | `00H-06H` (Table-10.1)
+| `02` | Phaser stage | `0000 0nnn` | 0:4 1:6 2:8 3:10 4:12 stage
+| `03` | Vibrato trigger | `0000 00nn` | 0:OFF 1:ON 2:AUTO
+| `04` | Vibrato rise time | `0vvv vvvv` | `00H-64H` (0-100)
+| `05` | Humanizer type | `0000 000n` | 0:AUTO 1:PEDAL
+| `06` | Humanizer vowel 1 | `0000 0nnn` | 0:a 1:e 2:i 3:o 4:u
+| `07` | Humanizer vowel 2 | `0000 0nnn` | 0:a 1:e 2:i 3:o 4:u
+| `08` | Rate (Humanizer/Vibrato/Flanger/Phaser) | `0vvv vvvv` | `00H-64H` (0-100)
+| `09` | Depth (Humanizer/Vibrato/Flanger/Phaser) | `0vvv vvvv` | `00H-64H` (0-100)
+| `0A` | Flanger/Phaser manual | `0vvv vvvv` | `00H-64H` (0-100)
+| `0B`,`0C` | Flanger/Phaser resonance | nibble MSB+LSB → 8-bit | (-100 +100)
+| `0D` | Phaser step rate | `0vvv vvvv` | `00H-64H` (OFF, 1-100)
+| `0E`,`0F` | Flanger separation | nibble MSB+LSB → 8-bit | (-100 +100)
+| `10` | Flanger gate | `0vvv vvvv` | `00H-64H` (OFF, 1-100)
+| `11` | Humanizer trigger | `0000 000n` | 0:AUTO 1:PEDAL
+| `12` | Humanizer pedal source | `0vvv vvvv` | 0:EXP PEDAL 1:FC-200EXP 2:CC#1 .. 32:CC#31, 33:CC#64 .. 64:CC#95
+| `13` | Ring modulator frequency | `0vvv vvvv` | `00H-64H` (INT, 1-100)
+| `14` | Ring modulator effect level | `0vvv vvvv` | `00H-64H` (0-100)
+| `15` | Ring modulator direct level | `0vvv vvvv` | `00H-64H` (0-100)
+| `16` | P.S. type | `0000 00nn` | 0:SLOW 1:FAST 2:MONO
+| `17`,`18`,`19` | P.S. pitch #1..#3 | `00vv vvvv` | `00H-32H` (-24 +24 semitones)
+| `1A`,`1B`,`1C` | P.S. fine #1..#3 | `0vvv vvvv` | `00H-64H` (-50 +50)
+| `1D` | Harmonist key | `000v vvvv` | `00H-18H` (0-24)
+| `1E`,`1F`,`20` | PS & HR pre-delay #1..#3 | `0vvv vvvv` | (per-voice pre-delay) +++<!-- rows between Harmonist key @1D and Pan#2 @22; pan#1=21 -->+++
+| `21`,`22`,`23` | PS & HR pan #1..#3 | `0vvv vvvv` | `00H-64H` (L100:R0 - L0:R100)
+| `24`,`25`,`26` | PS & HR level #1..#3 | `0vvv vvvv` | `00H-64H` (0-100)
+| `27` | PS & HR balance | `0vvv vvvv` | `00H-64H` (D100:E0 - D0:E100)
+| `28` | PS & HR total level | `0vvv vvvv` | `00H-64H` (0-100)
+| `29`..`4C` | Harmonist scale | `00vv vvvv` | 3 voices × 12 chromatic notes (C, Db, D, Eb, E, F, F#, G, Ab, A, Bb, B), each `00H-30H` (Table-10.2)
+|===
+
+The harmonist scale at `29`..`4C` is 36 bytes: for each note (C..B) three voice
+intervals (`#1 #2 #3`), i.e. `C#1 C#2 C#3 Db#1 Db#2 Db#3 …`. Last byte `4C` =
+B voice #3, which makes the block exactly 77 bytes (`00`..`4C`).
+
+NOTE: Offsets `1E`..`20` (labelled "pre-delay") are inferred from the 3-voice
+pattern — they sit between Harmonist key (`1D`, read directly) and PS & HR pan #2
+(`22`, read directly), with pan #1 at `21`. Confirm against fixtures before relying
+on the exact field name.
+
+== `0A` — Delay (21 bytes)
+
+Delay times are 14-bit (two 7-bit bytes). Three taps: Center (ms), Left and Right
+(percent of center).
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Mode | `0000 000n` | 0:NORMAL 1:TEMPO
+| `02` | Tempo in control | `0vvv vvvv` | 0:FIXED 1:CONTROL1 2:CONTROL2 3:FC-200CTL 4:CC#0 .. 35:CC#31, 36:CC#64 .. 67:CC#95
+| `03`,`04` | Tempo | nibble MSB+LSB → 8-bit | `00H-FAH` (50-300 BPM)
+| `05`,`06` | Delay time C | 7-bit MSB+LSB → 14-bit | (0-2000 ms)
+| `07`,`08` | Delay time L | 7-bit MSB+LSB → 14-bit | (0-400 %)
+| `09`,`0A` | Delay time R | 7-bit MSB+LSB → 14-bit | (0-400 %)
+| `0B` | Delay interval C | `0000 nnnn` | `00H-0AH` (Table-11.1)
+| `0C` | Feedback | `0vvv vvvv` | `00H-64H` (0-100)
+| `0D` | Delay level C | `0vvv vvvv` | `00H-64H` (0-100)
+| `0E` | Delay level L | `0vvv vvvv` | `00H-64H` (0-100)
+| `0F` | Delay level R | `0vvv vvvv` | `00H-64H` (0-100)
+| `10` | High damp | `0vvv vvvv` | `00H-32H` (-50 - 0)
+| `11` | Hi cut | `0000 vvvv` | `00H-0FH` (Table-15)
+| `12` | Smooth | `0000 000n` | 0:OFF 1:ON
+| `13` | Effect level | `0vvv vvvv` | `00H-64H` (0-100)
+| `14` | Direct level | `0vvv vvvv` | `00H-64H` (0-100)
+|===
+
+== `0B` — Chorus (9 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Mode | `0000 000n` | 0:MONO 1:STEREO
+| `02` | Rate | `0vvv vvvv` | `00H-64H` (0-100)
+| `03` | Depth | `0vvv vvvv` | `00H-64H` (0-100)
+| `04` | Pre-delay | `0ddd dddd` | `00H-64H` (×0.5 ms, 0.0-50.0 ms)
+| `05` | Low cut | `0000 vvvv` | `00H-0AH` (Table-16)
+| `06` | Hi cut | `0000 vvvv` | `00H-0FH` (Table-15)
+| `07` | Mod wave | `0000 vvvv` | `00H-0AH` (T10:S0 - T0:S10)
+| `08` | Effect level | `0vvv vvvv` | `00H-64H` (0-100)
+|===
+
+== `0C` — Tremolo/Pan (5 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Mode | `0000 00nn` | 0:TREMOLO(TRI) 1:TREMOLO(SQR) 2:PAN(TRI) 3:PAN(SQR)
+| `02` | Rate | `0vvv vvvv` | `00H-64H` (1-100)
+| `03` | Depth | `0vvv vvvv` | `00H-64H` (0-100)
+| `04` | Balance | `0vvv vvvv` | `00H-64H` (L100:R0 - L0:R100)
+|===
+
+== `0D` — Reverb (9 bytes)
+
+[cols="1,3,2,3",options="header"]
+|===
+| Offset | Field | Encoding | Value
+| `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
+| `01` | Mode | `0000 0nnn` | 0:ROOM1 1:ROOM2 2:HALL1 3:HALL2 4:PLATE
+| `02` | Reverb time | `0ddd dddd` | `01H-64H` (0.1-10.0 sec)
+| `03` | Pre-delay | `0ddd dddd` | `00H-64H` (0-100 ms)
+| `04` | Low cut | `0000 vvvv` | `00H-0AH` (low-cut freq, Table-16)
+| `05` | Hi cut | `0000 vvvv` | `00H-0FH` (hi-cut freq, Table-15)
+| `06` | Diffusion | `0vvv vvvv` | `00H-0AH` (0-10)
+| `07` | Effect level | `0vvv vvvv` | `00H-64H` (0-100)
+| `08` | Direct level | `0vvv vvvv` | `00H-64H` (0-100)
+|===
+
+== Shared value tables
+
+Indices referenced by the blocks above. Long enumerations (Target Type Table-1.2,
+Assign Source Table-1.3, Name Table-1.4, Harmonist Scale Table-10.2) are large and
+transcribed on demand from the MI PDF (pages 3, 4); their *ranges* are given inline
+in the block tables above.
+
+.Table-1.1 — Effect type / chain ids
+[cols="1,3",options="header"]
+|===
+| Value | Block
+| 1 | Compressor
+| 2 | Wah
+| 3 | Distortion
+| 4 | Preamp
+| 5 | Loop
+| 6 | Equalizer
+| 7 | Speaker Simulator
+| 8 | Noise Suppressor
+| 9 | Modulation
+| 10 | Delay
+| 11 | Chorus
+| 12 | Tremolo/Pan
+| 13 | Reverb
+|===
+
+.Table-7.1 — EQ mid frequency (0..20)
+100, 125, 160, 200, 250, 315, 400, 500, 630, 800 Hz; 1.00, 1.25, 1.60, 2.00, 2.50,
+3.15, 4.00, 5.00, 6.30, 8.00, 10.0 kHz.
+
+.Table-7.2 — EQ Q (0..5)
+0.5, 1, 2, 4, 8, 16.
+
+.Table-8.1 — Speaker type (0..0B)
+SMALL, MIDDLE, JC-120, BUILT IN 1, BUILT IN 2, BG STACK 1, BG STACK 2,
+MS STACK 1, MS STACK 2, METAL STACK, (+ remaining to `0BH`). +++<!-- last two rows transcribe on demand -->+++
+
+.Table-10.1 — Modulation type (0..6)
+0:FLANGER 1:PHASER 2:PITCH SHIFTER 3:HARMONIST 4:VIBRATO 5:RING MODULATOR
+6:HUMANIZER.
+
+.Table-10.2 — Harmonist scale interval
+Raw `00H-30H` (0..48) maps to a musical interval (−24 .. +24); used by the 36 scale
+bytes. Full mapping on the MI page that carries Table-10.2.
+
+.Table-11.1 — Delay interval C (0..0A)
+0:sixteenth, 1:eighth triplet, 2:dotted sixteenth, 3:eighth, 4:quarter triplet,
+5:dotted eighth, 6:quarter, 7:dotted quarter, 8:half, 9:dotted half, 10:whole.
+
+.Table-15 / Table-16 — Hi-cut / Low-cut frequency
+Frequency-step tables (FLAT + a series from ~55 Hz to ~8 kHz) indexed by the
+hi-cut (`00H-0FH`) and low-cut (`00H-0AH`) bytes in Chorus, Delay, and Reverb.
+
+== Status / TODO
+
+* Block layouts (offsets, sizes, encodings) — *complete and fixture-validated.*
+* Per-block type enums (effect/mode types) — *transcribed.*
+* Open transcriptions (ranges known, full value lists pending): Target Type
+  (Table-1.2), Assign Source (Table-1.3, partial), Name char map (Table-1.4),
+  Harmonist scale interval values (Table-10.2), Speaker type tail (Table-8.1),
+  Hi/Low-cut frequency step values (Table-15/16).
+* Modulation offsets `1E`..`20` (PS & HR pre-delay) — confirm field name against
+  fixtures.

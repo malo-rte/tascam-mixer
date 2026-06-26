@@ -394,6 +394,11 @@ These tables are generated from the parameter catalog in
 `crates/gx700/src/param.rs` -- run `cargo run -p rackctl-gx700 --example
 gen_patch_format` to regenerate -- so they match the shipping code exactly.
 
+For the *complete* per-offset map of every block -- including the bytes the catalog
+does not yet cover (Level/Chain control assigns, the full Modulation block, Delay
+multi-byte fields) -- see `gx700-patch-data-format.adoc`, transcribed from the MIDI
+Implementation and validated byte-for-byte against the captured bank fixtures.
+
 [NOTE]
 ====
 Two parts of a patch are not fully expanded as individual parameters here:
