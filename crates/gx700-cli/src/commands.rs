@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use rackctl_gx700::{Gx700, Kind, Param, RawPatch, Transport, param};
+use anyhow::{Context, Result, bail};
+use rackctl_gx700::{Gx700, Kind, Param, RawPatch, Scene, Transport, param};
 
 use crate::config;
 use crate::value::{format_value, parse_value};
@@ -178,6 +178,74 @@ fn read_saved(name: &str) -> Result<RawPatch> {
     let path = config::patch_path(name).context("could not determine the patches directory")?;
     let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// Save all 100 user patches to disk as a single named scene (a whole-device
+/// snapshot). Reads are paced like [`patches`]; the port lock makes this the
+/// device's sole accessor for the run.
+pub(crate) fn scene_save<T: Transport>(dev: &mut Gx700<T>, name: &str) -> Result<()> {
+    let mut scene = Scene::new(name.to_owned());
+    for slot in 1u16..=100 {
+        let raw = dev
+            .read_patch(slot)
+            .with_context(|| format!("reading patch {slot}"))?;
+        println!("U{slot:03}  {:<12}", raw.name);
+        scene.patches.insert(slot, raw);
+        sleep(BANK_READ_PACE); // ease off the US-16x08's MIDI input between reads
+    }
+    let path = config::scene_path(name).context("could not determine the scenes directory")?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let json = serde_json::to_string_pretty(&scene).context("serializing scene")?;
+    fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
+    eprintln!(
+        "saved scene {name:?} ({} patches) to {}",
+        scene.patches.len(),
+        path.display()
+    );
+    Ok(())
+}
+
+/// Restore a named scene to the device, overwriting the user patch bank. This is
+/// destructive, so `confirm` must be set (the CLI's `--yes`).
+pub(crate) fn scene_restore<T: Transport>(
+    dev: &mut Gx700<T>,
+    name: &str,
+    confirm: bool,
+) -> Result<()> {
+    let path = config::scene_path(name).context("could not determine the scenes directory")?;
+    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let scene: Scene =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    if !confirm {
+        bail!(
+            "restoring scene {name:?} overwrites {} user patches on the device; \
+             re-run with --yes to confirm",
+            scene.patches.len()
+        );
+    }
+    let mut count = 0u32;
+    for (&slot, raw) in &scene.patches {
+        dev.write_patch(slot, raw)
+            .with_context(|| format!("writing patch {slot}"))?;
+        println!("U{slot:03}  {:<12}", raw.name);
+        count += 1;
+        sleep(BANK_READ_PACE); // pace writes too, for the same reason
+    }
+    eprintln!("restored scene {name:?} ({count} patches) to the device");
+    Ok(())
+}
+
+/// List scenes saved on disk (file stems). Backend-free.
+pub(crate) fn scenes_list() {
+    let names = config::saved_scenes();
+    if names.is_empty() {
+        eprintln!("no saved scenes");
+    }
+    for name in names {
+        println!("{name}");
+    }
 }
 
 /// List patches saved on disk (file stems). Backend-free.

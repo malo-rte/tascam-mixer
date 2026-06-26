@@ -46,6 +46,7 @@ mod patch;
 
 pub mod monitor;
 pub mod param;
+pub mod scene;
 pub mod sysex;
 pub mod units;
 
@@ -60,4 +61,5 @@ pub use patch::{
     NAME_LEN, PATCH_VERSION, Patch, PatchHeader, RawPatch, Scalar, decode_name, encode_name,
     patch_base,
 };
+pub use scene::{SCENE_VERSION, Scene, USER_PATCH_COUNT};
 pub use sysex::{Framer, RolandMessage};

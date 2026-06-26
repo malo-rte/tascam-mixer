@@ -1,18 +1,28 @@
-//! On-disk location of saved GX-700 patches.
+//! On-disk location of saved GX-700 patches and scenes.
 //!
-//! Patches are stored as JSON files under the suite's per-device settings
-//! directory, `<config>/rackctl/gx700/patches/`, mirroring the US-16x08 tool's
-//! layout.
+//! Both live under the suite's per-device settings directory, mirroring the
+//! US-16x08 tool's layout: individual patches in `<config>/rackctl/gx700/patches/`
+//! and whole-device scenes in `<config>/rackctl/gx700/scenes/`.
 
 use std::path::PathBuf;
 
 use directories::ProjectDirs;
 
+/// The per-device settings root (`<config>/rackctl/gx700/`), or `None` if no home
+/// directory can be determined.
+fn gx700_dir() -> Option<PathBuf> {
+    ProjectDirs::from("", "malo-rte", "rackctl").map(|dirs| dirs.config_dir().join("gx700"))
+}
+
 /// The directory holding saved patch files, or `None` if no home directory can
 /// be determined.
 pub(crate) fn patches_dir() -> Option<PathBuf> {
-    ProjectDirs::from("", "malo-rte", "rackctl")
-        .map(|dirs| dirs.config_dir().join("gx700").join("patches"))
+    gx700_dir().map(|dir| dir.join("patches"))
+}
+
+/// The directory holding saved scene files (whole-device snapshots).
+pub(crate) fn scenes_dir() -> Option<PathBuf> {
+    gx700_dir().map(|dir| dir.join("scenes"))
 }
 
 /// The path of the saved patch named `name` (`<patches_dir>/<name>.json`).
@@ -20,10 +30,24 @@ pub(crate) fn patch_path(name: &str) -> Option<PathBuf> {
     patches_dir().map(|dir| dir.join(format!("{}.json", sanitize(name))))
 }
 
-/// The names (file stems) of every saved patch, sorted. Empty if the directory
-/// does not exist.
+/// The path of the saved scene named `name` (`<scenes_dir>/<name>.json`).
+pub(crate) fn scene_path(name: &str) -> Option<PathBuf> {
+    scenes_dir().map(|dir| dir.join(format!("{}.json", sanitize(name))))
+}
+
+/// The names (file stems) of every saved patch, sorted.
 pub(crate) fn saved_patches() -> Vec<String> {
-    let Some(dir) = patches_dir() else {
+    json_stems(patches_dir())
+}
+
+/// The names (file stems) of every saved scene, sorted.
+pub(crate) fn saved_scenes() -> Vec<String> {
+    json_stems(scenes_dir())
+}
+
+/// The sorted `.json` file stems in `dir`. Empty if the directory is missing.
+fn json_stems(dir: Option<PathBuf>) -> Vec<String> {
+    let Some(dir) = dir else {
         return Vec::new();
     };
     let Ok(entries) = std::fs::read_dir(dir) else {

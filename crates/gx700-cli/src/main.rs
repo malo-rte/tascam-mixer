@@ -120,6 +120,11 @@ enum Command {
         #[arg(long)]
         preset: bool,
     },
+    /// Save or restore a whole-device scene: all 100 user patches under one name.
+    Scene {
+        #[command(subcommand)]
+        command: SceneCommand,
+    },
     /// Load a saved whole-patch file onto the device.
     Load {
         /// Saved patch name to load.
@@ -158,6 +163,27 @@ enum Command {
         #[arg(value_enum)]
         shell: Shell,
     },
+}
+
+/// Subcommands of `scene`: whole-device snapshots (all 100 user patches).
+#[derive(Subcommand)]
+enum SceneCommand {
+    /// Save all 100 user patches to disk as a named scene.
+    Save {
+        /// Name to save the scene under, in the gx700 scenes directory.
+        name: String,
+    },
+    /// Restore a named scene to the device. DESTRUCTIVE: overwrites all 100 user
+    /// patches. Requires --yes to proceed.
+    Restore {
+        /// Scene name to restore.
+        name: String,
+        /// Confirm the destructive overwrite of every user patch.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// List scenes saved on disk.
+    List,
 }
 
 /// Write the completion script for `shell` to standard output. Backend-free.
@@ -245,6 +271,12 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
         Command::Dump { patch, .. } => commands::dump_device(dev, patch),
         Command::Save { name, patch } => commands::save(dev, &name, patch),
         Command::Backup { preset } => commands::backup(dev, preset),
+        Command::Scene { command } => match command {
+            SceneCommand::Save { name } => commands::scene_save(dev, &name),
+            SceneCommand::Restore { name, yes } => commands::scene_restore(dev, &name, yes),
+            // `scene list` is disk-only and handled before a device is opened.
+            SceneCommand::List => Ok(()),
+        },
         Command::Load { name, to_patch } => commands::load(dev, &name, to_patch),
         Command::Select { n } => commands::select(dev, n),
         Command::Patches { preset, .. } => commands::patches(dev, preset),
@@ -279,6 +311,12 @@ fn run() -> Result<()> {
         // Disk-only operations need no device.
         Command::Patches { disk: true, .. } => {
             commands::patches_disk();
+            return Ok(());
+        }
+        Command::Scene {
+            command: SceneCommand::List,
+        } => {
+            commands::scenes_list();
             return Ok(());
         }
         Command::Dump {
