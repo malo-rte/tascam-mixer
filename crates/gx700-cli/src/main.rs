@@ -131,7 +131,8 @@ enum Command {
         /// Saved patch name to load.
         name: String,
         /// Write to USER patch memory slot N (1-100) instead of the current
-        /// sound. DESTRUCTIVE: overwrites that stored patch.
+        /// sound. DESTRUCTIVE: overwrites that stored patch. Requires the unit in
+        /// BULK LOAD mode (TUNER/UTILITY -> MIDI BULK LOAD).
         #[arg(long)]
         to_patch: Option<u16>,
     },
@@ -139,7 +140,8 @@ enum Command {
     ///
     /// The source may be any patch (user 1-100 or preset 101-200); the
     /// destination must be a user slot (1-100). DESTRUCTIVE: overwrites the
-    /// destination patch.
+    /// destination patch. Requires the unit in BULK LOAD mode (TUNER/UTILITY ->
+    /// MIDI BULK LOAD) to store.
     Copy {
         /// Source patch slot (1-200; 101-200 are presets).
         from: u16,
@@ -186,7 +188,8 @@ enum SceneCommand {
         name: String,
     },
     /// Restore a named scene to the device. DESTRUCTIVE: overwrites all 100 user
-    /// patches. Requires --yes to proceed.
+    /// patches. Requires --yes, and the unit in BULK LOAD mode (TUNER/UTILITY ->
+    /// MIDI BULK LOAD).
     Restore {
         /// Scene name to restore.
         name: String,

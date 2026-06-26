@@ -132,10 +132,10 @@ pub(crate) fn copy<T: Transport>(dev: &mut Gx700<T>, from: u16, to: u16) -> Resu
 /// After writing a patch to a device slot, read it back and confirm the device
 /// actually stored it.
 ///
-/// The GX-700 accepts writes to the temporary buffer (the current sound), but
-/// this unit does not persist writes to a *numbered user memory* over MIDI --
-/// storing there is a front-panel WRITE operation. Without this check a failed
-/// store looks like success; the read-back turns it into a clear error.
+/// The GX-700 accepts patch-memory writes *only while it is in BULK LOAD mode*
+/// (entered from the front panel); outside that mode the write is silently
+/// ignored. Without this check a failed store looks like success; the read-back
+/// turns it into a clear, actionable error.
 fn verify_stored<T: Transport>(dev: &mut Gx700<T>, slot: u16, expected: &RawPatch) -> Result<()> {
     let got = dev
         .read_patch(slot)
@@ -143,8 +143,9 @@ fn verify_stored<T: Transport>(dev: &mut Gx700<T>, slot: u16, expected: &RawPatc
     if got.blocks != expected.blocks {
         bail!(
             "the GX-700 did not store the patch to {} -- the slot is unchanged after the write. \
-             On this unit, storing to a numbered user memory did not take effect over MIDI; use \
-             the front-panel WRITE button to store. See the user manual.",
+             The unit accepts patch-memory writes only in BULK LOAD mode: on the GX-700, press \
+             TUNER/UTILITY and select \"MIDI BULK LOAD\" (the display shows \"Waiting...\"), then \
+             re-run this command. See the user manual.",
             slot_label(slot)
         );
     }
