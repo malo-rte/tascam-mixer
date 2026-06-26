@@ -1,8 +1,10 @@
 name: Release
 
-# Build the release binaries and publish a GitHub Release whenever a version
-# tag (vMAJOR.MINOR.PATCH) is pushed. Release notes are taken from the matching
-# CHANGELOG.md section.
+# Build the release binaries, render the documentation to PDF, and publish a
+# GitHub Release whenever a version tag (vMAJOR.MINOR.PATCH) is pushed. The PDFs
+# (rendered from README.adoc + docs/*.adoc by docs/build.sh) are bundled in the
+# release archive and attached as individual assets. Release notes are taken from
+# the matching CHANGELOG.md section.
 on:
   push:
     tags:
@@ -50,14 +52,22 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --workspace --locked
 
+      - name: Build documentation PDFs
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            plantuml graphviz default-jre-headless
+          sudo gem install --no-document asciidoctor-pdf rouge asciidoctor-diagram
+          ./docs/build.sh
+
       - name: Package
         id: package
         run: |
           version="${GITHUB_REF_NAME#v}"
           name="rackctl-us16x08-${version}-x86_64-linux"
-          mkdir -p "dist/${name}"
+          mkdir -p "dist/${name}/docs"
           cp target/release/rackctl-us16x08 target/release/rackctl-us16x08-gui "dist/${name}/"
-          cp README.adoc CHANGELOG.md LICENSE docs/user-manual.adoc "dist/${name}/"
+          cp README.adoc CHANGELOG.md LICENSE "dist/${name}/"
+          cp build/docs/*.pdf "dist/${name}/docs/"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
           ( cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256" )
           echo "archive=dist/${name}.tar.gz" >> "$GITHUB_OUTPUT"
@@ -84,4 +94,5 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --notes-file notes.md \
             "${{ steps.package.outputs.archive }}" \
-            "${{ steps.package.outputs.checksum }}"
+            "${{ steps.package.outputs.checksum }}" \
+            build/docs/*.pdf
