@@ -407,8 +407,10 @@ Two parts of a patch are not fully expanded as individual parameters here:
   thirteen effect-chain-order bytes, `0E`..`19` the twelve name characters, and
   `1A`+ the four control assigns. See <<Patch memories (presets)>> ("The Level/Chain
   block") and MI Tables 1.2-1.4.
-* *Modulation* (`09`) has a large per-*type* parameter matrix (MI Table-10) that is
-  only partially transcribed; only the on/off and type bytes are catalogued so far.
+* *Modulation* (`09`) is now catalogued through `mod-pshr-total-level` (`0x28`).
+  Still deferred (multi-byte): resonance (`0B`/`0C`) and flanger separation
+  (`0E`/`0F`), and the 36-byte harmonist scale map (`29`..`4C`). Likewise the Delay
+  tempo/tap-time bytes (`03`..`0A`) are 14-bit values not yet modelled.
 ====
 
 === Level/Chain -- sub-block `00`
@@ -539,6 +541,41 @@ Two parts of a patch are not fully expanded as individual parameters here:
 | Offset | Parameter | Type / values
 | `00` | `mod-enable` | bool (`0`=off, `1`=on)
 | `01` | `mod-type` | enum -- `0`=Flanger, `1`=Phaser, `2`=Pitch Shifter, `3`=Harmonist, `4`=Vibrato, `5`=Ring Modulator, `6`=Humanizer
+| `02` | `mod-phaser-stage` | enum -- `0`=4-Stage, `1`=6-Stage, `2`=8-Stage, `3`=10-Stage, `4`=12-Stage
+| `03` | `mod-vibrato-trigger` | enum -- `0`=Off, `1`=On, `2`=Auto
+| `04` | `mod-vibrato-rise-time` | int `0`..`100`
+| `05` | `mod-humanizer-type` | enum -- `0`=Auto, `1`=Pedal
+| `06` | `mod-humanizer-vowel1` | enum -- `0`=a, `1`=e, `2`=i, `3`=o, `4`=u
+| `07` | `mod-humanizer-vowel2` | enum -- `0`=a, `1`=e, `2`=i, `3`=o, `4`=u
+| `08` | `mod-rate` | int `0`..`100`
+| `09` | `mod-depth` | int `0`..`100`
+| `0A` | `mod-manual` | int `0`..`100`
+| `0D` | `mod-phaser-step-rate` | int `0`..`100`
+| `10` | `mod-flanger-gate` | int `0`..`100`
+| `11` | `mod-humanizer-trigger` | enum -- `0`=Auto, `1`=Pedal
+| `12` | `mod-humanizer-pedal-source` | int `0`..`64`
+| `13` | `mod-ring-frequency` | int `0`..`100`
+| `14` | `mod-ring-effect-level` | int `0`..`100`
+| `15` | `mod-ring-direct-level` | int `0`..`100`
+| `16` | `mod-ps-type` | enum -- `0`=Slow, `1`=Fast, `2`=Mono
+| `17` | `mod-ps-pitch1` | int `0`..`50`
+| `18` | `mod-ps-pitch2` | int `0`..`50`
+| `19` | `mod-ps-pitch3` | int `0`..`50`
+| `1A` | `mod-ps-fine1` | int `0`..`100`
+| `1B` | `mod-ps-fine2` | int `0`..`100`
+| `1C` | `mod-ps-fine3` | int `0`..`100`
+| `1D` | `mod-harmonist-key` | int `0`..`24`
+| `1E` | `mod-harmonist-interval1` | int `0`..`48`
+| `1F` | `mod-harmonist-interval2` | int `0`..`48`
+| `20` | `mod-harmonist-interval3` | int `0`..`48`
+| `21` | `mod-pshr-pan1` | int `0`..`100`
+| `22` | `mod-pshr-pan2` | int `0`..`100`
+| `23` | `mod-pshr-pan3` | int `0`..`100`
+| `24` | `mod-pshr-level1` | int `0`..`100`
+| `25` | `mod-pshr-level2` | int `0`..`100`
+| `26` | `mod-pshr-level3` | int `0`..`100`
+| `27` | `mod-pshr-balance` | int `0`..`100`
+| `28` | `mod-pshr-total-level` | int `0`..`100`
 |===
 
 === Delay -- sub-block `0A`
@@ -548,6 +585,7 @@ Two parts of a patch are not fully expanded as individual parameters here:
 | Offset | Parameter | Type / values
 | `00` | `delay-enable` | bool (`0`=off, `1`=on)
 | `01` | `delay-mode` | enum -- `0`=Normal, `1`=Tempo
+| `0B` | `delay-interval-c` | enum -- `0`=1/16, `1`=1/8 Triplet, `2`=Dotted 1/16, `3`=1/8, `4`=1/4 Triplet, `5`=Dotted 1/8, `6`=1/4, `7`=Dotted 1/4, `8`=1/2, `9`=Dotted 1/2, `10`=Whole
 | `0C` | `delay-feedback` | int `0`..`100`
 | `0D` | `delay-level-c` | int `0`..`100`
 | `0E` | `delay-level-l` | int `0`..`100`
@@ -568,6 +606,7 @@ Two parts of a patch are not fully expanded as individual parameters here:
 | `01` | `chorus-mode` | enum -- `0`=Mono, `1`=Stereo
 | `02` | `chorus-rate` | int `0`..`100`
 | `03` | `chorus-depth` | int `0`..`100`
+| `04` | `chorus-pre-delay` | int `0`..`100`
 | `05` | `chorus-low-cut` | enum -- `0`=Flat, `1`=55Hz, `2`=110Hz, `3`=165Hz, `4`=220Hz, `5`=280Hz, `6`=340Hz, `7`=400Hz, `8`=500Hz, `9`=640Hz, `10`=800Hz
 | `06` | `chorus-hi-cut` | enum -- `0`=500Hz, `1`=630Hz, `2`=800Hz, `3`=1kHz, `4`=1.25kHz, `5`=1.6kHz, `6`=2kHz, `7`=2.5kHz, `8`=3.15kHz, `9`=4kHz, `10`=5kHz, `11`=6.3kHz, `12`=8kHz, `13`=10kHz, `14`=12.5kHz, `15`=Flat
 | `07` | `chorus-mod-wave` | int `0`..`10`
@@ -580,7 +619,7 @@ Two parts of a patch are not fully expanded as individual parameters here:
 |===
 | Offset | Parameter | Type / values
 | `00` | `tremolo-enable` | bool (`0`=off, `1`=on)
-| `01` | `tremolo-mode` | enum -- `0`=Tremolo (Tri), `1`=Tremolo (Sqr), `2`=Pan (Sqr), `3`=Pan (Tri)
+| `01` | `tremolo-mode` | enum -- `0`=Tremolo (Tri), `1`=Tremolo (Sqr), `2`=Pan (Tri), `3`=Pan (Sqr)
 | `02` | `tremolo-rate` | int `0`..`100`
 | `03` | `tremolo-depth` | int `0`..`100`
 | `04` | `tremolo-balance` | int `0`..`100`
@@ -593,6 +632,8 @@ Two parts of a patch are not fully expanded as individual parameters here:
 | Offset | Parameter | Type / values
 | `00` | `reverb-enable` | bool (`0`=off, `1`=on)
 | `01` | `reverb-mode` | enum -- `0`=Room 1, `1`=Room 2, `2`=Hall 1, `3`=Hall 2, `4`=Plate
+| `02` | `reverb-time` | int `1`..`100`
+| `03` | `reverb-pre-delay` | int `0`..`100`
 | `04` | `reverb-low-cut` | enum -- `0`=Flat, `1`=55Hz, `2`=110Hz, `3`=165Hz, `4`=220Hz, `5`=280Hz, `6`=340Hz, `7`=400Hz, `8`=500Hz, `9`=640Hz, `10`=800Hz
 | `05` | `reverb-hi-cut` | enum -- `0`=500Hz, `1`=630Hz, `2`=800Hz, `3`=1kHz, `4`=1.25kHz, `5`=1.6kHz, `6`=2kHz, `7`=2.5kHz, `8`=3.15kHz, `9`=4kHz, `10`=5kHz, `11`=6.3kHz, `12`=8kHz, `13`=10kHz, `14`=12.5kHz, `15`=Flat
 | `06` | `reverb-diffusion` | int `0`..`10`

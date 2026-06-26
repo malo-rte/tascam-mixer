@@ -21,10 +21,18 @@
 //!
 //! # Coverage
 //!
-//! The single-byte parameters of every effect block are catalogued. A few
-//! multi-byte, nibble-encoded values (delay/tempo times, chorus/reverb pre-delay
-//! and time) and the large per-type Modulation matrix are not yet exposed; see
-//! `docs/gx700-sysex-protocol.adoc` "Open items".
+//! Every **single-byte** parameter of every effect block is catalogued, including
+//! the full Modulation block and the Chorus/Reverb pre-delay and Reverb time. The
+//! complete per-offset map is `docs/gx700-patch-data-format.adoc`, and the
+//! `catalog_bank` integration test cross-checks every catalogued parameter against
+//! a real 100-patch bank.
+//!
+//! Still deferred (they are **multi-byte**, needing a model that spans >1 byte, or
+//! belong to patch data rather than live edits):
+//! - Delay tempo (`0x03`/`0x04`) and tap times (`0x05`..`0x0A`) — 14-bit values.
+//! - Modulation resonance (`0x0B`/`0x0C`) and flanger separation (`0x0E`/`0x0F`) —
+//!   nibble-split, and the 36-byte harmonist scale map (`0x29`..`0x4C`).
+//! - The Level/Chain control assigns (`0x1A`..`0x41`).
 
 /// Base address (`08 00 00 00`) of the *individual* temporary buffer: writing one
 /// parameter here edits the current sound live, with immediate effect.
@@ -235,13 +243,37 @@ pub const MOD_TYPE_VALUES: &[&str] = &[
     "Ring Modulator",
     "Humanizer",
 ];
+/// Phaser stage count (Modulation offset 0x02).
+pub const PHASER_STAGE_VALUES: &[&str] = &["4-Stage", "6-Stage", "8-Stage", "10-Stage", "12-Stage"];
+/// Vibrato trigger (Modulation offset 0x03).
+pub const VIBRATO_TRIGGER_VALUES: &[&str] = &["Off", "On", "Auto"];
+/// Humanizer type / trigger (Modulation offsets 0x05, 0x11).
+pub const HUMANIZER_MODE_VALUES: &[&str] = &["Auto", "Pedal"];
+/// Humanizer vowels (Modulation offsets 0x06, 0x07).
+pub const VOWEL_VALUES: &[&str] = &["a", "e", "i", "o", "u"];
+/// Pitch-shifter type (Modulation offset 0x16).
+pub const PS_TYPE_VALUES: &[&str] = &["Slow", "Fast", "Mono"];
+/// Tempo-synced delay interval (Table 11.1; Delay offset 0x0B).
+pub const DELAY_INTERVAL_VALUES: &[&str] = &[
+    "1/16",
+    "1/8 Triplet",
+    "Dotted 1/16",
+    "1/8",
+    "1/4 Triplet",
+    "Dotted 1/8",
+    "1/4",
+    "Dotted 1/4",
+    "1/2",
+    "Dotted 1/2",
+    "Whole",
+];
 /// Delay mode (Table 11).
 pub const DELAY_MODE_VALUES: &[&str] = &["Normal", "Tempo"];
 /// Chorus mode (Table 12).
 pub const CHORUS_MODE_VALUES: &[&str] = &["Mono", "Stereo"];
-/// Tremolo/pan mode (Table 13).
+/// Tremolo/pan mode (Table 13): `0:TREMOLO(TRI) 1:TREMOLO(SQR) 2:PAN(TRI) 3:PAN(SQR)`.
 pub const TREMOLO_MODE_VALUES: &[&str] =
-    &["Tremolo (Tri)", "Tremolo (Sqr)", "Pan (Sqr)", "Pan (Tri)"];
+    &["Tremolo (Tri)", "Tremolo (Sqr)", "Pan (Tri)", "Pan (Sqr)"];
 /// Reverb mode (Table 14).
 pub const REVERB_MODE_VALUES: &[&str] = &["Room 1", "Room 2", "Hall 1", "Hall 2", "Plate"];
 /// High-cut frequency (Table 15), shared by delay/chorus/reverb.
@@ -431,12 +463,67 @@ pub const ALL: &[Param] = &[
     i100("ns-release", NoiseSuppressor, 0x02),
     e("ns-detect", NoiseSuppressor, 0x03, NS_DETECT_VALUES),
     i100("ns-level", NoiseSuppressor, 0x04),
-    // Modulation (Table 10). Per-type parameters beyond type are not yet exposed.
+    // Modulation (Table 10). One block shared by seven effect types; many offsets
+    // are reused across types (the doc names every type a field applies to).
+    // Deferred: nibble-encoded resonance (0x0B/0x0C) and flanger separation
+    // (0x0E/0x0F), and the 36-byte harmonist scale map (0x29..0x4C).
     b("mod-enable", Modulation, 0x00),
     e("mod-type", Modulation, 0x01, MOD_TYPE_VALUES),
-    // Delay (Table 11). Multi-byte tempo/time values (offsets 0x03..0x0A) deferred.
+    e("mod-phaser-stage", Modulation, 0x02, PHASER_STAGE_VALUES),
+    e(
+        "mod-vibrato-trigger",
+        Modulation,
+        0x03,
+        VIBRATO_TRIGGER_VALUES,
+    ),
+    i100("mod-vibrato-rise-time", Modulation, 0x04),
+    e(
+        "mod-humanizer-type",
+        Modulation,
+        0x05,
+        HUMANIZER_MODE_VALUES,
+    ),
+    e("mod-humanizer-vowel1", Modulation, 0x06, VOWEL_VALUES),
+    e("mod-humanizer-vowel2", Modulation, 0x07, VOWEL_VALUES),
+    i100("mod-rate", Modulation, 0x08), // Humanizer/Vibrato/Flanger/Phaser
+    i100("mod-depth", Modulation, 0x09), // "
+    i100("mod-manual", Modulation, 0x0A), // Flanger/Phaser
+    i100("mod-phaser-step-rate", Modulation, 0x0D), // 0 = off, 1..100
+    i100("mod-flanger-gate", Modulation, 0x10), // 0 = off, 1..100
+    e(
+        "mod-humanizer-trigger",
+        Modulation,
+        0x11,
+        HUMANIZER_MODE_VALUES,
+    ),
+    i("mod-humanizer-pedal-source", Modulation, 0x12, 0, 64, 0),
+    i100("mod-ring-frequency", Modulation, 0x13), // 0 = INT, 1..100
+    i100("mod-ring-effect-level", Modulation, 0x14),
+    i100("mod-ring-direct-level", Modulation, 0x15),
+    e("mod-ps-type", Modulation, 0x16, PS_TYPE_VALUES),
+    i("mod-ps-pitch1", Modulation, 0x17, 0, 50, 25), // raw 0..50 = -24..+24
+    i("mod-ps-pitch2", Modulation, 0x18, 0, 50, 25),
+    i("mod-ps-pitch3", Modulation, 0x19, 0, 50, 25),
+    i("mod-ps-fine1", Modulation, 0x1A, 0, 100, 50), // raw 0..100 = -50..+50
+    i("mod-ps-fine2", Modulation, 0x1B, 0, 100, 50),
+    i("mod-ps-fine3", Modulation, 0x1C, 0, 100, 50),
+    i("mod-harmonist-key", Modulation, 0x1D, 0, 24, 0),
+    i("mod-harmonist-interval1", Modulation, 0x1E, 0, 48, 24), // raw 0..48 = -24..+24
+    i("mod-harmonist-interval2", Modulation, 0x1F, 0, 48, 24),
+    i("mod-harmonist-interval3", Modulation, 0x20, 0, 48, 24),
+    i100("mod-pshr-pan1", Modulation, 0x21), // L100:R0 .. L0:R100
+    i100("mod-pshr-pan2", Modulation, 0x22),
+    i100("mod-pshr-pan3", Modulation, 0x23),
+    i100("mod-pshr-level1", Modulation, 0x24),
+    i100("mod-pshr-level2", Modulation, 0x25),
+    i100("mod-pshr-level3", Modulation, 0x26),
+    i100("mod-pshr-balance", Modulation, 0x27),
+    i100("mod-pshr-total-level", Modulation, 0x28),
+    // Delay (Table 11). Multi-byte tempo (0x03/0x04) and tap times (0x05..0x0A)
+    // are deferred (14-bit values not yet modelled).
     b("delay-enable", Delay, 0x00),
     e("delay-mode", Delay, 0x01, DELAY_MODE_VALUES),
+    e("delay-interval-c", Delay, 0x0B, DELAY_INTERVAL_VALUES),
     i100("delay-feedback", Delay, 0x0C),
     i100("delay-level-c", Delay, 0x0D),
     i100("delay-level-l", Delay, 0x0E),
@@ -446,11 +533,12 @@ pub const ALL: &[Param] = &[
     b("delay-smooth", Delay, 0x12),
     i100("delay-effect-level", Delay, 0x13),
     i100("delay-direct-level", Delay, 0x14),
-    // Chorus (Table 12). Pre-delay (0x04) deferred.
+    // Chorus (Table 12).
     b("chorus-enable", Chorus, 0x00),
     e("chorus-mode", Chorus, 0x01, CHORUS_MODE_VALUES),
     i100("chorus-rate", Chorus, 0x02),
     i100("chorus-depth", Chorus, 0x03),
+    i100("chorus-pre-delay", Chorus, 0x04), // raw 0..100 = ×0.5 ms (0.0..50.0 ms)
     e("chorus-low-cut", Chorus, 0x05, LOW_CUT_VALUES),
     e("chorus-hi-cut", Chorus, 0x06, HI_CUT_VALUES),
     i("chorus-mod-wave", Chorus, 0x07, 0, 10, 0),
@@ -461,9 +549,11 @@ pub const ALL: &[Param] = &[
     i100("tremolo-rate", TremoloPan, 0x02),
     i100("tremolo-depth", TremoloPan, 0x03),
     i100("tremolo-balance", TremoloPan, 0x04), // L100:R0 .. L0:R100
-    // Reverb (Table 14). Reverb-time and pre-delay (0x02, 0x03) deferred.
+    // Reverb (Table 14).
     b("reverb-enable", Reverb, 0x00),
     e("reverb-mode", Reverb, 0x01, REVERB_MODE_VALUES),
+    i("reverb-time", Reverb, 0x02, 1, 100, 50), // raw 1..100 = 0.1..10.0 s
+    i100("reverb-pre-delay", Reverb, 0x03),     // raw 0..100 = 0..100 ms
     e("reverb-low-cut", Reverb, 0x04, LOW_CUT_VALUES),
     e("reverb-hi-cut", Reverb, 0x05, HI_CUT_VALUES),
     i("reverb-diffusion", Reverb, 0x06, 0, 10, 10),
