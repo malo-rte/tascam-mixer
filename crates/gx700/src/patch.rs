@@ -205,6 +205,32 @@ impl RawPatch {
         self.blocks.insert(0x00, to_hex(&bytes));
         Ok(())
     }
+
+    /// The patch output level (Level/Chain offset `0`, raw `0..=100`). `0` if the
+    /// Level/Chain block is missing.
+    #[must_use]
+    pub fn output_level(&self) -> u8 {
+        self.header().0
+    }
+
+    /// Set the patch output level (Level/Chain offset `0`, raw `0..=100`),
+    /// rewriting the Level/Chain block in place.
+    ///
+    /// # Errors
+    /// [`Error::Patch`] if the Level/Chain block is missing or empty.
+    pub fn set_output_level(&mut self, level: u8) -> Result<()> {
+        let hex = self
+            .blocks
+            .get(&0x00)
+            .ok_or_else(|| Error::Patch("patch has no Level/Chain block".to_owned()))?;
+        let mut bytes = from_hex(hex)?;
+        let Some(first) = bytes.first_mut() else {
+            return Err(Error::Patch("Level/Chain block is empty".to_owned()));
+        };
+        *first = level;
+        self.blocks.insert(0x00, to_hex(&bytes));
+        Ok(())
+    }
 }
 
 /// Format a raw device byte for one parameter in display units.
@@ -525,6 +551,26 @@ mod tests {
                 .is_err()
         );
         assert!(patch.set_chain(&[1, 2, 3]).is_err());
+    }
+
+    #[test]
+    fn output_level_reads_and_sets() {
+        let mut blocks = BTreeMap::new();
+        blocks.insert(
+            0x00u8,
+            "32 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 4A 41 5A 5A 20 54 4F 4E 45 20 20 20"
+                .to_owned(),
+        );
+        let mut patch = RawPatch {
+            version: PATCH_VERSION,
+            name: "JAZZ TONE".to_owned(),
+            blocks,
+        };
+        assert_eq!(patch.output_level(), 0x32); // 50
+        patch.set_output_level(80).unwrap();
+        assert_eq!(patch.output_level(), 80);
+        // The chain bytes are untouched by a level change.
+        assert_eq!(patch.chain(), (1u8..=13).collect::<Vec<u8>>());
     }
 
     #[test]

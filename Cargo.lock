@@ -2766,6 +2766,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackctl-gx700-gui"
+version = "0.7.3"
+dependencies = [
+ "anyhow",
+ "clap",
+ "directories",
+ "eframe",
+ "egui",
+ "rackctl-gx700",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rackctl-us16x08"
 version = "0.7.3"
 dependencies = [

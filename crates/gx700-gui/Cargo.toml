@@ -1,0 +1,33 @@
+[package]
+name = "rackctl-gx700-gui"
+version.workspace = true
+description = "Graphical patch librarian and level balancer (rackctl-gx700-gui) for the BOSS GX-700 guitar effects processor."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false             # application crate, not for crates.io (it has a path dependency)
+
+[[bin]]
+name = "rackctl-gx700-gui"
+path = "src/main.rs"
+
+[features]
+# The real ALSA rawmidi backend is on by default; `--mock` swaps in the in-memory
+# transport at runtime. Build with `--no-default-features` for a mock-only binary.
+default = ["alsa"]
+alsa = ["rackctl-gx700/alsa"]
+
+[dependencies]
+rackctl-gx700 = { path = "../gx700", default-features = false }
+clap.workspace = true
+eframe.workspace = true
+egui.workspace = true
+directories.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

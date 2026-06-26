@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Rackctl GX-700 Patch Editor
+GenericName=Guitar Effects Patch Editor
+Comment=Browse, audition, and balance the levels of BOSS GX-700 patches
+Exec=rackctl-gx700-gui
+Icon=rackctl-gx700-gui
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=rackctl;boss;gx-700;guitar;effects;patch;midi;sysex;
+StartupNotify=true
+StartupWMClass=rackctl-gx700-gui

@@ -3,11 +3,14 @@
 :icons: font
 :source-highlighter: rouge
 
-Planning notes for a *graphical patch editor* for the BOSS GX-700 (Rackctl Stage 4).
-*Not built yet* -- today the GX-700 has a library (`crates/gx700`) and a CLI
-(`rackctl-gx700`). This document records the feature ideas and how they map onto the
-building blocks that already exist, so the GUI can be built deliberately when the
-time comes.
+Roadmap for the *graphical patch editor* for the BOSS GX-700 (Rackctl Stage 4),
+`crates/gx700-gui` (binary `rackctl-gx700-gui`).
+
+*Status:* the **patch librarian + level balancer** (the headline feature below) is
+**implemented** -- a one-screen list of all 100 user patches with one-click
+audition and inline output-level balancing, plus a "balance live, write once" store
+that guides the user into BULK LOAD mode. The rest of this document records the
+remaining ideas and how they map onto the existing building blocks.
 
 NOTE: BOSS and Roland are trademarks of Roland Corporation. This is an independent,
 unofficial project, not affiliated with Roland.
