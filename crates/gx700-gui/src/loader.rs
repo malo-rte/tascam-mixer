@@ -24,12 +24,19 @@ const READ_PACE: Duration = Duration::from_millis(40);
 /// dropped device reply shouldn't abort the whole bank load.
 const READ_ATTEMPTS: u32 = 3;
 
+/// If this many slots fail back-to-back the device is clearly not answering at
+/// all (off, unplugged, wrong port, in BULK LOAD, or the port is in use), so the
+/// load aborts with one clear message instead of grinding through all 100 slots.
+const ABORT_AFTER_CONSECUTIVE: u16 = 3;
+
 /// A result from the loader.
 pub(crate) enum Loaded {
     /// One slot's header arrived.
     Header(u16, PatchHeader),
     /// A slot read failed (slot, message); the load continues with the next.
     Failed(u16, String),
+    /// The load gave up early because the device stopped answering (message).
+    Aborted(String),
     /// The whole bank finished (or the load was cancelled).
     Done,
 }
@@ -74,12 +81,28 @@ impl Drop for Loader {
 }
 
 fn run(device: &SharedDevice, cancel: &AtomicBool, tx: &Sender<Loaded>) {
+    let mut consecutive_fail = 0u16;
     for slot in 1..=USER_SLOTS {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        if tx.send(read_slot(device, cancel, slot)).is_err() {
+        let result = read_slot(device, cancel, slot);
+        let failed = matches!(result, Loaded::Failed(..));
+        if tx.send(result).is_err() {
             return; // UI gone
+        }
+        if failed {
+            consecutive_fail += 1;
+            if consecutive_fail >= ABORT_AFTER_CONSECUTIVE {
+                let _ = tx.send(Loaded::Aborted(format!(
+                    "device not responding ({consecutive_fail} slots timed out in a row). \
+                     Check it is powered on, connected to the right port, not in BULK LOAD \
+                     mode, and that no other program is using the MIDI port — then Refresh."
+                )));
+                return;
+            }
+        } else {
+            consecutive_fail = 0;
         }
         thread::sleep(READ_PACE);
     }

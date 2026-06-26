@@ -480,6 +480,7 @@ impl App {
             return;
         };
         let mut done = false;
+        let mut aborted: Option<String> = None;
         for ev in loader.drain() {
             match ev {
                 Loaded::Header(slot, header) => {
@@ -503,10 +504,19 @@ impl App {
                     }
                     self.status = format!("U{slot:03}: {msg}");
                 }
+                Loaded::Aborted(msg) => aborted = Some(msg),
                 Loaded::Done => done = true,
             }
         }
-        if done {
+        if let Some(msg) = aborted {
+            // Device-wide failure, not a handful of bad slots: drop the per-slot
+            // marks (the shown values are the last good cache) and stop.
+            self.loader = None;
+            for row in &mut self.rows {
+                row.failed = false;
+            }
+            self.status = msg;
+        } else if done {
             self.loader = None;
             "bank loaded".clone_into(&mut self.status);
             self.save_cache();
