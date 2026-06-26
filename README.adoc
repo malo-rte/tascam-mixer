@@ -29,7 +29,9 @@ the verified control catalog.
 The BOSS GX-700 control tool `rackctl-gx700` has its own
 link:docs/gx700-user-manual.adoc[user manual] (currently covering patch backups and
 whole-device scenes); its MIDI control surface is documented in
-link:docs/gx700-sysex-protocol.adoc[the SysEx protocol reference].
+link:docs/gx700-sysex-protocol.adoc[the SysEx protocol reference], and ideas for a
+future graphical patch editor are collected in
+link:docs/gx700-gui-roadmap.adoc[the GUI roadmap].
 
 A global `--mock` flag (CLI) or `--mock` argument (GUI) runs against an in-memory
 device with no card attached, e.g. `cargo run -p rackctl-us16x08-cli -- --mock list`.
