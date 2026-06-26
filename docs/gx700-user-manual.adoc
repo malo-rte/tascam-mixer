@@ -82,6 +82,181 @@ TIP: Every command also runs against an in-memory mock device with `--mock` (and
 no `--port`), so you can try the commands and see the file layout without the
 hardware connected.
 
+[[sec-editing]]
+== Editing parameters
+
+A GX-700 sound is a chain of effect blocks -- a compressor, a wah, a
+distortion, a preamp, an equalizer, modulation, delay, reverb, and so on.
+`rackctl-gx700` reads and writes the individual parameters of those blocks, each
+addressed by a short stable *key* such as `preamp-type`, `delay-time`, or
+`output-level`.
+
+[[sec-editing-model]]
+=== What `get` and `set` act on
+
+[IMPORTANT]
+====
+`get` and `set` operate on the *current sound* -- the temporary buffer, i.e. what
+the unit is playing right now -- and a `set` takes effect *immediately* (you hear
+it). They do *not* change a stored patch. Editing leaves the 200 patch memories
+untouched until you explicitly save (see <<sec-editing-keep>>).
+====
+
+So the usual flow is: pick a starting patch, edit the current sound, listen, then
+keep it if you like it.
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 select 42     # load user patch 42 into the current sound
+$ rackctl-gx700 --port hw:1,0 set preamp-type "Metal 5150"
+$ rackctl-gx700 --port hw:1,0 set preamp-volume 90
+----
+
+To read back a *stored* patch instead of the current sound, use `dump --patch N`
+(a readable dump, no editing) or `select` it first so it becomes the current sound.
+
+[[sec-editing-find]]
+=== Finding a parameter
+
+`list` prints the whole catalog -- 91 parameters across the 14 blocks -- as key,
+block, kind, and patch offset:
+
+[source,console]
+----
+$ rackctl-gx700 list
+KEY                    BLOCK              KIND                     PATCH OFFSET
+output-level           Level/Chain        int 0..=100              00 00 00 00
+comp-enable            Compressor         bool                     00 00 01 00
+comp-type              Compressor         enum[2]                  00 00 01 01
+...
+----
+
+`info <key>` shows one parameter in detail -- its block, its kind, and its range
+or enum values:
+
+[source,console]
+----
+$ rackctl-gx700 info preamp-type
+preamp-type  (Preamp)
+  patch offset: 00 00 04 01
+  live address: 08 00 04 01
+  kind:  enum (default 0)
+  values: 0=JC-120  1=Clean Twin  2=Match Drive  3=BG Lead  4=MS1959 (I)  ...
+----
+
+Neither command needs the hardware -- the catalog is built in -- so `list` and
+`info` work without `--port`.
+
+[[sec-editing-kinds]]
+=== Kinds of value
+
+Every parameter is one of three kinds (the `KIND` column, and the `kind:` line of
+`info`):
+
+Boolean:: An on/off switch -- a block's `-enable`, or a toggle like
+`preamp-bright`. Accepts `on`/`off`, `true`/`false`, `1`/`0`, or `yes`/`no`.
+`get` prints it as `true`/`false`.
+
+Integer:: A number in a raw range, usually `0..=100` (`info` shows the range). Set
+it with a plain number. A few are shown with units -- `output-level` reads back as
+a percentage, for example.
+
+Enum:: A choice from a fixed list, like `preamp-type`. Set it either by index
+(`0`, `1`, `2`, ...) or by its case-insensitive label (`"BG Lead"`). `get` prints
+it as `label (index)`.
+
+[[sec-editing-read]]
+=== Reading a value
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 get preamp-type
+BG Lead (3)
+$ rackctl-gx700 --port hw:1,0 get preamp-volume
+90
+$ rackctl-gx700 --port hw:1,0 get output-level
+80%
+----
+
+[[sec-editing-write]]
+=== Changing a value
+
+`set <key> <value>` writes the value to the current sound. It is silent on
+success; `get` to confirm.
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 set preamp-enable on           # boolean
+$ rackctl-gx700 --port hw:1,0 set preamp-volume 90           # integer
+$ rackctl-gx700 --port hw:1,0 set preamp-type "Metal 5150"   # enum by label
+$ rackctl-gx700 --port hw:1,0 set preamp-type 8              # enum by index (the same thing)
+----
+
+Out-of-range or unknown values are rejected, and an enum error lists the valid
+choices:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 set preamp-volume 200
+error: value 200 out of range for preamp-volume (expected 0..=100)
+$ rackctl-gx700 --port hw:1,0 set preamp-type "Tweed"
+error: unknown value "Tweed"; expected one of: JC-120, Clean Twin, Match Drive, BG Lead, ...
+----
+
+[[sec-editing-keep]]
+=== Keeping an edit
+
+Because edits change only the current sound, they are gone the next time you select
+another patch -- unless you store them. Save the current sound to a file, then load
+it into a user slot:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 save "my-lead"                  # current sound -> file
+$ rackctl-gx700 --port hw:1,0 load "my-lead" --to-patch 42    # file -> user slot 42 (destructive)
+----
+
+See <<sec-scenes-backups>> for saving and loading in full. (You can also store the
+current sound from the GX-700's own front panel with its Write button.)
+
+[[sec-editing-blocks]]
+=== The effect blocks
+
+Each block has an `<prefix>-enable` on/off switch and a set of parameters; most also
+have a `-type` choosing the model or mode. The keys group by block prefix:
+
+[cols="1,1,1,3",options="header"]
+|===
+| Block | Key prefix | Params | What it is
+| Level / Chain | `output-level` | 1 | Patch output level (the chain order and name travel with whole-patch save/load, not as individual parameters)
+| Compressor    | `comp-`     | 8  | Dynamics compressor / limiter
+| Wah           | `wah-`      | 12 | Wah, auto-wah, and pedal filters
+| Distortion    | `dist-`     | 6  | Overdrive, distortion, fuzz
+| Preamp        | `preamp-`   | 10 | COSM amp models and tone stack
+| Loop          | `loop-`     | 4  | External effects-loop send / return
+| Equalizer     | `eq-`       | 7  | Four-band EQ
+| Speaker       | `speaker-`  | 5  | Speaker / cabinet simulator
+| Noise         | `ns-`       | 5  | Noise suppressor / gate
+| Modulation    | `mod-`      | 2  | Flanger / phaser / pitch / harmonist / ... (only on/off and type are catalogued so far; the per-type parameters are still being mapped)
+| Delay         | `delay-`    | 11 | Delay
+| Chorus        | `chorus-`   | 8  | Chorus
+| Tremolo / Pan | `tremolo-`  | 5  | Tremolo and auto-pan
+| Reverb        | `reverb-`   | 7  | Reverb
+|===
+
+TIP: `list` and `info` are the authoritative reference -- the table above is a map;
+`info <key>` gives the exact range or the full list of enum labels for any
+parameter.
+
+[[sec-editing-mock]]
+=== Trying it without hardware
+
+`--mock` (with no `--port`) runs `set`/`get` against an in-memory device, handy for
+checking command and value syntax. Note that the mock starts fresh on every run, so
+a `set` in one command is *not* visible to a `get` in the next -- each invocation is
+a new mock device seeded with defaults. On real hardware a `set` persists in the
+current sound until you change it or select another patch.
+
 [[sec-scenes-backups]]
 == Scenes & backups
 
