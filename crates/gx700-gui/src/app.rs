@@ -1690,27 +1690,29 @@ impl App {
             if ui.checkbox(&mut on, "Preamp enabled").changed() {
                 actions.push(Action::SetParam(slot, "preamp-enable", Value::Bool(on)));
             }
-            ui.horizontal(|ui| {
-                ui.label("Model").on_hover_text(
-                    "Amp model — cleans (JC-120, Clean Twin) through high gain (Metal 5150).",
-                );
-                param_combo(ui, slot, "preamp-type", typed, connected, actions);
-            });
-            ui.horizontal(|ui| {
-                ui.label("Gain")
-                    .on_hover_text("Input gain range: Low / Mid / Hi — the overall drive amount.");
-                param_combo(ui, slot, "preamp-gain", typed, connected, actions);
-                let mut bright = matches!(typed.get("preamp-bright"), Some(Value::Bool(true)));
-                if ui
-                    .checkbox(&mut bright, "Bright")
-                    .on_hover_text(
+            egui::Grid::new("gx700-preamp-head")
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Model").on_hover_text(
+                        "Amp model — cleans (JC-120, Clean Twin) through high gain (Metal 5150).",
+                    );
+                    param_combo(ui, slot, "preamp-type", typed, connected, actions);
+                    ui.end_row();
+                    ui.label("Gain").on_hover_text(
+                        "Input gain range: Low / Mid / Hi — the overall drive amount.",
+                    );
+                    param_combo(ui, slot, "preamp-gain", typed, connected, actions);
+                    ui.end_row();
+                    ui.label("Bright").on_hover_text(
                         "Bright switch — extra high-end sparkle (mostly on the clean models).",
-                    )
-                    .changed()
-                {
-                    actions.push(Action::SetParam(slot, "preamp-bright", Value::Bool(bright)));
-                }
-            });
+                    );
+                    let mut bright = matches!(typed.get("preamp-bright"), Some(Value::Bool(true)));
+                    if ui.checkbox(&mut bright, "").changed() {
+                        actions.push(Action::SetParam(slot, "preamp-bright", Value::Bool(bright)));
+                    }
+                    ui.end_row();
+                });
         });
         show_preamp_curve(ui, typed);
         ui.add_space(2.0);
