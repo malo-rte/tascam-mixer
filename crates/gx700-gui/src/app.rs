@@ -409,6 +409,9 @@ pub(crate) struct App {
     /// The effect block selected in the Edit tab.
     selected_block: Block,
     bulk_prompt: bool,
+    /// After a write, reminds the user to leave BULK LOAD mode (press PLAY) — patch
+    /// recall stays disabled on the unit until they do.
+    bulk_done: bool,
     status: String,
     zoom: f32,
     window: Option<[f32; 2]>,
@@ -454,6 +457,7 @@ impl App {
             tab: Tab::Patches,
             selected_block: Block::Compressor,
             bulk_prompt: false,
+            bulk_done: false,
             status: if connected {
                 "reading patch bank…".to_owned()
             } else {
@@ -831,8 +835,9 @@ impl App {
 
     /// Store every pending change (name + level) to memory in one batch (the
     /// "Write changes to unit" button). Attempts every dirty row even if some fail,
-    /// committing each success so its row clears, and reports any failures.
-    fn write_all(&mut self) {
+    /// committing each success so its row clears, and reports any failures. Returns
+    /// the number of patches successfully stored.
+    fn write_all(&mut self) -> usize {
         let dirty: Vec<u16> = self
             .rows
             .iter()
@@ -841,7 +846,7 @@ impl App {
             .collect();
         if dirty.is_empty() {
             "no pending changes to store".clone_into(&mut self.status);
-            return;
+            return 0;
         }
         let mut stored = 0usize;
         let mut failed: Vec<u16> = Vec::new();
@@ -861,7 +866,9 @@ impl App {
         }
         self.save_cache();
         self.status = if failed.is_empty() {
-            format!("stored {stored} patch change(s)")
+            format!(
+                "stored {stored} patch change(s) — press PLAY on the unit to leave BULK LOAD mode"
+            )
         } else {
             // Lead with the cause (often "not in BULK LOAD mode"); list the slots.
             let slots: Vec<String> = failed.iter().map(|s| format!("U{s:03}")).collect();
@@ -871,6 +878,7 @@ impl App {
                 slots.join(", ")
             )
         };
+        stored
     }
 
     fn save_cache(&self) {
@@ -1241,6 +1249,9 @@ impl App {
                                     actions.push(Action::ClearRow(row.slot));
                                 }
                             });
+                            // Keep the last button clear of the vertical scrollbar,
+                            // which otherwise overlays (and clips) the Clear button.
+                            ui.add_space(18.0);
                         });
                         ui.end_row();
                     }
@@ -1266,10 +1277,15 @@ impl App {
             Action::Refresh => self.start_load(),
             Action::Retry => self.retry(),
             Action::OpenBulkPrompt => self.bulk_prompt = true,
-            Action::CloseBulkPrompt => self.bulk_prompt = false,
+            Action::CloseBulkPrompt => {
+                self.bulk_prompt = false;
+                self.bulk_done = false;
+            }
             Action::WriteAll => {
                 self.bulk_prompt = false;
-                self.write_all();
+                // Show the "leave BULK LOAD mode" reminder when anything was stored:
+                // the unit ignores patch recall until the user presses PLAY.
+                self.bulk_done = self.write_all() > 0;
             }
         }
     }
@@ -1426,6 +1442,24 @@ impl eframe::App for App {
                             actions.push(Action::CloseBulkPrompt);
                         }
                     });
+                });
+        }
+
+        if self.bulk_done {
+            egui::Window::new("Changes written")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(
+                        "Now press PLAY on the GX-700 to leave BULK LOAD mode.\n\
+                         Until you do, the unit stays in the utility menu and \
+                         changing patches (on the unit or by Program Change) has no \
+                         effect. Auditioning from here still works.",
+                    );
+                    if action_button(ui, "OK", ActionKind::Commit).clicked() {
+                        actions.push(Action::CloseBulkPrompt);
+                    }
                 });
         }
 
