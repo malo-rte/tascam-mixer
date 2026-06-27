@@ -542,8 +542,8 @@ fn show_delay_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
     let fb = f64::from(raw("delay-feedback")) / 100.0;
     let span = (c * 3.5).max(lt).max(rt).max(50.0);
     let blue = egui::Color32::from_rgb(90, 170, 220);
-    let teal = egui::Color32::from_rgb(90, 200, 170);
-    let amber = egui::Color32::from_rgb(220, 170, 90);
+    let green = egui::Color32::from_rgb(80, 200, 100); // left tap
+    let red = egui::Color32::from_rgb(220, 80, 80); // right tap
     // A vertical impulse line (time, height).
     let tap = |t: f64, h: f64| PlotPoints::from(vec![[t, 0.0], [t, h]]);
     Plot::new("gx700-delay")
@@ -574,9 +574,9 @@ fn show_delay_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
                 t += c;
                 h *= fb;
             }
-            // Left / right taps (single).
-            plot.line(Line::new(tap(lt, f64::from(raw("delay-level-l")))).color(teal));
-            plot.line(Line::new(tap(rt, f64::from(raw("delay-level-r")))).color(amber));
+            // Left (green) / right (red) taps (single).
+            plot.line(Line::new(tap(lt, f64::from(raw("delay-level-l")))).color(green));
+            plot.line(Line::new(tap(rt, f64::from(raw("delay-level-r")))).color(red));
         });
 }
 
@@ -1854,7 +1854,10 @@ impl App {
         });
         show_delay_curve(ui, typed);
         ui.add_space(2.0);
-        ui.label(egui::RichText::new("Tap diagram — centre echoes (feedback), L/R taps.").weak());
+        ui.label(
+            egui::RichText::new("Tap diagram — centre echoes (blue), Left (green), Right (red).")
+                .weak(),
+        );
         ui.add_space(4.0);
         egui::Grid::new("gx700-delay-grid")
             .num_columns(4)
