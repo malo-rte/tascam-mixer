@@ -662,6 +662,79 @@ fn show_speaker_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         .show(ui, |plot| plot.line(Line::new(PlotPoints::from(points))));
 }
 
+/// Draw the wah as a resonant peak filter: a boost at the centre frequency whose
+/// width follows the Peak control. In the pedal modes the heel/toe sweep range
+/// (Pedal Min/Max) is shown as faint peaks; in Auto Wah the single peak sits at
+/// Manual. The Hz mapping is nominal (the device publishes no exact frequencies).
+fn show_wah_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("wah-enable"), Some(Value::Bool(true)));
+    let auto = matches!(typed.get("wah-mode"), Some(Value::Enum(2)));
+    let q = 0.7 + f64::from(raw("wah-peak")) / 100.0 * 6.0;
+    // A 0..100 frequency control -> log Hz over ~250 Hz .. 2.8 kHz (a wah's range).
+    let peak_curve = |ctrl: i32| -> Vec<[f64; 2]> {
+        let f0 = 10f64.powf(2.4 + (3.45 - 2.4) * f64::from(ctrl.clamp(0, 100)) / 100.0);
+        let band = [EqBand {
+            kind: BandType::Peaking,
+            f0,
+            q,
+            gain_db: 15.0,
+        }];
+        (0..=200)
+            .map(|i| {
+                let lf = 1.3 + (4.3 - 1.3) * (f64::from(i) / 200.0);
+                let db = if active {
+                    eq_response_db(&band, 10f64.powf(lf))
+                } else {
+                    0.0
+                };
+                [lf, db]
+            })
+            .collect()
+    };
+    let center = peak_curve(if auto {
+        raw("wah-auto-manual")
+    } else {
+        raw("wah-pedal-freq")
+    });
+    let sweep = (!auto).then(|| {
+        (
+            peak_curve(raw("wah-pedal-min")),
+            peak_curve(raw("wah-pedal-max")),
+        )
+    });
+    Plot::new("gx700-wah")
+        .height(150.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_y(-3.0)
+        .include_y(18.0)
+        .x_axis_formatter(|mark, _| hz_label(mark.value))
+        .y_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
+        .show(ui, |plot| {
+            if let Some((lo, hi)) = sweep {
+                let faint = egui::Color32::from_gray(110);
+                plot.line(
+                    Line::new(PlotPoints::from(lo))
+                        .color(faint)
+                        .style(LineStyle::dashed_loose()),
+                );
+                plot.line(
+                    Line::new(PlotPoints::from(hi))
+                        .color(faint)
+                        .style(LineStyle::dashed_loose()),
+                );
+            }
+            plot.line(
+                Line::new(PlotPoints::from(center)).color(egui::Color32::from_rgb(90, 170, 220)),
+            );
+        });
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1526,6 +1599,10 @@ impl App {
                 self.show_speaker_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::Wah {
+                self.show_wah_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -2014,6 +2091,96 @@ impl App {
     /// The Speaker Sim's custom UI: enable + cabinet model and mic setting, a
     /// generic cabinet response curve (the mic setting tilts the top end), then the
     /// mic (wet) / direct (dry) level mix.
+    /// The Wah's custom UI: enable + mode, a resonant-peak filter curve, then the
+    /// mode-relevant controls — pedal sweep (Frequency / Peak / pedal source / min /
+    /// max) for the pedal modes, or envelope+LFO controls for Auto Wah.
+    fn show_wah_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::Wah);
+        let auto = matches!(typed.get("wah-mode"), Some(Value::Enum(2)));
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Wah enabled").changed() {
+                actions.push(Action::SetParam(slot, "wah-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Mode").on_hover_text(
+                    "Pedal Wah / SW-Pedal Wah follow a pedal; Auto Wah sweeps from the \
+                     envelope or an LFO.",
+                );
+                param_combo(ui, slot, "wah-mode", typed, connected, actions);
+            });
+        });
+        show_wah_curve(ui, typed);
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new("Resonant peak — Peak sets the width; faint = pedal sweep range.")
+                .weak(),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("gx700-wah-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                if auto {
+                    ui.label("Polarity")
+                        .on_hover_text("Sweep direction driven by the envelope (Up or Down).");
+                    param_combo(ui, slot, "wah-auto-polarity", typed, connected, actions);
+                    ui.label("Sensitivity")
+                        .on_hover_text("How strongly the input level drives the sweep.");
+                    param_drag(ui, slot, "wah-auto-sens", typed, connected, actions);
+                    ui.end_row();
+                    ui.label("Manual")
+                        .on_hover_text("Centre frequency the auto-wah sweeps around.");
+                    param_drag(ui, slot, "wah-auto-manual", typed, connected, actions);
+                    ui.label("Peak").on_hover_text(
+                        "Resonance / width — 50 ≈ standard; higher is narrower and more vocal.",
+                    );
+                    param_drag(ui, slot, "wah-peak", typed, connected, actions);
+                    ui.end_row();
+                    ui.label("Rate")
+                        .on_hover_text("LFO rate of the cyclic sweep.");
+                    param_drag(ui, slot, "wah-auto-rate", typed, connected, actions);
+                    ui.label("Depth")
+                        .on_hover_text("LFO depth of the cyclic sweep.");
+                    param_drag(ui, slot, "wah-auto-depth", typed, connected, actions);
+                    ui.end_row();
+                } else {
+                    ui.label("Frequency")
+                        .on_hover_text("Centre frequency / pedal position of the wah.");
+                    param_drag(ui, slot, "wah-pedal-freq", typed, connected, actions);
+                    ui.label("Peak").on_hover_text(
+                        "Resonance / width — 50 ≈ standard; higher is narrower and more vocal.",
+                    );
+                    param_drag(ui, slot, "wah-peak", typed, connected, actions);
+                    ui.end_row();
+                    ui.label("Pedal").on_hover_text(
+                        "Pedal source: 0 = Fixed, 1 = Exp pedal, 2 = FC-200, 3+ = MIDI CC.",
+                    );
+                    param_drag(ui, slot, "wah-pedal-source", typed, connected, actions);
+                    ui.label("");
+                    ui.label("");
+                    ui.end_row();
+                    ui.label("Pedal min")
+                        .on_hover_text("Frequency at the pedal's heel (sweep low end).");
+                    param_drag(ui, slot, "wah-pedal-min", typed, connected, actions);
+                    ui.label("Pedal max")
+                        .on_hover_text("Frequency at the pedal's toe (sweep high end).");
+                    param_drag(ui, slot, "wah-pedal-max", typed, connected, actions);
+                    ui.end_row();
+                }
+                ui.label("Level").on_hover_text("Wah output level.");
+                param_drag(ui, slot, "wah-level", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
     fn show_speaker_editor(
         &self,
         ui: &mut egui::Ui,
