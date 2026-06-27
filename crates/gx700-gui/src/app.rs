@@ -1337,8 +1337,12 @@ impl App {
                 );
                 param_drag(ui, slot, "ns-release", typed, connected, actions);
                 ui.end_row();
-                ui.label("Level")
-                    .on_hover_text("Noise Suppressor output level.");
+                ui.label("Level").on_hover_text(
+                    "Output volume of this block — a mid-chain gain stage (0–100), \
+                     not make-up gain. It sits inside the signal chain, so turning it \
+                     down attenuates everything downstream. For overall patch loudness \
+                     use the master output level on the Patches tab.",
+                );
                 param_drag(ui, slot, "ns-level", typed, connected, actions);
                 ui.end_row();
             });
