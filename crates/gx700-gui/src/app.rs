@@ -58,6 +58,8 @@ enum Action {
     Audition(u16),
     SetLevel(u16, u8),
     SetParam(u16, &'static str, Value),
+    SelectTab(Tab),
+    SelectBlock(Block),
     SetName(u16, String),
     SaveRow(u16),
     RevertRow(u16),
@@ -69,6 +71,24 @@ enum Action {
     OpenBulkPrompt,
     CloseBulkPrompt,
     WriteAll,
+}
+
+/// Which screen is showing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    /// The patch librarian / level balancer.
+    Patches,
+    /// The per-block effect-parameter editor.
+    Edit,
+}
+
+/// Whether `block`'s enable byte (its offset-0 bool) is on in `typed`.
+fn block_enabled(typed: &TypedPatch, block: Block) -> bool {
+    param::ALL
+        .iter()
+        .find(|p| p.block() == block && p.offset() == 0 && matches!(p.kind(), Kind::Bool))
+        .and_then(|p| typed.get(p.key()))
+        .is_some_and(|v| matches!(v, Value::Bool(true)))
 }
 
 /// Render one parameter as a live widget (checkbox / slider / combo by kind),
@@ -133,6 +153,10 @@ pub(crate) struct App {
     now_playing: Option<u16>,
     /// The copied patch and its source slot, set by Copy and stamped by Paste.
     clipboard: Option<(u16, RawPatch)>,
+    /// Which screen is showing.
+    tab: Tab,
+    /// The effect block selected in the Edit tab.
+    selected_block: Block,
     bulk_prompt: bool,
     status: String,
     zoom: f32,
@@ -176,6 +200,8 @@ impl App {
             rows,
             now_playing: None,
             clipboard: None,
+            tab: Tab::Patches,
+            selected_block: Block::Compressor,
             bulk_prompt: false,
             status: if connected {
                 "reading patch bank…".to_owned()
@@ -523,37 +549,59 @@ impl App {
 
     /// Render the scrollable patch list (name, level slider, Save/Revert), pushing
     /// any interactions into `actions` to apply after the render pass.
-    /// The effect-parameter editor for the now-playing patch: every block's
-    /// parameters as live widgets. Reads current values through the typed model
-    /// and stages edits the same way as the level balancer.
-    fn show_editor(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    /// The Edit tab's left column: the now-playing patch's effect blocks in chain
+    /// (signal) order, selectable, each marked with its enable state.
+    fn show_block_list(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        ui.heading("Effect blocks");
         let Some(slot) = self.now_playing else {
-            ui.label("Click a patch's id to audition it, then edit its effects here.");
+            ui.label("Audition a patch on the Patches tab to edit it here.");
+            return;
+        };
+        let Some(eff) = self.effective_patch(slot) else {
+            return;
+        };
+        ui.label(format!("U{slot:03}  {:?}", eff.name));
+        ui.separator();
+        let typed = TypedPatch::from_raw(&eff);
+        for id in eff.chain() {
+            let Some(block) = Block::from_base(id) else {
+                continue;
+            };
+            let mark = if block_enabled(&typed, block) {
+                "●"
+            } else {
+                "○"
+            };
+            let selected = self.selected_block == block;
+            if ui
+                .selectable_label(selected, format!("{mark}  {}", block.label()))
+                .clicked()
+            {
+                actions.push(Action::SelectBlock(block));
+            }
+        }
+    }
+
+    /// The Edit tab's main area: the selected block's parameters as live widgets.
+    /// Values are read through the typed model; edits stage like the balancer.
+    fn show_block_params(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let Some(slot) = self.now_playing else {
+            ui.label("Audition a patch to edit its effects.");
             return;
         };
         let Some(eff) = self.effective_patch(slot) else {
             return;
         };
         let typed = TypedPatch::from_raw(&eff);
-        ui.heading(format!("Effects — U{slot:03}"));
+        let block = self.selected_block;
+        ui.heading(block.label());
         egui::ScrollArea::vertical().show(ui, |ui| {
-            // One collapsible section per effect block (Level/Chain — output level,
-            // name, assigns — is edited on the main list).
-            for base in 1u8..=13 {
-                let Some(block) = Block::from_base(base) else {
+            for &p in param::ALL {
+                if p.block() != block {
                     continue;
-                };
-                egui::CollapsingHeader::new(block.label())
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        for &p in param::ALL {
-                            if p.block() != block {
-                                continue;
-                            }
-                            let value = typed.get(p.key()).unwrap_or(Value::Int(0));
-                            param_widget(ui, slot, p, value, self.connected, actions);
-                        }
-                    });
+                }
+                let value = typed.get(p.key()).unwrap_or(Value::Int(0));
+                param_widget(ui, slot, p, value, self.connected, actions);
             }
         });
     }
@@ -684,6 +732,8 @@ impl App {
             Action::Audition(slot) => self.audition(slot),
             Action::SetLevel(slot, level) => self.set_level(slot, level),
             Action::SetParam(slot, key, value) => self.set_param(slot, key, value),
+            Action::SelectTab(tab) => self.tab = tab,
+            Action::SelectBlock(block) => self.selected_block = block,
             Action::SetName(slot, name) => self.set_name_edit(slot, name),
             Action::SaveRow(slot) => self.save_row(slot),
             Action::RevertRow(slot) => self.revert_row(slot),
@@ -766,7 +816,17 @@ impl eframe::App for App {
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.heading("GX-700 Patches");
+                ui.heading("GX-700");
+                ui.separator();
+                if ui
+                    .selectable_label(self.tab == Tab::Patches, "Patches")
+                    .clicked()
+                {
+                    actions.push(Action::SelectTab(Tab::Patches));
+                }
+                if ui.selectable_label(self.tab == Tab::Edit, "Edit").clicked() {
+                    actions.push(Action::SelectTab(Tab::Edit));
+                }
                 ui.separator();
                 if self.connected {
                     if self.loader.is_some() {
@@ -804,16 +864,24 @@ impl eframe::App for App {
             ui.label(&self.status);
         });
 
-        egui::SidePanel::right("editor")
-            .resizable(true)
-            .default_width(340.0)
-            .show(ctx, |ui| {
-                self.show_editor(ui, &mut actions);
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.show_patch_list(ui, &mut actions);
-        });
+        match self.tab {
+            Tab::Patches => {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.show_patch_list(ui, &mut actions);
+                });
+            }
+            Tab::Edit => {
+                egui::SidePanel::left("blocks")
+                    .resizable(true)
+                    .default_width(180.0)
+                    .show(ctx, |ui| {
+                        self.show_block_list(ui, &mut actions);
+                    });
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.show_block_params(ui, &mut actions);
+                });
+            }
+        }
 
         if self.bulk_prompt {
             egui::Window::new("Write changes to the unit")

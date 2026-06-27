@@ -87,14 +87,17 @@ reach into `preamp-master` / `preamp-volume`, which belongs in the *effect edito
 
 == Other candidate features (from the Stage 4 plan)
 
-* *Effect editor* -- **implemented**: a right-hand panel shows the now-playing
-  patch's effect blocks (collapsible), each parameter a live widget (checkbox /
-  slider / combo) driven by the catalog. Reading current values goes through the
-  typed model (`typed::Patch::get`) and edits stage through it (`set` →
+* *Effect editor* -- **implemented** as a separate *Edit* tab: a left column lists
+  the patch's effect blocks in chain (signal) order, each marked with its enable
+  state (●/○); selecting a block shows *only that block's* parameters on the right,
+  each a live widget (checkbox / slider / combo) driven by the catalog. This split
+  leaves room for *custom per-block UIs* (e.g. an EQ curve, a graphical pan) by
+  special-casing `show_block_params` per block. Reading current values goes through
+  the typed model (`typed::Patch::get`) and edits stage through it (`set` →
   `to_raw`), applied live via `Gx700::set` and saved/reverted with the rest of the
-  row's pending changes. Still to do here: drag-to-reorder the signal chain (the
-  library has `RawPatch::chain` / `set_chain` and the CLI `chain` command), and a
-  per-block enable toggle in the header.
+  row's pending changes. Still to do here: drag-to-reorder the chain (the library
+  has `RawPatch::chain` / `set_chain` and the CLI `chain` command), and a per-block
+  enable toggle in the list.
 * *Patch librarian* -- save / load / `backup` / `scene` from the GUI, reusing the
   US-16x08 GUI's preset-tab patterns.
 * *Per-block response curves* -- reuse the US-16x08 GUI's `curves.rs` (EQ, etc.).
