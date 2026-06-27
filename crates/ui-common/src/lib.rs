@@ -24,11 +24,15 @@ pub enum ActionKind {
     /// Pulls data in; changes nothing (Refresh, Reconnect, Backup, Load-from-file).
     /// Blue.
     Read,
-    /// Discards unsaved work, reversible by re-reading (Revert, Clear, Reset).
-    /// Amber.
+    /// Undoes *your own unsaved edits*, back to what's already stored (Revert,
+    /// Reset, Discard changes). Amber. The dividing line vs. `Destructive`: Caution
+    /// only loses edits you just made; the underlying data is still on the device.
     Caution,
-    /// Irreversible data loss (Delete, Factory reset). Red — reserved for genuine
-    /// destruction; nothing routine should use it.
+    /// Destroys *existing content*, not just your edits (Clear/blank a patch,
+    /// Delete, Factory reset). Red — reserved for genuine destruction; nothing
+    /// routine should use it. Still applies when the destruction is staged and
+    /// undoable (e.g. a Clear that a Revert could restore): the *intent* is to
+    /// throw the content away, so it reads red.
     Destructive,
     /// No consequence (Cancel, Close, Paste-into-buffer). The egui default, no tint.
     Neutral,

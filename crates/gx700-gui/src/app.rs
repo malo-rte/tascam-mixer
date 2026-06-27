@@ -1372,9 +1372,10 @@ impl App {
                 }
             });
             ui.add_enabled_ui(self.editable(), |ui| {
-                if action_button(ui, "Clear", ActionKind::Caution)
+                if action_button(ui, "Clear", ActionKind::Destructive)
                     .on_hover_text(
-                        "reset to an empty patch (name \"Empty\", level 0, effects off), then Save",
+                        "blank this patch to Empty (name \"Empty\", level 0, effects off); \
+                         staged — Revert restores it, Save overwrites the stored patch",
                     )
                     .clicked()
                 {
