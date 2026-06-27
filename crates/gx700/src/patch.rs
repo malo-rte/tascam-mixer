@@ -490,6 +490,37 @@ impl<T: Transport> Gx700<T> {
         self.write_raw_patch(base, patch, false)
     }
 
+    /// Probe whether the unit is in front-panel BULK LOAD mode, by writing a marker
+    /// name to patch `slot` and reading it back: a *memory* write persists only in
+    /// BULK LOAD mode (it is silently ignored in normal Play mode). The slot's
+    /// original patch is written back afterwards either way, so the slot is left
+    /// unchanged. Returns `Ok(true)` when the marker stuck — i.e. the unit is in
+    /// BULK LOAD mode.
+    ///
+    /// `slot` must be a user slot (`1..=100`); a preset is read-only and can't be
+    /// probed. Pick a slot whose brief, self-reverting rename is acceptable.
+    ///
+    /// # Errors
+    /// [`Error::Patch`] if `slot` is out of range/read back malformed; transport
+    /// read/write errors otherwise (e.g. the unit not answering at all).
+    pub fn probe_bulk_load(&mut self, slot: u16) -> Result<bool> {
+        let original = self.read_patch(slot)?;
+        let mut probe = original.clone();
+        // A marker distinct from the slot's current name, so a stored write is
+        // unambiguous. Restored immediately below.
+        let marker = if original.name.trim() == "RACKCTL?" {
+            "RACKCTL!"
+        } else {
+            "RACKCTL?"
+        };
+        probe.set_name(marker)?;
+        self.write_patch(slot, &probe)?;
+        let stuck = self.read_patch(slot)?.name.trim() == marker;
+        // Restore the original (a no-op in Play mode, where nothing changed anyway).
+        self.write_patch(slot, &original)?;
+        Ok(stuck)
+    }
+
     /// Apply a [`Patch`], writing every parameter the patch holds that this
     /// build recognises. Keys it does not recognise are skipped; the count of
     /// applied parameters is returned.
@@ -650,6 +681,29 @@ mod tests {
         // Level and chain are untouched by a name change.
         assert_eq!(patch.output_level(), 0x32);
         assert_eq!(patch.chain(), (1u8..=13).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn probe_bulk_load_detects_persisted_write_and_restores() {
+        let mut d = dev();
+        // Seed slot 1 with a valid patch so it has a Level/Chain block to rename.
+        let mut blocks = BTreeMap::new();
+        blocks.insert(
+            0x00u8,
+            "32 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 4A 41 5A 5A 20 54 4F 4E 45 20 20 20"
+                .to_owned(),
+        );
+        let patch = RawPatch {
+            version: PATCH_VERSION,
+            name: "JAZZ TONE".to_owned(),
+            blocks,
+        };
+        d.write_patch(1, &patch).unwrap();
+        // The mock stores writes (as the hardware does in BULK LOAD), so the marker
+        // sticks and the probe reports BULK LOAD.
+        assert!(d.probe_bulk_load(1).unwrap());
+        // …and the slot is left with its original name afterwards.
+        assert_eq!(d.read_patch(1).unwrap().name, "JAZZ TONE");
     }
 
     #[test]

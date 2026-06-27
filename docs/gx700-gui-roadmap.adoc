@@ -58,9 +58,17 @@ There are two flavours of "set the volume", and they differ by device mode (see
 
 So the natural flow is *balance live, write once*: click through the patches
 adjusting each one's level by ear, then a single *"Write levels to the unit"* action
-that guides the user into BULK LOAD mode and stores the adjusted patches as a batch.
-That keeps the per-patch BULK LOAD dance out of the everyday loop -- you do it once,
-at the end.
+stores the adjusted patches as a batch.
+
+To take the *mode switching out of the loop entirely*, the GUI gates the **whole
+session** into BULK LOAD mode up front: at startup (and on reconnect) it
+*write-probes* the mode (`Gx700::probe_bulk_load` -- a self-reverting marker write to
+a user slot) and, if the unit is not in BULK LOAD, shows a *blocking dialog* until it
+is, re-probing automatically. Everything the GUI does -- reading the bank,
+auditioning into the active sound, and storing patches -- works inside BULK LOAD, so
+the user enters the mode once and never switches back to Play (the only thing BULK
+LOAD disables is front-panel/Program-Change patch recall, which the GUI doesn't use).
+A failed store re-arms the same dialog, in case the unit dropped out of the mode.
 
 === Why the balancer touches only `output-level`
 

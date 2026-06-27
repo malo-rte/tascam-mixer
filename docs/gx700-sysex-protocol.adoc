@@ -286,6 +286,17 @@ front-panel safety gate, and the investigation confirmed there is no remote way 
   or skipped. The tools therefore confirm the mode *after the fact* (read-back), not
   before.
 
+[NOTE]
+====
+The mode *can* be inferred indirectly with a non-destructive *write-probe*: write a
+marker (e.g. a new patch name) to a user slot, read it back, then restore the
+original. A memory write *persists only in Bulk Load mode* -- in Play mode it is a
+silent no-op -- so "did the marker stick?" reveals the mode without any front-panel
+read. `Gx700::probe_bulk_load` does exactly this (restoring the slot either way), and
+the GUI uses it at startup to gate the session into Bulk Load mode. This is still an
+*after-the-fact* method (it relies on the write/no-op behaviour), not a mode flag.
+====
+
 To change the *current sound* without touching stored memory -- and without Bulk
 Load mode -- write to the temporary buffer instead (see <<Editing model>>): a bulk
 write to `04 00 00 00` must be followed by a Sound Change Request (DT1 `00` to

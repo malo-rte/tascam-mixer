@@ -26,6 +26,13 @@ use crate::loader::{Loaded, Loader, PRESET_END, PRESET_SLOTS, PRESET_START, USER
 /// Reopen the device on demand (the Retry button), e.g. after the port appears.
 pub(crate) type Reopen = Box<dyn Fn() -> anyhow::Result<Device>>;
 
+/// User slot the startup BULK LOAD probe writes-and-restores (see
+/// [`rackctl_gx700::Gx700::probe_bulk_load`]). Its name is briefly renamed and
+/// restored; in Play mode the write is a no-op, so the slot is untouched.
+const PROBE_SLOT: u16 = 1;
+/// Seconds between automatic BULK LOAD re-probes while waiting for the mode.
+const PROBE_INTERVAL: f64 = 1.5;
+
 /// One patch in the librarian list.
 struct PatchRow {
     slot: u16,
@@ -92,6 +99,7 @@ enum Action {
     OpenBulkPrompt,
     CloseBulkPrompt,
     WriteAll,
+    ProbeBulk,
 }
 
 /// Which screen is showing.
@@ -447,9 +455,12 @@ pub(crate) struct App {
     /// The effect block selected in the Edit tab.
     selected_block: Block,
     bulk_prompt: bool,
-    /// After a write, reminds the user to leave BULK LOAD mode (press PLAY) — patch
-    /// recall stays disabled on the unit until they do.
-    bulk_done: bool,
+    /// Whether the unit is in BULK LOAD mode: `None` until first probed, then
+    /// `Some(true/false)`. While `Some(false)` a blocking dialog asks the user to
+    /// enter BULK LOAD; the whole session then stays in it, so no mode switching.
+    bulk_ok: Option<bool>,
+    /// `egui` input-time of the last BULK LOAD probe, to throttle re-probes.
+    last_probe: f64,
     status: String,
     zoom: f32,
     window: Option<[f32; 2]>,
@@ -479,12 +490,13 @@ impl App {
         }
 
         let device = Arc::new(Mutex::new(device));
-        let loader = connected.then(|| Loader::spawn(Arc::clone(&device)));
+        // The bank read is deferred until the BULK LOAD probe confirms the mode
+        // (driven from `update`), so the session starts in BULK LOAD and stays.
         Self {
             device,
             connected,
             reopen,
-            loader,
+            loader: None,
             progress: 0,
             rows,
             presets,
@@ -496,9 +508,10 @@ impl App {
             tab: Tab::Patches,
             selected_block: Block::Compressor,
             bulk_prompt: false,
-            bulk_done: false,
+            bulk_ok: None,
+            last_probe: 0.0,
             status: if connected {
-                "reading patch bank…".to_owned()
+                "checking BULK LOAD mode…".to_owned()
             } else {
                 "not connected — pass --port hw:CARD,DEV (or --mock), then Retry".to_owned()
             },
@@ -536,9 +549,48 @@ impl App {
     }
 
     /// Whether interactive controls (edits, audition, writes) are usable: the
-    /// device is connected and no bank read is in flight.
+    /// device is connected, no bank read is in flight, and we are not blocked
+    /// waiting for the unit to enter BULK LOAD mode.
     fn editable(&self) -> bool {
-        self.connected && self.loader.is_none()
+        self.connected && self.loader.is_none() && self.bulk_ok != Some(false)
+    }
+
+    /// Probe the unit's BULK LOAD mode and react: start the bank read once it's in
+    /// BULK LOAD (or if the probe can't run, e.g. on the mock), otherwise mark it
+    /// not-yet-ready so the blocking dialog stays up. Restores the probed slot.
+    fn probe_now(&mut self) {
+        if !self.connected {
+            return;
+        }
+        let result = device::lock(&self.device).probe_bulk_load(PROBE_SLOT);
+        // `Ok(false)` is the only "still waiting" case. `Ok(true)` is in BULK LOAD;
+        // `Err` means the probe can't run (unit silent, or no patch to read — e.g.
+        // the mock), so don't block on it — let the bank read surface real trouble.
+        if matches!(result, Ok(false)) {
+            self.bulk_ok = Some(false);
+            "waiting for BULK LOAD mode on the unit…".clone_into(&mut self.status);
+        } else {
+            let first = self.bulk_ok != Some(true);
+            self.bulk_ok = Some(true);
+            if first {
+                self.start_load();
+            }
+        }
+    }
+
+    /// Drive the startup BULK LOAD check: probe immediately the first time, then
+    /// re-probe on an interval while still waiting (so entering the mode on the
+    /// unit is picked up automatically). Quiet once the unit is confirmed.
+    fn drive_startup(&mut self, ctx: &egui::Context) {
+        if !self.connected || self.bulk_ok == Some(true) {
+            return;
+        }
+        let now = ctx.input(|i| i.time);
+        if self.bulk_ok.is_some() && now - self.last_probe < PROBE_INTERVAL {
+            return;
+        }
+        self.last_probe = now;
+        self.probe_now();
     }
 
     /// Load a row's full patch if it isn't loaded yet (needed before storing,
@@ -604,8 +656,9 @@ impl App {
                 self.device = Arc::new(Mutex::new(dev));
                 self.connected = true;
                 self.now_playing = None;
-                "connected".clone_into(&mut self.status);
-                self.start_load();
+                // Re-run the BULK LOAD probe (which then starts the bank read).
+                self.bulk_ok = None;
+                "checking BULK LOAD mode…".clone_into(&mut self.status);
             }
             Err(e) => self.status = format!("connect failed: {e}"),
         }
@@ -916,19 +969,19 @@ impl App {
             }
         }
         self.save_cache();
-        self.status = if failed.is_empty() {
-            format!(
-                "stored {stored} patch change(s) — press PLAY on the unit to leave BULK LOAD mode"
-            )
+        if failed.is_empty() {
+            self.status = format!("stored {stored} patch change(s)");
         } else {
-            // Lead with the cause (often "not in BULK LOAD mode"); list the slots.
-            let slots: Vec<String> = failed.iter().map(|s| format!("U{s:03}")).collect();
-            format!(
+            // A failed store almost always means the unit dropped out of BULK LOAD
+            // mode: re-block on the probe so the dialog guides the user back in.
+            self.bulk_ok = Some(false);
+            let slots: Vec<String> = failed.iter().map(|s| slot_label(*s)).collect();
+            self.status = format!(
                 "stored {stored}, {} failed ({}) — {last_err}",
                 failed.len(),
                 slots.join(", ")
-            )
-        };
+            );
+        }
         stored
     }
 
@@ -1386,16 +1439,12 @@ impl App {
             Action::Refresh => self.start_load(),
             Action::Retry => self.retry(),
             Action::OpenBulkPrompt => self.bulk_prompt = true,
-            Action::CloseBulkPrompt => {
-                self.bulk_prompt = false;
-                self.bulk_done = false;
-            }
+            Action::CloseBulkPrompt => self.bulk_prompt = false,
             Action::WriteAll => {
                 self.bulk_prompt = false;
-                // Show the "leave BULK LOAD mode" reminder when anything was stored:
-                // the unit ignores patch recall until the user presses PLAY.
-                self.bulk_done = self.write_all() > 0;
+                self.write_all();
             }
+            Action::ProbeBulk => self.probe_now(),
         }
     }
 
@@ -1512,11 +1561,16 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.drive_startup(ctx);
         self.drain_loader();
         self.maybe_load_presets();
         self.drain_preset_loader();
         if self.loader.is_some() || self.preset_loader.is_some() {
             ctx.request_repaint_after(Duration::from_millis(150));
+        }
+        // Keep re-probing while waiting for the unit to enter BULK LOAD mode.
+        if self.bulk_ok == Some(false) {
+            ctx.request_repaint_after(Duration::from_millis(500));
         }
         // Capture view state for persistence on exit.
         self.zoom = ctx.zoom_factor();
@@ -1615,22 +1669,47 @@ impl eframe::App for App {
 }
 
 impl App {
-    /// The BULK-LOAD modals: the pre-write prompt (how to enter the mode) and the
-    /// post-write reminder to leave it (press PLAY), which is the whole point —
-    /// patch recall stays dead on the unit until the user exits BULK LOAD.
+    /// The BULK-LOAD modals: the blocking "enter BULK LOAD" gate shown until the
+    /// unit is in the mode (the session stays in it, so no switching), and the
+    /// pre-write confirm for the batch store.
     fn show_bulk_modals(&self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        if self.bulk_ok == Some(false) {
+            egui::Window::new("Put the GX-700 in BULK LOAD mode")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(
+                        "This app reads and stores patches over MIDI, which the GX-700 \
+                         only allows in BULK LOAD mode.",
+                    );
+                    ui.label(
+                        "On the unit: press TUNER/UTILITY, select \"MIDI BULK LOAD\" \
+                         (the display shows \"Waiting…\"). Stay in this mode for the \
+                         whole session — auditioning and writing both work here, so \
+                         you never have to switch back to Play.",
+                    );
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if action_button(ui, "Check now", ActionKind::Read).clicked() {
+                            actions.push(Action::ProbeBulk);
+                        }
+                        ui.label(egui::RichText::new("Checking automatically…").weak());
+                    });
+                });
+        }
+
         if self.bulk_prompt {
             egui::Window::new("Write changes to the unit")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.label(format!("{} patch change(s) to store.", self.dirty_count()));
-                    ui.label(
-                        "On the GX-700: press TUNER/UTILITY, select \"MIDI BULK LOAD\" \
-                         (the display shows \"Waiting…\"), then click Write. \
-                         Press PLAY on the unit when done.",
-                    );
+                    ui.label(format!(
+                        "Store {} patch change(s) to the unit's memory? \
+                         The GX-700 is in BULK LOAD mode, so this writes immediately.",
+                        self.dirty_count()
+                    ));
                     ui.horizontal(|ui| {
                         if action_button(ui, "Write", ActionKind::Commit).clicked() {
                             actions.push(Action::WriteAll);
@@ -1639,24 +1718,6 @@ impl App {
                             actions.push(Action::CloseBulkPrompt);
                         }
                     });
-                });
-        }
-
-        if self.bulk_done {
-            egui::Window::new("Changes written")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ctx, |ui| {
-                    ui.label(
-                        "Now press PLAY on the GX-700 to leave BULK LOAD mode.\n\
-                         Until you do, the unit stays in the utility menu and \
-                         changing patches (on the unit or by Program Change) has no \
-                         effect. Auditioning from here still works.",
-                    );
-                    if action_button(ui, "OK", ActionKind::Commit).clicked() {
-                        actions.push(Action::CloseBulkPrompt);
-                    }
                 });
         }
     }
