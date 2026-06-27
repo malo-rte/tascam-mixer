@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
-use egui_plot::{Line, LineStyle, Plot, PlotPoints};
+use egui_plot::{Line, LineStyle, Plot, PlotBounds, PlotPoints};
 use rackctl_gx700::param::{EQ_MID_FREQ_VALUES, EQ_MID_Q_VALUES};
 use rackctl_gx700::typed::Patch as TypedPatch;
 use rackctl_gx700::{Block, Kind, NAME_LEN, Param, RawPatch, Value, param, units};
@@ -540,7 +540,9 @@ fn show_delay_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
     let lt = c * f64::from(raw("delay-time-l")) / 100.0;
     let rt = c * f64::from(raw("delay-time-r")) / 100.0;
     let fb = f64::from(raw("delay-feedback")) / 100.0;
-    let span = (c * 3.5).max(lt).max(rt).max(50.0);
+    // A fixed 2-second window, so the axis never moves as the delay times change;
+    // taps past 2 s simply fall off the right edge.
+    let span = 2000.0;
     let blue = egui::Color32::from_rgb(90, 170, 220);
     let green = egui::Color32::from_rgb(80, 200, 100); // left tap
     let red = egui::Color32::from_rgb(220, 80, 80); // right tap
@@ -551,13 +553,11 @@ fn show_delay_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         .allow_drag(false)
         .allow_zoom(false)
         .allow_scroll(false)
-        .include_x(0.0)
-        .include_x(span)
-        .include_y(0.0)
-        .include_y(100.0)
         .x_axis_formatter(|mark, _| format!("{:.2}s", mark.value / 1000.0))
         .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
         .show(ui, |plot| {
+            // Pin the view to 0..2 s × 0..100, regardless of the tap positions.
+            plot.set_plot_bounds(PlotBounds::from_min_max([0.0, 0.0], [span, 100.0]));
             // Dry signal at t=0.
             plot.line(
                 Line::new(tap(0.0, f64::from(raw("delay-direct-level"))))
