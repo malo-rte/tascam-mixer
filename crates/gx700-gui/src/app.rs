@@ -786,6 +786,72 @@ fn show_chorus_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         });
 }
 
+/// Draw the Tremolo/Pan LFO: the modulation waveform (triangle or square per mode)
+/// with Rate as cycle density and Depth as amplitude. Tremolo shows one trace (the
+/// volume); Pan shows anti-phase L (green) / R (red) — when L rises, R falls.
+fn show_trem_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("tremolo-enable"), Some(Value::Bool(true)));
+    let mode = match typed.get("tremolo-mode") {
+        Some(Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let pan = mode >= 2; // 0/1 = Tremolo, 2/3 = Pan
+    let square = mode == 1 || mode == 3;
+    let freq = 0.3 + f64::from(raw("tremolo-rate")) / 100.0 * 6.0;
+    let amp = if active {
+        f64::from(raw("tremolo-depth")) / 100.0 * 50.0
+    } else {
+        0.0
+    };
+    let window = 2.0;
+    let wave = |sign: f64| -> Vec<[f64; 2]> {
+        (0..=240)
+            .map(|i| {
+                let t = window * f64::from(i) / 240.0;
+                let s = (std::f64::consts::TAU * freq * t).sin();
+                let w = if square {
+                    if s >= 0.0 { 1.0 } else { -1.0 }
+                } else {
+                    (2.0 / std::f64::consts::PI) * s.asin()
+                };
+                [t, sign * amp * w]
+            })
+            .collect()
+    };
+    Plot::new("gx700-trem")
+        .height(150.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_x(0.0)
+        .include_x(window)
+        .include_y(-55.0)
+        .include_y(55.0)
+        .x_axis_formatter(|_, _| String::new())
+        .y_axis_formatter(|_, _| String::new())
+        .show(ui, |plot| {
+            if pan {
+                plot.line(
+                    Line::new(PlotPoints::from(wave(1.0)))
+                        .color(egui::Color32::from_rgb(80, 200, 100)),
+                );
+                plot.line(
+                    Line::new(PlotPoints::from(wave(-1.0)))
+                        .color(egui::Color32::from_rgb(220, 80, 80)),
+                );
+            } else {
+                plot.line(
+                    Line::new(PlotPoints::from(wave(1.0)))
+                        .color(egui::Color32::from_rgb(90, 170, 220)),
+                );
+            }
+        });
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1662,6 +1728,10 @@ impl App {
                 self.show_chorus_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::TremoloPan {
+                self.show_trem_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -2150,6 +2220,53 @@ impl App {
     /// The Speaker Sim's custom UI: enable + cabinet model and mic setting, a
     /// generic cabinet response curve (the mic setting tilts the top end), then the
     /// mic (wet) / direct (dry) level mix.
+    /// The Tremolo/Pan's custom UI: enable + mode, an LFO-waveform view (volume for
+    /// Tremolo, anti-phase L/R for Pan; triangle or square), then Rate / Depth /
+    /// Balance.
+    fn show_trem_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::TremoloPan);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Tremolo/Pan enabled").changed() {
+                actions.push(Action::SetParam(slot, "tremolo-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Mode").on_hover_text(
+                    "Tremolo modulates volume; Pan sweeps L↔R. Tri = smooth, Sqr = on/off chop.",
+                );
+                param_combo(ui, slot, "tremolo-mode", typed, connected, actions);
+            });
+        });
+        show_trem_curve(ui, typed);
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new("LFO — Tremolo: one volume trace; Pan: L (green) / R (red).")
+                .weak(),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("gx700-trem-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Rate").on_hover_text("LFO speed.");
+                param_drag(ui, slot, "tremolo-rate", typed, connected, actions);
+                ui.label("Depth").on_hover_text("Modulation depth.");
+                param_drag(ui, slot, "tremolo-depth", typed, connected, actions);
+                ui.end_row();
+                ui.label("Balance")
+                    .on_hover_text("Stereo balance / centre point (L100:R0 … L0:R100).");
+                param_drag(ui, slot, "tremolo-balance", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
     /// The Chorus's custom UI: enable + mode, an LFO-waveform view (Rate / Depth /
     /// Mod-wave shape, with an anti-phase trace in Stereo), then the rate/depth,
     /// pre-delay, tone cuts, mod-wave and effect level controls.
