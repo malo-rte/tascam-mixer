@@ -1237,10 +1237,12 @@ impl App {
         self.ensure_loaded(slot);
         match self.effective_patch(slot) {
             Some(patch) => {
-                self.status = format!("copied U{slot:03} {:?}", patch.name);
+                self.status = format!("copied {} {:?}", slot_label(slot), patch.name);
                 self.clipboard = Some((slot, patch));
             }
-            None => self.status = format!("U{slot:03}: nothing to copy — read the bank first"),
+            None => {
+                self.status = format!("{}: nothing to copy — read it first", slot_label(slot));
+            }
         }
     }
 
@@ -2201,7 +2203,9 @@ impl App {
             });
             ui.add_enabled_ui(self.editable() && self.clipboard.is_some(), |ui| {
                 let hover = match &self.clipboard {
-                    Some((from, p)) => format!("paste U{from:03} {:?} here (then Save)", p.name),
+                    Some((from, p)) => {
+                        format!("paste {} {:?} here (then Save)", slot_label(*from), p.name)
+                    }
                     None => "Copy a patch first".to_owned(),
                 };
                 if action_button(ui, "Paste", ActionKind::Neutral)
@@ -2234,8 +2238,8 @@ impl App {
     fn show_preset_list(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.label(
             egui::RichText::new(
-                "Click a preset to load it into the active sound (current buffer). \
-                 Works in Play mode — no BULK LOAD needed.",
+                "Click a preset to load it into the active sound (no BULK LOAD needed). \
+                 Copy grabs it; Paste it onto a user slot on the Patches tab.",
             )
             .weak(),
         );
@@ -2251,7 +2255,7 @@ impl App {
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Grid::new("presets")
                 .striped(true)
-                .num_columns(3)
+                .num_columns(4)
                 .show(ui, |ui| {
                     for row in &self.presets {
                         let playing = self.now_playing == Some(row.slot);
@@ -2275,6 +2279,17 @@ impl App {
                         };
                         ui.label(name);
                         ui.label(format!("{}%", row.stored_level));
+                        ui.add_enabled_ui(self.editable(), |ui| {
+                            if action_button(ui, "Copy", ActionKind::Read)
+                                .on_hover_text(
+                                    "copy this preset to the clipboard, then Paste it onto a \
+                                     user slot on the Patches tab",
+                                )
+                                .clicked()
+                            {
+                                actions.push(Action::CopyRow(row.slot));
+                            }
+                        });
                         ui.end_row();
                     }
                 });
