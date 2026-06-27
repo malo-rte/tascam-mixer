@@ -21,7 +21,7 @@ use rackctl_ui::{ActionKind, action_button};
 
 use crate::config::{self, CachedRow, GuiConfig};
 use crate::device::{self, Device, SharedDevice};
-use crate::loader::{Loaded, Loader, USER_SLOTS};
+use crate::loader::{Loaded, Loader, PRESET_END, PRESET_SLOTS, PRESET_START, USER_SLOTS};
 
 /// Reopen the device on demand (the Retry button), e.g. after the port appears.
 pub(crate) type Reopen = Box<dyn Fn() -> anyhow::Result<Device>>;
@@ -50,6 +50,21 @@ struct PatchRow {
 }
 
 impl PatchRow {
+    /// An empty row for `slot`, before its header is read.
+    fn empty(slot: u16) -> Self {
+        Self {
+            slot,
+            name: String::new(),
+            name_edit: String::new(),
+            stored_level: 0,
+            chain: Vec::new(),
+            full: None,
+            pending_level: None,
+            pending_patch: None,
+            failed: false,
+        }
+    }
+
     /// Whether the row has unsaved edits (a level, name, or whole-patch change).
     fn dirty(&self) -> bool {
         self.pending_level.is_some() || self.name_edit != self.name || self.pending_patch.is_some()
@@ -86,6 +101,18 @@ enum Tab {
     Patches,
     /// The per-block effect-parameter editor.
     Edit,
+    /// The factory-preset browser (load a preset into the active sound).
+    Presets,
+}
+
+/// Display label for a slot: `U001..U100` for user patches, `P001..P100` for the
+/// factory presets (slots `101..=200`).
+fn slot_label(slot: u16) -> String {
+    if slot <= USER_SLOTS {
+        format!("U{slot:03}")
+    } else {
+        format!("P{:03}", slot - USER_SLOTS)
+    }
 }
 
 /// A block's enable parameter (its offset-0 bool), if any.
@@ -393,6 +420,7 @@ fn param_widget(
     });
 }
 
+#[allow(clippy::struct_excessive_bools)] // aggregate UI state, not a state machine
 pub(crate) struct App {
     device: SharedDevice,
     connected: bool,
@@ -401,6 +429,16 @@ pub(crate) struct App {
     /// Slots received from the loader in the current load (for the progress bar).
     progress: u16,
     rows: Vec<PatchRow>,
+    /// The factory presets (slots `101..=200`), read-only; loaded lazily the first
+    /// time the Presets tab is opened.
+    presets: Vec<PatchRow>,
+    /// The background read of the preset headers, while it runs.
+    preset_loader: Option<Loader>,
+    /// Presets received from the preset loader in the current load (progress bar).
+    preset_progress: u16,
+    /// Set once the preset headers are populated (from cache or a completed read),
+    /// so the lazy load runs at most once per session.
+    presets_loaded: bool,
     now_playing: Option<u16>,
     /// The copied patch and its source slot, set by Copy and stamped by Paste.
     clipboard: Option<(u16, RawPatch)>,
@@ -420,22 +458,19 @@ pub(crate) struct App {
 impl App {
     pub(crate) fn new(device: Device, connected: bool, reopen: Reopen) -> Self {
         let cfg = config::load();
-        let mut rows: Vec<PatchRow> = (1..=USER_SLOTS)
-            .map(|slot| PatchRow {
-                slot,
-                name: String::new(),
-                name_edit: String::new(),
-                stored_level: 0,
-                chain: Vec::new(),
-                full: None,
-                pending_level: None,
-                pending_patch: None,
-                failed: false,
-            })
-            .collect();
+        let mut rows: Vec<PatchRow> = (1..=USER_SLOTS).map(PatchRow::empty).collect();
+        let mut presets: Vec<PatchRow> = (PRESET_START..=PRESET_END).map(PatchRow::empty).collect();
         // Show the cached bank instantly, before the (slow) re-read fills it in.
+        // The cache holds both user (`1..=100`) and preset (`101..=200`) rows.
+        let mut presets_loaded = false;
         for cached in config::load_cache() {
-            if let Some(row) = rows.get_mut(usize::from(cached.slot.saturating_sub(1))) {
+            let target = if cached.slot <= USER_SLOTS {
+                rows.get_mut(usize::from(cached.slot - 1))
+            } else {
+                presets_loaded = true;
+                presets.get_mut(usize::from(cached.slot - PRESET_START))
+            };
+            if let Some(row) = target {
                 row.name.clone_from(&cached.name);
                 row.name_edit = cached.name;
                 row.stored_level = cached.output_level;
@@ -452,6 +487,10 @@ impl App {
             loader,
             progress: 0,
             rows,
+            presets,
+            preset_loader: None,
+            preset_progress: 0,
+            presets_loaded,
             now_playing: None,
             clipboard: None,
             tab: Tab::Patches,
@@ -472,12 +511,24 @@ impl App {
         self.zoom
     }
 
+    /// The row for any slot: a user patch (`1..=100`) or a factory preset
+    /// (`101..=200`). This lets audition / `effective_patch` work for presets too.
     fn row(&self, slot: u16) -> Option<&PatchRow> {
-        self.rows.get(usize::from(slot.saturating_sub(1)))
+        if slot <= USER_SLOTS {
+            self.rows.get(usize::from(slot.saturating_sub(1)))
+        } else {
+            self.presets
+                .get(usize::from(slot.saturating_sub(PRESET_START)))
+        }
     }
 
     fn row_mut(&mut self, slot: u16) -> Option<&mut PatchRow> {
-        self.rows.get_mut(usize::from(slot.saturating_sub(1)))
+        if slot <= USER_SLOTS {
+            self.rows.get_mut(usize::from(slot.saturating_sub(1)))
+        } else {
+            self.presets
+                .get_mut(usize::from(slot.saturating_sub(PRESET_START)))
+        }
     }
 
     fn dirty_count(&self) -> usize {
@@ -574,9 +625,9 @@ impl App {
         match written {
             Ok(_) => {
                 self.now_playing = Some(slot);
-                self.status = format!("auditioning U{slot:03} {:?}", patch.name);
+                self.status = format!("auditioning {} {:?}", slot_label(slot), patch.name);
             }
-            Err(e) => self.status = format!("audition U{slot:03}: {e}"),
+            Err(e) => self.status = format!("audition {}: {e}", slot_label(slot)),
         }
     }
 
@@ -882,16 +933,21 @@ impl App {
     }
 
     fn save_cache(&self) {
-        let rows: Vec<CachedRow> = self
-            .rows
-            .iter()
-            .map(|r| CachedRow {
-                slot: r.slot,
-                name: r.name.clone(),
-                output_level: r.stored_level,
-                chain: r.chain.clone(),
-            })
-            .collect();
+        let to_cached = |r: &PatchRow| CachedRow {
+            slot: r.slot,
+            name: r.name.clone(),
+            output_level: r.stored_level,
+            chain: r.chain.clone(),
+        };
+        // User rows always; preset rows only once read (non-empty name), so the
+        // cache doubles as the "presets already loaded" marker on next launch.
+        let mut rows: Vec<CachedRow> = self.rows.iter().map(to_cached).collect();
+        rows.extend(
+            self.presets
+                .iter()
+                .filter(|r| !r.name.is_empty())
+                .map(to_cached),
+        );
         config::save_cache(&rows);
     }
 
@@ -1259,6 +1315,59 @@ impl App {
         });
     }
 
+    /// The Presets tab: the factory presets (P001..P100). Clicking a preset loads
+    /// it into the active sound (the temporary buffer) so it can be heard and used
+    /// immediately — this works in Play mode, so no BULK LOAD switch is needed.
+    fn show_preset_list(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        ui.label(
+            egui::RichText::new(
+                "Click a preset to load it into the active sound (current buffer). \
+                 Works in Play mode — no BULK LOAD needed.",
+            )
+            .weak(),
+        );
+        if self.preset_loader.is_some() {
+            let frac = f32::from(self.preset_progress) / f32::from(PRESET_SLOTS);
+            ui.add(
+                egui::ProgressBar::new(frac)
+                    .desired_width(220.0)
+                    .text(format!("reading {}/{PRESET_SLOTS}", self.preset_progress)),
+            );
+        }
+        ui.separator();
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::Grid::new("presets")
+                .striped(true)
+                .num_columns(3)
+                .show(ui, |ui| {
+                    for row in &self.presets {
+                        let playing = self.now_playing == Some(row.slot);
+                        let label = if row.failed {
+                            egui::RichText::new(format!("⚠ {}", slot_label(row.slot)))
+                                .color(egui::Color32::from_rgb(0xE0, 0xA0, 0x30))
+                        } else {
+                            egui::RichText::new(slot_label(row.slot))
+                        };
+                        let resp = ui.add_enabled(
+                            self.editable(),
+                            egui::SelectableLabel::new(playing, label),
+                        );
+                        if resp.clicked() {
+                            actions.push(Action::Audition(row.slot));
+                        }
+                        let name = if row.name.is_empty() {
+                            "—".to_owned()
+                        } else {
+                            row.name.clone()
+                        };
+                        ui.label(name);
+                        ui.label(format!("{}%", row.stored_level));
+                        ui.end_row();
+                    }
+                });
+        });
+    }
+
     fn apply(&mut self, action: Action) {
         match action {
             Action::Audition(slot) => self.audition(slot),
@@ -1337,12 +1446,76 @@ impl App {
             self.save_cache();
         }
     }
+
+    /// Start the one-shot factory-preset read the first time the Presets tab is
+    /// shown (presets are static, so this runs at most once per session — and not
+    /// at all if a cached preset list was loaded). Waits for the user-bank load to
+    /// finish so the two reads don't contend for the device.
+    fn maybe_load_presets(&mut self) {
+        if self.tab == Tab::Presets
+            && self.connected
+            && !self.presets_loaded
+            && self.preset_loader.is_none()
+            && self.loader.is_none()
+        {
+            self.preset_progress = 0;
+            self.preset_loader = Some(Loader::spawn_range(
+                Arc::clone(&self.device),
+                PRESET_START,
+                PRESET_END,
+            ));
+            "reading factory presets…".clone_into(&mut self.status);
+        }
+    }
+
+    /// Drain the background preset read, filling the preset rows as headers arrive.
+    fn drain_preset_loader(&mut self) {
+        let Some(loader) = &self.preset_loader else {
+            return;
+        };
+        let mut done = false;
+        let mut aborted: Option<String> = None;
+        for ev in loader.drain() {
+            match ev {
+                Loaded::Header(slot, header) => {
+                    self.preset_progress = self.preset_progress.saturating_add(1);
+                    if let Some(row) = self.row_mut(slot) {
+                        row.name.clone_from(&header.name);
+                        row.name_edit = header.name;
+                        row.stored_level = header.output_level;
+                        row.chain = header.chain;
+                        row.failed = false;
+                    }
+                }
+                Loaded::Failed(slot, msg) => {
+                    self.preset_progress = self.preset_progress.saturating_add(1);
+                    if let Some(row) = self.row_mut(slot) {
+                        row.failed = true;
+                    }
+                    self.status = format!("{}: {msg}", slot_label(slot));
+                }
+                Loaded::Aborted(msg) => aborted = Some(msg),
+                Loaded::Done => done = true,
+            }
+        }
+        if let Some(msg) = aborted {
+            self.preset_loader = None;
+            self.status = msg;
+        } else if done {
+            self.preset_loader = None;
+            self.presets_loaded = true;
+            "factory presets loaded".clone_into(&mut self.status);
+            self.save_cache();
+        }
+    }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.drain_loader();
-        if self.loader.is_some() {
+        self.maybe_load_presets();
+        self.drain_preset_loader();
+        if self.loader.is_some() || self.preset_loader.is_some() {
             ctx.request_repaint_after(Duration::from_millis(150));
         }
         // Capture view state for persistence on exit.
@@ -1365,6 +1538,12 @@ impl eframe::App for App {
                 }
                 if ui.selectable_label(self.tab == Tab::Edit, "Edit").clicked() {
                     actions.push(Action::SelectTab(Tab::Edit));
+                }
+                if ui
+                    .selectable_label(self.tab == Tab::Presets, "Presets")
+                    .clicked()
+                {
+                    actions.push(Action::SelectTab(Tab::Presets));
                 }
                 ui.separator();
                 if self.connected {
@@ -1420,8 +1599,26 @@ impl eframe::App for App {
                     self.show_block_params(ui, &mut actions);
                 });
             }
+            Tab::Presets => {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.show_preset_list(ui, &mut actions);
+                });
+            }
         }
 
+        self.show_bulk_modals(ctx, &mut actions);
+
+        for action in actions {
+            self.apply(action);
+        }
+    }
+}
+
+impl App {
+    /// The BULK-LOAD modals: the pre-write prompt (how to enter the mode) and the
+    /// post-write reminder to leave it (press PLAY), which is the whole point —
+    /// patch recall stays dead on the unit until the user exits BULK LOAD.
+    fn show_bulk_modals(&self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if self.bulk_prompt {
             egui::Window::new("Write changes to the unit")
                 .collapsible(false)
@@ -1461,10 +1658,6 @@ impl eframe::App for App {
                         actions.push(Action::CloseBulkPrompt);
                     }
                 });
-        }
-
-        for action in actions {
-            self.apply(action);
         }
     }
 }

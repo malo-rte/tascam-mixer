@@ -16,6 +16,11 @@ use crate::device::{SharedDevice, lock};
 /// Number of user patch slots a bank load covers (slots `1..=100`).
 pub(crate) const USER_SLOTS: u16 = 100;
 
+/// First and last factory-preset slot (P001..P100), and how many there are.
+pub(crate) const PRESET_START: u16 = 101;
+pub(crate) const PRESET_END: u16 = 200;
+pub(crate) const PRESET_SLOTS: u16 = PRESET_END - PRESET_START + 1;
+
 /// Gap left between slot reads, to avoid overrunning the USB-MIDI interface (the
 /// same pacing the CLI's `patches` uses).
 const READ_PACE: Duration = Duration::from_millis(40);
@@ -52,11 +57,18 @@ impl Loader {
     /// Spawn a one-shot read of all user patch headers over `device`. Locks the
     /// device per slot so UI actions (auditioning) interleave between reads.
     pub(crate) fn spawn(device: SharedDevice) -> Self {
+        Self::spawn_range(device, 1, USER_SLOTS)
+    }
+
+    /// Spawn a one-shot read of the patch headers in `start..=end` (inclusive).
+    /// Used both for the user bank (`1..=100`) and the factory presets
+    /// (`101..=200`). Locks the device per slot so auditions interleave.
+    pub(crate) fn spawn_range(device: SharedDevice, start: u16, end: u16) -> Self {
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = channel();
         let handle = {
             let cancel = Arc::clone(&cancel);
-            thread::spawn(move || run(&device, &cancel, &tx))
+            thread::spawn(move || run(&device, &cancel, &tx, start, end))
         };
         Self {
             cancel,
@@ -80,9 +92,9 @@ impl Drop for Loader {
     }
 }
 
-fn run(device: &SharedDevice, cancel: &AtomicBool, tx: &Sender<Loaded>) {
+fn run(device: &SharedDevice, cancel: &AtomicBool, tx: &Sender<Loaded>, start: u16, end: u16) {
     let mut consecutive_fail = 0u16;
-    for slot in 1..=USER_SLOTS {
+    for slot in start..=end {
         if cancel.load(Ordering::Relaxed) {
             break;
         }

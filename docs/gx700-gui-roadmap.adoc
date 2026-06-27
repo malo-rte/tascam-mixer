@@ -110,6 +110,12 @@ reach into `preamp-master` / `preamp-volume`, which belongs in the *effect edito
   row's pending changes. The block list also carries a *per-block enable checkbox*
   and supports *drag-to-reorder the chain* (drop one block onto another →
   `RawPatch::set_chain`, staged into the row's pending patch and re-auditioned live).
+* *Factory-preset browser* -- **implemented** as a third *Presets* tab listing the
+  100 built-in presets (`P001`..`P100`, slots `101..=200`). Clicking a preset loads
+  it into the *active sound* (the temporary buffer, `write_current_patch`), which
+  works in *Play mode* -- so auditioning and using a factory preset needs **no BULK
+  LOAD switch**. The preset headers are read once by a background loader the first
+  time the tab is opened and cached on disk like the user bank.
 * *Patch librarian* -- save / load / `backup` / `scene` from the GUI, reusing the
   US-16x08 GUI's preset-tab patterns.
 * *Per-block response curves* -- reuse the US-16x08 GUI's `curves.rs` (EQ, etc.).
