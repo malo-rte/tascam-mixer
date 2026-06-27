@@ -437,6 +437,74 @@ fn show_dist_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         });
 }
 
+/// Draw an *indicative* preamp tone-stack response from the Bass / Middle / Treble
+/// / Presence controls (each 0..100, 50 ≈ flat) plus the Bright switch. The band
+/// frequencies are nominal and the real amp models interact differently, so this
+/// shows roughly how the tone controls tilt the voicing, not an exact response.
+fn show_preamp_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("preamp-enable"), Some(Value::Bool(true)));
+    let bright = matches!(typed.get("preamp-bright"), Some(Value::Bool(true)));
+    // 0..100 control -> ±span dB, centred at 50.
+    let g = |k: &str, span: f64| (f64::from(raw(k)) - 50.0) / 50.0 * span;
+    let bands = [
+        EqBand {
+            kind: BandType::LowShelf,
+            f0: 100.0,
+            q: 0.7,
+            gain_db: g("preamp-bass", 12.0),
+        },
+        EqBand {
+            kind: BandType::Peaking,
+            f0: 600.0,
+            q: 0.7,
+            gain_db: g("preamp-middle", 12.0),
+        },
+        EqBand {
+            kind: BandType::HighShelf,
+            f0: 3000.0,
+            q: 0.7,
+            gain_db: g("preamp-treble", 12.0),
+        },
+        EqBand {
+            kind: BandType::HighShelf,
+            f0: 6000.0,
+            q: 0.7,
+            gain_db: g("preamp-presence", 9.0),
+        },
+        EqBand {
+            kind: BandType::HighShelf,
+            f0: 2000.0,
+            q: 0.7,
+            gain_db: if bright { 4.0 } else { 0.0 },
+        },
+    ];
+    let points: Vec<[f64; 2]> = (0..=200)
+        .map(|i| {
+            let lf = 1.3 + (4.3 - 1.3) * (f64::from(i) / 200.0);
+            let db = if active {
+                eq_response_db(&bands, 10f64.powf(lf))
+            } else {
+                0.0
+            };
+            [lf, db]
+        })
+        .collect();
+    Plot::new("gx700-preamp")
+        .height(150.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_y(-18.0)
+        .include_y(18.0)
+        .x_axis_formatter(|mark, _| hz_label(mark.value))
+        .y_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
+        .show(ui, |plot| plot.line(Line::new(PlotPoints::from(points))));
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1287,6 +1355,10 @@ impl App {
                 self.show_dist_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::Preamp {
+                self.show_preamp_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -1597,6 +1669,79 @@ impl App {
                 ui.label("Treble")
                     .on_hover_text("High-frequency tone, −50…+50.");
                 param_drag(ui, slot, "dist-treble", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
+    /// The Preamp's custom UI: enable + amp model, gain range and Bright switch, an
+    /// indicative tone-stack response curve, then the Bass/Middle/Treble/Presence
+    /// tone controls and the Volume / Master gain stages.
+    fn show_preamp_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::Preamp);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Preamp enabled").changed() {
+                actions.push(Action::SetParam(slot, "preamp-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Model").on_hover_text(
+                    "Amp model — cleans (JC-120, Clean Twin) through high gain (Metal 5150).",
+                );
+                param_combo(ui, slot, "preamp-type", typed, connected, actions);
+            });
+            ui.horizontal(|ui| {
+                ui.label("Gain")
+                    .on_hover_text("Input gain range: Low / Mid / Hi — the overall drive amount.");
+                param_combo(ui, slot, "preamp-gain", typed, connected, actions);
+                let mut bright = matches!(typed.get("preamp-bright"), Some(Value::Bool(true)));
+                if ui
+                    .checkbox(&mut bright, "Bright")
+                    .on_hover_text(
+                        "Bright switch — extra high-end sparkle (mostly on the clean models).",
+                    )
+                    .changed()
+                {
+                    actions.push(Action::SetParam(slot, "preamp-bright", Value::Bool(bright)));
+                }
+            });
+        });
+        show_preamp_curve(ui, typed);
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new(
+                "Indicative tone stack — the real amp models interact differently.",
+            )
+            .weak(),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("gx700-preamp-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Bass");
+                param_drag(ui, slot, "preamp-bass", typed, connected, actions);
+                ui.label("Middle");
+                param_drag(ui, slot, "preamp-middle", typed, connected, actions);
+                ui.end_row();
+                ui.label("Treble");
+                param_drag(ui, slot, "preamp-treble", typed, connected, actions);
+                ui.label("Presence")
+                    .on_hover_text("Brilliance / top-end edge above the treble band.");
+                param_drag(ui, slot, "preamp-presence", typed, connected, actions);
+                ui.end_row();
+                ui.label("Volume")
+                    .on_hover_text("Preamp volume — the main drive into the amp model.");
+                param_drag(ui, slot, "preamp-volume", typed, connected, actions);
+                ui.label("Master")
+                    .on_hover_text("Preamp master output level (after the tone stack).");
+                param_drag(ui, slot, "preamp-master", typed, connected, actions);
                 ui.end_row();
             });
     }
