@@ -21,17 +21,19 @@
 //!
 //! # Coverage
 //!
-//! Every parameter of every effect block is catalogued, including the multi-byte
-//! values: a parameter carries an [`Encoding`] (single byte, MIDI-14-bit MSB/LSB,
-//! or Roland-nibblized 8-bit), so the Delay tempo and tap times and the Modulation
-//! resonance / flanger separation are exposed like any other. The complete
-//! per-offset map is `docs/gx700-patch-data-format.adoc`, and the `catalog_bank`
-//! integration test cross-checks every catalogued parameter — decoded through its
-//! encoding — against a real 100-patch bank.
+//! **Every** addressable byte of every block is catalogued, including the multi-byte
+//! values (each [`Param`] carries an [`Encoding`]: single byte, MIDI-14-bit MSB/LSB,
+//! or Roland-nibblized 8-bit) — the Delay tempo/tap-times, the Modulation
+//! resonance / flanger separation, the 36-byte harmonist scale map, and the four
+//! Level/Chain control assigns. The only Level/Chain bytes not exposed as
+//! parameters are the chain order (`0x01`..`0x0D`) and the 12-char name
+//! (`0x0E`..`0x19`), which [`crate::RawPatch::chain`] / [`crate::RawPatch::set_name`]
+//! handle as structured fields.
 //!
-//! Still deferred (they are patch data rather than single live-edit parameters):
-//! - The 36-byte harmonist scale map (Modulation `0x29`..`0x4C`).
-//! - The Level/Chain control assigns (`0x1A`..`0x41`).
+//! The complete per-offset map is `docs/gx700-patch-data-format.adoc`. The
+//! `catalog_bank` integration test cross-checks every catalogued parameter —
+//! decoded through its encoding — against a real 100-patch bank, and the multi-byte
+//! and assign/scale values were live-round-tripped on hardware.
 
 /// Base address (`08 00 00 00`) of the *individual* temporary buffer: writing one
 /// parameter here edits the current sound live, with immediate effect.
@@ -347,6 +349,8 @@ pub const HI_CUT_VALUES: &[&str] = &[
 pub const LOW_CUT_VALUES: &[&str] = &[
     "Flat", "55Hz", "110Hz", "165Hz", "220Hz", "280Hz", "340Hz", "400Hz", "500Hz", "640Hz", "800Hz",
 ];
+/// Control-assign latch mode (Level/Chain assign `mode` byte).
+pub const ASSIGN_MODE_VALUES: &[&str] = &["Normal", "Toggle"];
 
 /// One editable GX-700 parameter.
 #[derive(Debug, Clone, Copy)]
@@ -491,12 +495,62 @@ use Block::{
     NoiseSuppressor, Preamp, Reverb, SpeakerSim, TremoloPan, Wah,
 };
 
+/// One harmonist-scale interval byte (Modulation; raw `0..=48` = -24..+24
+/// semitones, 24 = unison).
+const fn hrs(key: &'static str, offset: u8) -> Param {
+    i(key, Modulation, offset, 0, 48, 24)
+}
+
+/// A control-assign *target* byte (Level/Chain; nibblized 8-bit target id, MI
+/// Table 1.2, `0`=Not Assign).
+const fn asgn_target(key: &'static str, offset: u8) -> Param {
+    im(key, LevelChain, offset, 0, 133, 0, Encoding::Nibble8)
+}
+
+/// A control-assign *min/max* byte (Level/Chain; MIDI-14-bit, follows the target
+/// parameter's range).
+const fn asgn_val(key: &'static str, offset: u8, default: i32) -> Param {
+    im(key, LevelChain, offset, 0, 16383, default, Encoding::Midi14)
+}
+
 /// Every cataloged parameter, in chain order. Used for enumeration, mock seeding,
 /// CLI listings, and patch capture/apply. Transcribed from the Roland *GX-700
 /// MIDI Implementation* tables; ranges are raw device units.
 pub const ALL: &[Param] = &[
     // Patch common.
     i100("output-level", LevelChain, 0x00),
+    // The four control assigns (Level/Chain offsets 0x1A..0x41, 10 bytes each):
+    // target (8-bit nibblized), min & max (MIDI-14-bit), source, latch mode, and
+    // the action lo/hi range. Chain order (0x01..0x0D) and name (0x0E..0x19) are
+    // handled by RawPatch::chain / set_name, not as individual parameters.
+    asgn_target("assign1-target", 0x1A),
+    asgn_val("assign1-min", 0x1C, 0),
+    asgn_val("assign1-max", 0x1E, 100),
+    i("assign1-source", LevelChain, 0x20, 0, 67, 0),
+    e("assign1-mode", LevelChain, 0x21, ASSIGN_MODE_VALUES),
+    i("assign1-act-lo", LevelChain, 0x22, 0, 127, 0),
+    i("assign1-act-hi", LevelChain, 0x23, 0, 127, 127),
+    asgn_target("assign2-target", 0x24),
+    asgn_val("assign2-min", 0x26, 0),
+    asgn_val("assign2-max", 0x28, 100),
+    i("assign2-source", LevelChain, 0x2A, 0, 67, 0),
+    e("assign2-mode", LevelChain, 0x2B, ASSIGN_MODE_VALUES),
+    i("assign2-act-lo", LevelChain, 0x2C, 0, 127, 0),
+    i("assign2-act-hi", LevelChain, 0x2D, 0, 127, 127),
+    asgn_target("assign3-target", 0x2E),
+    asgn_val("assign3-min", 0x30, 0),
+    asgn_val("assign3-max", 0x32, 100),
+    i("assign3-source", LevelChain, 0x34, 0, 67, 0),
+    e("assign3-mode", LevelChain, 0x35, ASSIGN_MODE_VALUES),
+    i("assign3-act-lo", LevelChain, 0x36, 0, 127, 0),
+    i("assign3-act-hi", LevelChain, 0x37, 0, 127, 127),
+    asgn_target("assign4-target", 0x38),
+    asgn_val("assign4-min", 0x3A, 0),
+    asgn_val("assign4-max", 0x3C, 100),
+    i("assign4-source", LevelChain, 0x3E, 0, 67, 0),
+    e("assign4-mode", LevelChain, 0x3F, ASSIGN_MODE_VALUES),
+    i("assign4-act-lo", LevelChain, 0x40, 0, 127, 0),
+    i("assign4-act-hi", LevelChain, 0x41, 0, 127, 127),
     // Compressor (Table 2).
     b("comp-enable", Compressor, 0x00),
     e("comp-type", Compressor, 0x01, COMP_TYPE_VALUES),
@@ -635,6 +689,45 @@ pub const ALL: &[Param] = &[
     i100("mod-pshr-level3", Modulation, 0x26),
     i100("mod-pshr-balance", Modulation, 0x27),
     i100("mod-pshr-total-level", Modulation, 0x28),
+    // Harmonist scale map (Table 10.2): for each chromatic note, the interval of
+    // the three voices. raw 0..48 = -24..+24 semitones (24 = unison). Offsets
+    // 0x29..0x4C, note-major (C v1/v2/v3, Db v1/v2/v3, ...).
+    hrs("mod-hr-scale-c1", 0x29),
+    hrs("mod-hr-scale-c2", 0x2A),
+    hrs("mod-hr-scale-c3", 0x2B),
+    hrs("mod-hr-scale-db1", 0x2C),
+    hrs("mod-hr-scale-db2", 0x2D),
+    hrs("mod-hr-scale-db3", 0x2E),
+    hrs("mod-hr-scale-d1", 0x2F),
+    hrs("mod-hr-scale-d2", 0x30),
+    hrs("mod-hr-scale-d3", 0x31),
+    hrs("mod-hr-scale-eb1", 0x32),
+    hrs("mod-hr-scale-eb2", 0x33),
+    hrs("mod-hr-scale-eb3", 0x34),
+    hrs("mod-hr-scale-e1", 0x35),
+    hrs("mod-hr-scale-e2", 0x36),
+    hrs("mod-hr-scale-e3", 0x37),
+    hrs("mod-hr-scale-f1", 0x38),
+    hrs("mod-hr-scale-f2", 0x39),
+    hrs("mod-hr-scale-f3", 0x3A),
+    hrs("mod-hr-scale-fs1", 0x3B),
+    hrs("mod-hr-scale-fs2", 0x3C),
+    hrs("mod-hr-scale-fs3", 0x3D),
+    hrs("mod-hr-scale-g1", 0x3E),
+    hrs("mod-hr-scale-g2", 0x3F),
+    hrs("mod-hr-scale-g3", 0x40),
+    hrs("mod-hr-scale-ab1", 0x41),
+    hrs("mod-hr-scale-ab2", 0x42),
+    hrs("mod-hr-scale-ab3", 0x43),
+    hrs("mod-hr-scale-a1", 0x44),
+    hrs("mod-hr-scale-a2", 0x45),
+    hrs("mod-hr-scale-a3", 0x46),
+    hrs("mod-hr-scale-bb1", 0x47),
+    hrs("mod-hr-scale-bb2", 0x48),
+    hrs("mod-hr-scale-bb3", 0x49),
+    hrs("mod-hr-scale-b1", 0x4A),
+    hrs("mod-hr-scale-b2", 0x4B),
+    hrs("mod-hr-scale-b3", 0x4C),
     // Delay (Table 11). Tempo is a nibblized 8-bit value; the three tap times are
     // MIDI-14-bit MSB/LSB pairs.
     b("delay-enable", Delay, 0x00),

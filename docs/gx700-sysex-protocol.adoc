@@ -401,16 +401,16 @@ Implementation and validated byte-for-byte against the captured bank fixtures.
 
 [NOTE]
 ====
-Two parts of a patch are not fully expanded as individual parameters here:
+The catalog now covers *every addressable byte* of every block, including the
+multi-byte values (each parameter carries an encoding: single byte, MIDI-14-bit
+MSB/LSB, or Roland-nibblized 8-bit). The four Level/Chain control assigns
+(`1A`..`41`), the Modulation harmonist scale map (`29`..`4C`), the Delay tempo and
+tap times, and the modulation resonance / flanger separation are all exposed as
+parameters and were live-round-tripped on hardware.
 
-* *Level/Chain* (`00`) carries more than `output-level`: offsets `01`..`0D` are the
-  thirteen effect-chain-order bytes, `0E`..`19` the twelve name characters, and
-  `1A`+ the four control assigns. See <<Patch memories (presets)>> ("The Level/Chain
-  block") and MI Tables 1.2-1.4.
-* *Modulation* (`09`) is now catalogued through `mod-pshr-total-level` (`0x28`).
-  Still deferred (multi-byte): resonance (`0B`/`0C`) and flanger separation
-  (`0E`/`0F`), and the 36-byte harmonist scale map (`29`..`4C`). Likewise the Delay
-  tempo/tap-time bytes (`03`..`0A`) are 14-bit values not yet modelled.
+The only Level/Chain bytes *not* exposed as flat parameters are the effect-chain
+order (`01`..`0D`) and the twelve name characters (`0E`..`19`), which
+`RawPatch::chain` / `RawPatch::set_name` handle as structured fields.
 ====
 
 === Level/Chain -- sub-block `00`
@@ -419,6 +419,34 @@ Two parts of a patch are not fully expanded as individual parameters here:
 |===
 | Offset | Parameter | Type / values
 | `00` | `output-level` | int `0`..`100`
+| `1A` | `assign1-target` | int `0`..`133`
+| `1C` | `assign1-min` | int `0`..`16383`
+| `1E` | `assign1-max` | int `0`..`16383`
+| `20` | `assign1-source` | int `0`..`67`
+| `21` | `assign1-mode` | enum -- `0`=Normal, `1`=Toggle
+| `22` | `assign1-act-lo` | int `0`..`127`
+| `23` | `assign1-act-hi` | int `0`..`127`
+| `24` | `assign2-target` | int `0`..`133`
+| `26` | `assign2-min` | int `0`..`16383`
+| `28` | `assign2-max` | int `0`..`16383`
+| `2A` | `assign2-source` | int `0`..`67`
+| `2B` | `assign2-mode` | enum -- `0`=Normal, `1`=Toggle
+| `2C` | `assign2-act-lo` | int `0`..`127`
+| `2D` | `assign2-act-hi` | int `0`..`127`
+| `2E` | `assign3-target` | int `0`..`133`
+| `30` | `assign3-min` | int `0`..`16383`
+| `32` | `assign3-max` | int `0`..`16383`
+| `34` | `assign3-source` | int `0`..`67`
+| `35` | `assign3-mode` | enum -- `0`=Normal, `1`=Toggle
+| `36` | `assign3-act-lo` | int `0`..`127`
+| `37` | `assign3-act-hi` | int `0`..`127`
+| `38` | `assign4-target` | int `0`..`133`
+| `3A` | `assign4-min` | int `0`..`16383`
+| `3C` | `assign4-max` | int `0`..`16383`
+| `3E` | `assign4-source` | int `0`..`67`
+| `3F` | `assign4-mode` | enum -- `0`=Normal, `1`=Toggle
+| `40` | `assign4-act-lo` | int `0`..`127`
+| `41` | `assign4-act-hi` | int `0`..`127`
 |===
 
 === Compressor -- sub-block `01`
@@ -578,6 +606,42 @@ Two parts of a patch are not fully expanded as individual parameters here:
 | `26` | `mod-pshr-level3` | int `0`..`100`
 | `27` | `mod-pshr-balance` | int `0`..`100`
 | `28` | `mod-pshr-total-level` | int `0`..`100`
+| `29` | `mod-hr-scale-c1` | int `0`..`48`
+| `2A` | `mod-hr-scale-c2` | int `0`..`48`
+| `2B` | `mod-hr-scale-c3` | int `0`..`48`
+| `2C` | `mod-hr-scale-db1` | int `0`..`48`
+| `2D` | `mod-hr-scale-db2` | int `0`..`48`
+| `2E` | `mod-hr-scale-db3` | int `0`..`48`
+| `2F` | `mod-hr-scale-d1` | int `0`..`48`
+| `30` | `mod-hr-scale-d2` | int `0`..`48`
+| `31` | `mod-hr-scale-d3` | int `0`..`48`
+| `32` | `mod-hr-scale-eb1` | int `0`..`48`
+| `33` | `mod-hr-scale-eb2` | int `0`..`48`
+| `34` | `mod-hr-scale-eb3` | int `0`..`48`
+| `35` | `mod-hr-scale-e1` | int `0`..`48`
+| `36` | `mod-hr-scale-e2` | int `0`..`48`
+| `37` | `mod-hr-scale-e3` | int `0`..`48`
+| `38` | `mod-hr-scale-f1` | int `0`..`48`
+| `39` | `mod-hr-scale-f2` | int `0`..`48`
+| `3A` | `mod-hr-scale-f3` | int `0`..`48`
+| `3B` | `mod-hr-scale-fs1` | int `0`..`48`
+| `3C` | `mod-hr-scale-fs2` | int `0`..`48`
+| `3D` | `mod-hr-scale-fs3` | int `0`..`48`
+| `3E` | `mod-hr-scale-g1` | int `0`..`48`
+| `3F` | `mod-hr-scale-g2` | int `0`..`48`
+| `40` | `mod-hr-scale-g3` | int `0`..`48`
+| `41` | `mod-hr-scale-ab1` | int `0`..`48`
+| `42` | `mod-hr-scale-ab2` | int `0`..`48`
+| `43` | `mod-hr-scale-ab3` | int `0`..`48`
+| `44` | `mod-hr-scale-a1` | int `0`..`48`
+| `45` | `mod-hr-scale-a2` | int `0`..`48`
+| `46` | `mod-hr-scale-a3` | int `0`..`48`
+| `47` | `mod-hr-scale-bb1` | int `0`..`48`
+| `48` | `mod-hr-scale-bb2` | int `0`..`48`
+| `49` | `mod-hr-scale-bb3` | int `0`..`48`
+| `4A` | `mod-hr-scale-b1` | int `0`..`48`
+| `4B` | `mod-hr-scale-b2` | int `0`..`48`
+| `4C` | `mod-hr-scale-b3` | int `0`..`48`
 |===
 
 === Delay -- sub-block `0A`
