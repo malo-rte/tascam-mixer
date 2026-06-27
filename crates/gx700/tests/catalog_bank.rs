@@ -58,7 +58,8 @@ fn every_catalogued_param_is_in_range_across_the_bank() {
     for (name, patch) in &patches {
         for &p in param::ALL {
             let bytes = block_bytes(patch, p.block().base());
-            let Some(&raw) = bytes.get(usize::from(p.offset())) else {
+            let off = usize::from(p.offset());
+            let Some(slice) = bytes.get(off..off + p.width()) else {
                 failures.push(format!(
                     "{name}: {} reads past block {} (len {})",
                     p.key(),
@@ -67,7 +68,7 @@ fn every_catalogued_param_is_in_range_across_the_bank() {
                 ));
                 continue;
             };
-            let raw = i32::from(raw);
+            let raw = p.encoding().decode(slice);
             let ok = match p.kind() {
                 Kind::Bool => raw == 0 || raw == 1,
                 Kind::Int { min, max, .. } => (min..=max).contains(&raw),

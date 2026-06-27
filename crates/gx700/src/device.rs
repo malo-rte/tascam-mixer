@@ -26,12 +26,12 @@ impl<T: Transport> Gx700<T> {
     /// Propagates transport errors, and [`Error::Sysex`]/[`Error::Timeout`] from
     /// a hardware transport if the reply is malformed or absent.
     pub fn get(&mut self, param: Param) -> Result<Value> {
-        let bytes = self.transport.request(&param.address(), 1)?;
-        let raw = bytes.first().copied().unwrap_or(0);
+        let bytes = self.transport.request(&param.address(), param.width())?;
+        let raw = param.encoding().decode(&bytes);
         Ok(match param.kind() {
             Kind::Bool => Value::Bool(raw != 0),
-            Kind::Int { .. } => Value::Int(i32::from(raw)),
-            Kind::Enum { .. } => Value::Enum(i32::from(raw)),
+            Kind::Int { .. } => Value::Int(raw),
+            Kind::Enum { .. } => Value::Enum(raw),
         })
     }
 
@@ -43,7 +43,11 @@ impl<T: Transport> Gx700<T> {
     /// - Transport errors otherwise.
     pub fn set(&mut self, param: Param, value: Value) -> Result<()> {
         let raw = encode(param, value)?;
-        self.transport.send(&param.address(), &[raw])
+        let mut buf = [0u8; 2];
+        let n = param.encoding().encode(raw, &mut buf);
+        let data: &[u8] = &buf;
+        self.transport
+            .send(&param.address(), data.get(..n).unwrap_or(data))
     }
 
     /// Select a patch memory by sending a MIDI Program Change.
@@ -84,19 +88,21 @@ impl Gx700<crate::backend::RawMidi> {
     }
 }
 
-/// Validate `value` against `param` and encode it as a single 7-bit byte.
-fn encode(param: Param, value: Value) -> Result<u8> {
+/// Validate `value` against `param` and return the raw device value. The byte
+/// layout (single byte, MIDI-14-bit, or nibblized) is applied by the caller via
+/// [`rackctl_gx700::Encoding::encode`](crate::param::Encoding::encode).
+fn encode(param: Param, value: Value) -> Result<i32> {
     let key = param.key();
     match (param.kind(), value) {
-        (Kind::Bool, Value::Bool(b)) => Ok(u8::from(b)),
+        (Kind::Bool, Value::Bool(b)) => Ok(i32::from(b)),
         (Kind::Int { min, max, .. }, Value::Int(v)) => {
             range_check(key, v, min, max)?;
-            to_byte(key, v)
+            Ok(v)
         }
         (Kind::Enum { values, .. }, Value::Enum(v)) => {
             let max = i32::try_from(values.len().saturating_sub(1)).unwrap_or(0);
             range_check(key, v, 0, max)?;
-            to_byte(key, v)
+            Ok(v)
         }
         (kind, _) => Err(Error::TypeMismatch {
             param: key,
@@ -116,16 +122,6 @@ fn range_check(param: &'static str, value: i32, min: i32, max: i32) -> Result<()
         });
     }
     Ok(())
-}
-
-/// Encode a validated value as a 7-bit device byte.
-fn to_byte(param: &'static str, value: i32) -> Result<u8> {
-    u8::try_from(value).map_err(|_| Error::ValueOutOfRange {
-        param,
-        value,
-        min: 0,
-        max: 0x7f,
-    })
 }
 
 /// Human-readable name for a [`Kind`], for error messages.

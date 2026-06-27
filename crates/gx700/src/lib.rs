@@ -56,7 +56,7 @@ pub use backend::{MockTransport, Transport};
 pub use device::Gx700;
 pub use error::{Error, Result};
 pub use monitor::MidiDecoder;
-pub use param::{Block, Kind, Param, Value};
+pub use param::{Block, Encoding, Kind, Param, Value};
 pub use patch::{
     NAME_LEN, PATCH_VERSION, Patch, PatchHeader, RawPatch, Scalar, decode_name, encode_name,
     patch_base,

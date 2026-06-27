@@ -24,13 +24,16 @@ impl MockTransport {
     pub fn new() -> Self {
         let mut store = BTreeMap::new();
         for p in param::ALL {
-            let default: u8 = match p.kind() {
-                Kind::Bool => 0,
-                Kind::Int { default, .. } | Kind::Enum { default, .. } => {
-                    u8::try_from(default).unwrap_or(0)
-                }
+            let default: i32 = match p.kind() {
+                Kind::Int { default, .. } | Kind::Enum { default, .. } => default,
+                _ => 0,
             };
-            store.insert(p.address().to_vec(), vec![default]);
+            // Seed the default in the parameter's own byte layout (a multi-byte
+            // value occupies its full width), so a read decodes back to `default`.
+            let mut buf = [0u8; 2];
+            let n = p.encoding().encode(default, &mut buf);
+            let data: &[u8] = &buf;
+            store.insert(p.address().to_vec(), data.get(..n).unwrap_or(data).to_vec());
         }
         Self { store, program: 0 }
     }

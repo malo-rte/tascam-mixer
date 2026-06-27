@@ -21,17 +21,16 @@
 //!
 //! # Coverage
 //!
-//! Every **single-byte** parameter of every effect block is catalogued, including
-//! the full Modulation block and the Chorus/Reverb pre-delay and Reverb time. The
-//! complete per-offset map is `docs/gx700-patch-data-format.adoc`, and the
-//! `catalog_bank` integration test cross-checks every catalogued parameter against
-//! a real 100-patch bank.
+//! Every parameter of every effect block is catalogued, including the multi-byte
+//! values: a parameter carries an [`Encoding`] (single byte, MIDI-14-bit MSB/LSB,
+//! or Roland-nibblized 8-bit), so the Delay tempo and tap times and the Modulation
+//! resonance / flanger separation are exposed like any other. The complete
+//! per-offset map is `docs/gx700-patch-data-format.adoc`, and the `catalog_bank`
+//! integration test cross-checks every catalogued parameter — decoded through its
+//! encoding — against a real 100-patch bank.
 //!
-//! Still deferred (they are **multi-byte**, needing a model that spans >1 byte, or
-//! belong to patch data rather than live edits):
-//! - Delay tempo (`0x03`/`0x04`) and tap times (`0x05`..`0x0A`) — 14-bit values.
-//! - Modulation resonance (`0x0B`/`0x0C`) and flanger separation (`0x0E`/`0x0F`) —
-//!   nibble-split, and the 36-byte harmonist scale map (`0x29`..`0x4C`).
+//! Still deferred (they are patch data rather than single live-edit parameters):
+//! - The 36-byte harmonist scale map (Modulation `0x29`..`0x4C`).
 //! - The Level/Chain control assigns (`0x1A`..`0x41`).
 
 /// Base address (`08 00 00 00`) of the *individual* temporary buffer: writing one
@@ -176,6 +175,69 @@ pub enum Value {
     Enum(i32),
 }
 
+/// How a parameter's value is laid out in the device's data bytes. Most values are
+/// a single 7-bit byte; a few span two bytes, in one of two schemes the GX-700
+/// uses (confirmed against the MIDI Implementation and the bank fixtures).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Encoding {
+    /// One 7-bit byte (`0vvv vvvv`).
+    Byte,
+    /// Two 7-bit bytes, **MIDI 14-bit** MSB/LSB: `value = (MSB << 7) | LSB`
+    /// (range `0..=16383`). Used for the delay tap times — the same scheme as
+    /// MIDI pitch-bend and RPN/NRPN data entry.
+    Midi14,
+    /// Two **Roland-nibblized** bytes (`0000 dddd` each): `value = (MSB << 4) | LSB`
+    /// (range `0..=255`). Used for the delay tempo and the modulation
+    /// resonance / flanger separation.
+    Nibble8,
+}
+
+impl Encoding {
+    /// Number of device bytes this encoding occupies (1 or 2).
+    #[must_use]
+    pub const fn width(self) -> usize {
+        match self {
+            Encoding::Byte => 1,
+            Encoding::Midi14 | Encoding::Nibble8 => 2,
+        }
+    }
+
+    /// Decode a raw value from `bytes` (missing bytes read as 0).
+    #[must_use]
+    pub fn decode(self, bytes: &[u8]) -> i32 {
+        let hi = i32::from(bytes.first().copied().unwrap_or(0));
+        let lo = i32::from(bytes.get(1).copied().unwrap_or(0));
+        match self {
+            Encoding::Byte => hi,
+            Encoding::Midi14 => (hi << 7) | lo,
+            Encoding::Nibble8 => (hi << 4) | lo,
+        }
+    }
+
+    /// Encode `value` into `out`, returning the number of bytes written
+    /// ([`Self::width`]). The value is assumed already range-checked.
+    pub fn encode(self, value: i32, out: &mut [u8; 2]) -> usize {
+        let byte = |v: i32| u8::try_from(v & 0x7f).unwrap_or(0);
+        match self {
+            Encoding::Byte => {
+                out[0] = byte(value);
+                1
+            }
+            Encoding::Midi14 => {
+                out[0] = byte(value >> 7);
+                out[1] = byte(value);
+                2
+            }
+            Encoding::Nibble8 => {
+                out[0] = u8::try_from((value >> 4) & 0x0f).unwrap_or(0);
+                out[1] = u8::try_from(value & 0x0f).unwrap_or(0);
+                2
+            }
+        }
+    }
+}
+
 /// Compressor mode (Table 2).
 pub const COMP_TYPE_VALUES: &[&str] = &["Compressor", "Limiter"];
 /// Wah mode (Table 3).
@@ -293,6 +355,7 @@ pub struct Param {
     block: Block,
     offset: u8,
     kind: Kind,
+    encoding: Encoding,
 }
 
 impl Param {
@@ -324,6 +387,19 @@ impl Param {
     #[must_use]
     pub const fn kind(self) -> Kind {
         self.kind
+    }
+
+    /// How the value is laid out in device bytes.
+    #[must_use]
+    pub const fn encoding(self) -> Encoding {
+        self.encoding
+    }
+
+    /// Number of device bytes the value occupies (1 for most, 2 for the multi-byte
+    /// tempo/time values). The bytes are at consecutive offsets from [`Self::offset`].
+    #[must_use]
+    pub const fn width(self) -> usize {
+        self.encoding.width()
     }
 
     /// The 4-byte offset of this parameter within a patch (`00 00 <base> <offset>`).
@@ -359,16 +435,38 @@ const fn b(key: &'static str, block: Block, offset: u8) -> Param {
         block,
         offset,
         kind: Kind::Bool,
+        encoding: Encoding::Byte,
     }
 }
 
-/// An integer parameter with explicit raw range and default.
+/// An integer parameter with explicit raw range and default (single byte).
 const fn i(key: &'static str, block: Block, offset: u8, min: i32, max: i32, default: i32) -> Param {
     Param {
         key,
         block,
         offset,
         kind: Kind::Int { min, max, default },
+        encoding: Encoding::Byte,
+    }
+}
+
+/// A multi-byte integer parameter (the value spans `encoding.width()` bytes from
+/// `offset`).
+const fn im(
+    key: &'static str,
+    block: Block,
+    offset: u8,
+    min: i32,
+    max: i32,
+    default: i32,
+    encoding: Encoding,
+) -> Param {
+    Param {
+        key,
+        block,
+        offset,
+        kind: Kind::Int { min, max, default },
+        encoding,
     }
 }
 
@@ -384,6 +482,7 @@ const fn e(key: &'static str, block: Block, offset: u8, values: &'static [&'stat
         block,
         offset,
         kind: Kind::Enum { values, default: 0 },
+        encoding: Encoding::Byte,
     }
 }
 
@@ -465,8 +564,7 @@ pub const ALL: &[Param] = &[
     i100("ns-level", NoiseSuppressor, 0x04),
     // Modulation (Table 10). One block shared by seven effect types; many offsets
     // are reused across types (the doc names every type a field applies to).
-    // Deferred: nibble-encoded resonance (0x0B/0x0C) and flanger separation
-    // (0x0E/0x0F), and the 36-byte harmonist scale map (0x29..0x4C).
+    // Deferred: the 36-byte harmonist scale map (0x29..0x4C).
     b("mod-enable", Modulation, 0x00),
     e("mod-type", Modulation, 0x01, MOD_TYPE_VALUES),
     e("mod-phaser-stage", Modulation, 0x02, PHASER_STAGE_VALUES),
@@ -488,7 +586,25 @@ pub const ALL: &[Param] = &[
     i100("mod-rate", Modulation, 0x08), // Humanizer/Vibrato/Flanger/Phaser
     i100("mod-depth", Modulation, 0x09), // "
     i100("mod-manual", Modulation, 0x0A), // Flanger/Phaser
+    im(
+        "mod-resonance",
+        Modulation,
+        0x0B,
+        0,
+        200,
+        100,
+        Encoding::Nibble8,
+    ), // raw 0..200 = -100..+100
     i100("mod-phaser-step-rate", Modulation, 0x0D), // 0 = off, 1..100
+    im(
+        "mod-flanger-separation",
+        Modulation,
+        0x0E,
+        0,
+        200,
+        100,
+        Encoding::Nibble8,
+    ), // -100..+100
     i100("mod-flanger-gate", Modulation, 0x10), // 0 = off, 1..100
     e(
         "mod-humanizer-trigger",
@@ -519,10 +635,15 @@ pub const ALL: &[Param] = &[
     i100("mod-pshr-level3", Modulation, 0x26),
     i100("mod-pshr-balance", Modulation, 0x27),
     i100("mod-pshr-total-level", Modulation, 0x28),
-    // Delay (Table 11). Multi-byte tempo (0x03/0x04) and tap times (0x05..0x0A)
-    // are deferred (14-bit values not yet modelled).
+    // Delay (Table 11). Tempo is a nibblized 8-bit value; the three tap times are
+    // MIDI-14-bit MSB/LSB pairs.
     b("delay-enable", Delay, 0x00),
     e("delay-mode", Delay, 0x01, DELAY_MODE_VALUES),
+    i("delay-tempo-in-control", Delay, 0x02, 0, 67, 0), // 0 fixed, 1/2 control, 3 FC-200, 4.. CC#
+    im("delay-tempo", Delay, 0x03, 0, 250, 100, Encoding::Nibble8), // raw 0..250 = 50..300 BPM
+    im("delay-time-c", Delay, 0x05, 0, 2000, 500, Encoding::Midi14), // ms
+    im("delay-time-l", Delay, 0x07, 0, 400, 100, Encoding::Midi14), // % of centre
+    im("delay-time-r", Delay, 0x09, 0, 400, 100, Encoding::Midi14), // % of centre
     e("delay-interval-c", Delay, 0x0B, DELAY_INTERVAL_VALUES),
     i100("delay-feedback", Delay, 0x0C),
     i100("delay-level-c", Delay, 0x0D),
@@ -563,7 +684,12 @@ pub const ALL: &[Param] = &[
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )]
     use super::*;
     use std::collections::HashSet;
 
@@ -600,5 +726,40 @@ mod tests {
             assert_eq!(Param::from_key(p.key()).map(Param::key), Some(p.key()));
         }
         assert!(Param::from_key("nonsuch").is_none());
+    }
+
+    #[test]
+    fn encoding_round_trips_and_splits() {
+        let mut buf = [0u8; 2];
+        for (enc, value, bytes) in [
+            (Encoding::Byte, 100, &[100u8][..]),
+            (Encoding::Midi14, 2000, &[15, 80][..]), // 2000 = 15<<7 | 80
+            (Encoding::Nibble8, 250, &[15, 10][..]), // 250 = 15<<4 | 10
+        ] {
+            let n = enc.encode(value, &mut buf);
+            assert_eq!(n, enc.width());
+            assert_eq!(&buf[..n], bytes, "encode {enc:?}");
+            assert_eq!(enc.decode(&buf[..n]), value, "decode {enc:?}");
+        }
+    }
+
+    #[test]
+    fn param_byte_spans_do_not_overlap() {
+        // Within a block, no two parameters may claim the same byte. A multi-byte
+        // value occupies `width` consecutive offsets.
+        let mut owner: std::collections::HashMap<(u8, u8), &str> = std::collections::HashMap::new();
+        for p in ALL {
+            for off in p.offset()..p.offset() + u8::try_from(p.width()).unwrap() {
+                let prev = owner.insert((p.block().base(), off), p.key());
+                assert!(
+                    prev.is_none(),
+                    "byte {:#04x} of block {} claimed by both {} and {}",
+                    off,
+                    p.block().label(),
+                    prev.unwrap(),
+                    p.key()
+                );
+            }
+        }
     }
 }

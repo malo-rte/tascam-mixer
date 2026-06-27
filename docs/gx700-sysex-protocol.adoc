@@ -550,7 +550,9 @@ Two parts of a patch are not fully expanded as individual parameters here:
 | `08` | `mod-rate` | int `0`..`100`
 | `09` | `mod-depth` | int `0`..`100`
 | `0A` | `mod-manual` | int `0`..`100`
+| `0B` | `mod-resonance` | int `0`..`200`
 | `0D` | `mod-phaser-step-rate` | int `0`..`100`
+| `0E` | `mod-flanger-separation` | int `0`..`200`
 | `10` | `mod-flanger-gate` | int `0`..`100`
 | `11` | `mod-humanizer-trigger` | enum -- `0`=Auto, `1`=Pedal
 | `12` | `mod-humanizer-pedal-source` | int `0`..`64`
@@ -585,6 +587,11 @@ Two parts of a patch are not fully expanded as individual parameters here:
 | Offset | Parameter | Type / values
 | `00` | `delay-enable` | bool (`0`=off, `1`=on)
 | `01` | `delay-mode` | enum -- `0`=Normal, `1`=Tempo
+| `02` | `delay-tempo-in-control` | int `0`..`67`
+| `03` | `delay-tempo` | int `0`..`250`
+| `05` | `delay-time-c` | int `0`..`2000`
+| `07` | `delay-time-l` | int `0`..`400`
+| `09` | `delay-time-r` | int `0`..`400`
 | `0B` | `delay-interval-c` | enum -- `0`=1/16, `1`=1/8 Triplet, `2`=Dotted 1/16, `3`=1/8, `4`=1/4 Triplet, `5`=Dotted 1/8, `6`=1/4, `7`=Dotted 1/4, `8`=1/2, `9`=Dotted 1/2, `10`=Whole
 | `0C` | `delay-feedback` | int `0`..`100`
 | `0D` | `delay-level-c` | int `0`..`100`
