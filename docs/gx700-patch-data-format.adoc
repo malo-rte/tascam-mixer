@@ -112,6 +112,14 @@ NOTE: Verified against fixture `U001` (block `0`): output level `53H`=83, chain
 | `07` | Comp/limit level | `0vvv vvvv` | `00H-64H` (0-100)
 |===
 
+NOTE: The Owner's Manual (Effect Guide, COMPRESSOR) lists these as plain
+**`0-100`** relative values, not physical units: Sustain ("range/time over which
+low-level signals are boosted"), Attack, Limiter Threshold, Limiter Release and
+Level are all `0-100`; only Tone is `-50..+50`. So the device exposes **no
+threshold in dB, no release/attack in ms, and no ratio / make-up gain** — the
+compressor transfer curve in the GUI is therefore *indicative*, not a calibrated
+dB plot.
+
 == `02` — Wah (13 bytes)
 
 [cols="1,3,2,3",options="header"]
