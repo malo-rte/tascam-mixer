@@ -327,12 +327,13 @@ fn show_reverb_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
     let pre_s = f64::from(raw("reverb-pre-delay")) / 1000.0; // 0..0.1 s
     let effect = f64::from(raw("reverb-effect-level")); // 0..100 (wet tail height)
     let direct = f64::from(raw("reverb-direct-level")); // 0..100 (dry spike height)
-    let span = (pre_s + time_s).max(0.2);
+    // Fixed 3-second window, so the axis doesn't move as the reverb Time changes.
+    let span = 3.0;
     // Tail decays to ~5% of its start by the end of the reverb Time.
     let tau = (time_s / 3.0).max(0.01);
-    let tail: Vec<[f64; 2]> = (0..=120)
+    let tail: Vec<[f64; 2]> = (0..=180)
         .map(|i| {
-            let t = pre_s + time_s * (f64::from(i) / 120.0);
+            let t = pre_s + (time_s).min(span) * (f64::from(i) / 180.0);
             let level = if active {
                 effect * (-(t - pre_s) / tau).exp()
             } else {
@@ -346,13 +347,11 @@ fn show_reverb_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         .allow_drag(false)
         .allow_zoom(false)
         .allow_scroll(false)
-        .include_x(0.0)
-        .include_x(span)
-        .include_y(0.0)
-        .include_y(100.0)
         .x_axis_formatter(|mark, _| format!("{:.1}s", mark.value))
         .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
         .show(ui, |plot| {
+            // Pin the view to 0..3 s × 0..100, regardless of the reverb Time.
+            plot.set_plot_bounds(PlotBounds::from_min_max([0.0, 0.0], [span, 100.0]));
             // Dry signal: a spike at t=0 whose height is the Direct level.
             plot.line(
                 Line::new(PlotPoints::from(vec![[0.0, 0.0], [0.0, direct]]))
