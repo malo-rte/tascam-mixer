@@ -30,8 +30,9 @@ pub(crate) type Reopen = Box<dyn Fn() -> anyhow::Result<Device>>;
 /// [`rackctl_gx700::Gx700::probe_bulk_load`]). Its name is briefly renamed and
 /// restored; in Play mode the write is a no-op, so the slot is untouched.
 const PROBE_SLOT: u16 = 1;
-/// Seconds between automatic BULK LOAD re-probes while waiting for the mode.
-const PROBE_INTERVAL: f64 = 1.5;
+/// Seconds between automatic BULK LOAD re-probes while waiting for the mode. Kept
+/// fairly long so the probe's MIDI traffic doesn't make the unit's menu sluggish.
+const PROBE_INTERVAL: f64 = 5.0;
 
 /// One patch in the librarian list.
 struct PatchRow {
