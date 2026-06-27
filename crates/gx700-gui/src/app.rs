@@ -568,15 +568,18 @@ fn show_delay_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
             }
             // Each tap recirculates through the feedback loop (period = centre time),
             // so the C / L / R taps all repeat, decaying by the feedback each pass.
-            for (base_t, level_key, color) in [
-                (c, "delay-level-c", blue),
-                (lt, "delay-level-l", green),
-                (rt, "delay-level-r", red),
+            // Fan the three series by a small x offset so coincident taps show as
+            // adjacent lines (both colours) instead of hiding behind each other.
+            let dx = span * 0.006;
+            for (base_t, offset, level_key, color) in [
+                (c, 0.0, "delay-level-c", blue),
+                (lt, -dx, "delay-level-l", green),
+                (rt, dx, "delay-level-r", red),
             ] {
                 let mut t = base_t;
                 let mut h = f64::from(raw(level_key));
                 while t <= span && h >= 1.0 {
-                    plot.line(Line::new(tap(t, h)).color(color));
+                    plot.line(Line::new(tap((t + offset).max(0.0), h)).color(color));
                     t += c;
                     h *= fb;
                 }
