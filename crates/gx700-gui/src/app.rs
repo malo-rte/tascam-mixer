@@ -2615,9 +2615,32 @@ impl App {
                     "Delay before the chorus voice (0–50 ms); larger = more doubling.",
                 );
                 param_drag(ui, slot, "chorus-pre-delay", typed, connected, actions);
-                ui.label("Mod wave")
-                    .on_hover_text("LFO shape: 0 = triangle … 10 = sine.");
-                param_drag(ui, slot, "chorus-mod-wave", typed, connected, actions);
+                // Mod wave is a Triangle↔Sine blend (0..10) — a slider between the two
+                // ends reads far better than a numeric "Tri10:Sin0".
+                ui.label("Mod wave").on_hover_text(
+                    "LFO shape — blend from Triangle to Sine. Chorus is usually Triangle.",
+                );
+                ui.add_enabled_ui(connected, |ui| {
+                    let mut wave = match typed.get("chorus-mod-wave") {
+                        Some(Value::Int(v)) => v,
+                        _ => 0,
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label("Tri");
+                        let slider = egui::Slider::new(&mut wave, 0..=10).show_value(false);
+                        if ui
+                            .add_sized([90.0, ui.spacing().interact_size.y], slider)
+                            .changed()
+                        {
+                            actions.push(Action::SetParam(
+                                slot,
+                                "chorus-mod-wave",
+                                Value::Int(wave),
+                            ));
+                        }
+                        ui.label("Sin");
+                    });
+                });
                 ui.end_row();
                 ui.label("Low cut")
                     .on_hover_text("Roll off the wet signal below this frequency.");
