@@ -64,6 +64,7 @@ enum Action {
     SetParam(u16, &'static str, Value),
     SelectTab(Tab),
     SelectBlock(Block),
+    ReorderChain(u16, usize, usize),
     SetName(u16, String),
     SaveRow(u16),
     RevertRow(u16),
@@ -624,6 +625,35 @@ impl App {
         self.status = format!("U{slot:03}: {key} = {}", units::display(param, value));
     }
 
+    /// Move the effect block at chain position `from` to position `to` on the
+    /// now-playing patch: re-order its chain, stage it into the row's pending
+    /// patch, and re-audition so the new signal order is heard live.
+    fn reorder_chain(&mut self, slot: u16, from: usize, to: usize) {
+        if from == to {
+            return;
+        }
+        let base = self
+            .row(slot)
+            .and_then(|r| r.pending_patch.clone().or_else(|| r.full.clone()));
+        let Some(mut base) = base else {
+            return;
+        };
+        let mut chain = base.chain();
+        if from >= chain.len() || to >= chain.len() {
+            return;
+        }
+        let id = chain.remove(from);
+        chain.insert(to, id);
+        if base.set_chain(&chain).is_err() {
+            return;
+        }
+        if let Some(row) = self.row_mut(slot) {
+            row.pending_patch = Some(base);
+        }
+        // Re-audition so the re-ordered chain is applied to the current sound.
+        self.audition(slot);
+    }
+
     /// Write one patch (its edited name + level) to its memory slot and verify by
     /// read-back. `Ok` on success; `Err(message)` if the patch isn't loaded or the
     /// unit isn't in BULK LOAD mode (the write is silently ignored there).
@@ -816,9 +846,13 @@ impl App {
             return;
         };
         ui.label(format!("U{slot:03}  {:?}", eff.name));
+        ui.label(egui::RichText::new("Drag a block to re-order the chain.").weak());
         ui.separator();
         let typed = TypedPatch::from_raw(&eff);
-        for id in eff.chain() {
+        // Drag-to-reorder: each row's name is a drag source carrying its chain
+        // index, and a drop target. Releasing one row onto another records the move.
+        let mut reorder: Option<(usize, usize)> = None;
+        for (idx, id) in eff.chain().into_iter().enumerate() {
             let Some(block) = Block::from_base(id) else {
                 continue;
             };
@@ -826,7 +860,7 @@ impl App {
             let selected = self.selected_block == block;
             ui.horizontal(|ui| {
                 // A checkbox toggles the block's bypass directly; the name selects
-                // it for editing on the right.
+                // it for editing on the right (and is the drag handle for re-order).
                 if let Some(p) = block_enable_param(block) {
                     ui.add_enabled_ui(self.editable(), |ui| {
                         let mut on = enabled;
@@ -840,10 +874,22 @@ impl App {
                 } else {
                     egui::RichText::new(block.label()).weak()
                 };
-                if ui.selectable_label(selected, label).clicked() {
+                let row_id = egui::Id::new(("chain-block", idx));
+                let resp = ui
+                    .dnd_drag_source(row_id, idx, |ui| ui.selectable_label(selected, label))
+                    .response;
+                if resp.clicked() {
                     actions.push(Action::SelectBlock(block));
                 }
+                if self.editable()
+                    && let Some(from) = resp.dnd_release_payload::<usize>()
+                {
+                    reorder = Some((*from, idx));
+                }
             });
+        }
+        if let Some((from, to)) = reorder {
+            actions.push(Action::ReorderChain(slot, from, to));
         }
     }
 
@@ -1136,6 +1182,7 @@ impl App {
             Action::SetParam(slot, key, value) => self.set_param(slot, key, value),
             Action::SelectTab(tab) => self.tab = tab,
             Action::SelectBlock(block) => self.selected_block = block,
+            Action::ReorderChain(slot, from, to) => self.reorder_chain(slot, from, to),
             Action::SetName(slot, name) => self.set_name_edit(slot, name),
             Action::SaveRow(slot) => self.save_row(slot),
             Action::RevertRow(slot) => self.revert_row(slot),
