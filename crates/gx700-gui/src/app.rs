@@ -1019,11 +1019,12 @@ impl App {
             return;
         };
         ui.label(format!("U{slot:03}  {:?}", eff.name));
-        ui.label(egui::RichText::new("Drag a block to re-order the chain.").weak());
+        ui.label(egui::RichText::new("Drag the ↕ handle to re-order the chain.").weak());
         ui.separator();
         let typed = TypedPatch::from_raw(&eff);
-        // Drag-to-reorder: each row's name is a drag source carrying its chain
-        // index, and a drop target. Releasing one row onto another records the move.
+        // Drag-to-reorder: a separate ↕ handle per row is the drag source carrying
+        // the chain index; the whole row is the drop target. Keeping the handle off
+        // the name's rect means the name's click (select) isn't stolen by the drag.
         let mut reorder: Option<(usize, usize)> = None;
         for (idx, id) in eff.chain().into_iter().enumerate() {
             let Some(block) = Block::from_base(id) else {
@@ -1031,9 +1032,16 @@ impl App {
             };
             let enabled = block_enabled(&typed, block);
             let selected = self.selected_block == block;
-            ui.horizontal(|ui| {
-                // A checkbox toggles the block's bypass directly; the name selects
-                // it for editing on the right (and is the drag handle for re-order).
+            let cell = ui.horizontal(|ui| {
+                let drag_id = egui::Id::new(("chain-drag", idx));
+                ui.add_enabled_ui(self.editable(), |ui| {
+                    ui.dnd_drag_source(drag_id, idx, |ui| {
+                        ui.label(egui::RichText::new("↕").weak());
+                    })
+                    .response
+                    .on_hover_text("drag to re-order the chain");
+                });
+                // A checkbox toggles the block's bypass directly; the name selects it.
                 if let Some(p) = block_enable_param(block) {
                     ui.add_enabled_ui(self.editable(), |ui| {
                         let mut on = enabled;
@@ -1047,19 +1055,15 @@ impl App {
                 } else {
                     egui::RichText::new(block.label()).weak()
                 };
-                let row_id = egui::Id::new(("chain-block", idx));
-                let resp = ui
-                    .dnd_drag_source(row_id, idx, |ui| ui.selectable_label(selected, label))
-                    .response;
-                if resp.clicked() {
+                if ui.selectable_label(selected, label).clicked() {
                     actions.push(Action::SelectBlock(block));
                 }
-                if self.editable()
-                    && let Some(from) = resp.dnd_release_payload::<usize>()
-                {
-                    reorder = Some((*from, idx));
-                }
             });
+            if self.editable()
+                && let Some(from) = cell.response.dnd_release_payload::<usize>()
+            {
+                reorder = Some((*from, idx));
+            }
         }
         if let Some((from, to)) = reorder {
             actions.push(Action::ReorderChain(slot, from, to));
@@ -1230,7 +1234,7 @@ impl App {
     fn show_patch_list(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.label(
             egui::RichText::new(
-                "Click a slot to audition · drag a slot onto another to re-order the bank.",
+                "Click a slot to audition · drag the ↕ handle onto another slot to re-order the bank.",
             )
             .weak(),
         );
@@ -1249,25 +1253,38 @@ impl App {
                         } else {
                             egui::RichText::new(format!("U{:03}", row.slot))
                         };
-                        // The slot id is the audition click target *and* the
-                        // drag handle: drag one row onto another to re-order the
-                        // bank (the move is staged, written via "Write changes").
-                        let id = egui::SelectableLabel::new(playing, label);
-                        let drag_id = egui::Id::new(("patch-slot", row.slot));
-                        let isr = ui.dnd_drag_source(drag_id, row.slot, |ui| {
-                            ui.add_enabled(self.editable(), id)
+                        // A separate drag handle (↕) is the re-order grip; the slot
+                        // id stays a plain click-to-audition label. They occupy
+                        // different rects, so the drag-sense interaction can't steal
+                        // the label's click (which it does if they share a rect).
+                        let cell = ui.horizontal(|ui| {
+                            let drag_id = egui::Id::new(("patch-drag", row.slot));
+                            ui.add_enabled_ui(self.editable(), |ui| {
+                                ui.dnd_drag_source(drag_id, row.slot, |ui| {
+                                    ui.label(egui::RichText::new("↕").weak());
+                                })
+                                .response
+                                .on_hover_text("drag onto another slot to re-order the bank");
+                            });
+                            let r = ui.add_enabled(
+                                self.editable(),
+                                egui::SelectableLabel::new(playing, label),
+                            );
+                            let r = if row.failed {
+                                r.on_hover_text(
+                                    "read failed — value may be stale; Refresh to retry",
+                                )
+                            } else {
+                                r
+                            };
+                            if r.clicked() {
+                                actions.push(Action::Audition(row.slot));
+                            }
                         });
-                        let resp = if row.failed {
-                            isr.inner
-                                .on_hover_text("read failed — value may be stale; Refresh to retry")
-                        } else {
-                            isr.inner
-                        };
-                        if resp.clicked() {
-                            actions.push(Action::Audition(row.slot));
-                        }
+                        // The whole cell is the drop target, so releasing anywhere on
+                        // the row re-orders.
                         if self.editable()
-                            && let Some(from) = isr.response.dnd_release_payload::<u16>()
+                            && let Some(from) = cell.response.dnd_release_payload::<u16>()
                         {
                             actions.push(Action::ReorderPatch(*from, row.slot));
                         }
@@ -1298,74 +1315,75 @@ impl App {
                         let slider = egui::Slider::new(&mut level, 0..=100).suffix("%");
                         let size = [220.0, ui.spacing().interact_size.y];
                         let changed = ui
-                            .add_enabled_ui(self.editable(), |ui| ui.add_sized(size, slider).changed())
+                            .add_enabled_ui(self.editable(), |ui| {
+                                ui.add_sized(size, slider).changed()
+                            })
                             .inner;
                         if changed {
                             let level = u8::try_from(level.clamp(0, 100)).unwrap_or(0);
                             actions.push(Action::SetLevel(row.slot, level));
                         }
 
-                        // Column 4: per-row actions. Save/Revert are enabled only
-                        // when the row has an unsaved edit (their state is the
-                        // "modified" indicator); Copy/Clear need a connection, Paste
-                        // also needs something on the clipboard.
-                        ui.horizontal(|ui| {
-                            ui.add_enabled_ui(self.editable() && row.dirty(), |ui| {
-                                let save = action_button(ui, "Save", ActionKind::Commit)
-                                    .on_hover_text(
-                                        "store this patch (name + level) to the unit (needs BULK LOAD mode)",
-                                    );
-                                if save.clicked() {
-                                    actions.push(Action::SaveRow(row.slot));
-                                }
-                                let revert = action_button(ui, "Revert", ActionKind::Caution)
-                                    .on_hover_text(
-                                        "discard edits, back to the values stored on the unit",
-                                    );
-                                if revert.clicked() {
-                                    actions.push(Action::RevertRow(row.slot));
-                                }
-                            });
-                            ui.separator();
-                            ui.add_enabled_ui(self.editable(), |ui| {
-                                if action_button(ui, "Copy", ActionKind::Read)
-                                    .on_hover_text("copy this patch to the clipboard")
-                                    .clicked()
-                                {
-                                    actions.push(Action::CopyRow(row.slot));
-                                }
-                            });
-                            ui.add_enabled_ui(self.editable() && self.clipboard.is_some(), |ui| {
-                                let hover = match &self.clipboard {
-                                    Some((from, p)) => {
-                                        format!("paste U{from:03} {:?} here (then Save)", p.name)
-                                    }
-                                    None => "Copy a patch first".to_owned(),
-                                };
-                                if action_button(ui, "Paste", ActionKind::Neutral)
-                                    .on_hover_text(hover)
-                                    .clicked()
-                                {
-                                    actions.push(Action::PasteRow(row.slot));
-                                }
-                            });
-                            ui.add_enabled_ui(self.editable(), |ui| {
-                                if action_button(ui, "Clear", ActionKind::Caution)
-                                    .on_hover_text(
-                                        "reset to an empty patch (name \"Empty\", level 0, effects off), then Save",
-                                    )
-                                    .clicked()
-                                {
-                                    actions.push(Action::ClearRow(row.slot));
-                                }
-                            });
-                            // Keep the last button clear of the vertical scrollbar,
-                            // which otherwise overlays (and clips) the Clear button.
-                            ui.add_space(18.0);
-                        });
+                        // Column 4: per-row actions.
+                        self.patch_row_buttons(ui, row, actions);
                         ui.end_row();
                     }
                 });
+        });
+    }
+
+    /// A patch row's action buttons (column 4): Save/Revert (enabled only when the
+    /// row has an unsaved edit — their state is the "modified" indicator), and
+    /// Copy/Paste/Clear (Paste also needs something on the clipboard).
+    fn patch_row_buttons(&self, ui: &mut egui::Ui, row: &PatchRow, actions: &mut Vec<Action>) {
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(self.editable() && row.dirty(), |ui| {
+                let save = action_button(ui, "Save", ActionKind::Commit).on_hover_text(
+                    "store this patch (name + level) to the unit (needs BULK LOAD mode)",
+                );
+                if save.clicked() {
+                    actions.push(Action::SaveRow(row.slot));
+                }
+                let revert = action_button(ui, "Revert", ActionKind::Caution)
+                    .on_hover_text("discard edits, back to the values stored on the unit");
+                if revert.clicked() {
+                    actions.push(Action::RevertRow(row.slot));
+                }
+            });
+            ui.separator();
+            ui.add_enabled_ui(self.editable(), |ui| {
+                if action_button(ui, "Copy", ActionKind::Read)
+                    .on_hover_text("copy this patch to the clipboard")
+                    .clicked()
+                {
+                    actions.push(Action::CopyRow(row.slot));
+                }
+            });
+            ui.add_enabled_ui(self.editable() && self.clipboard.is_some(), |ui| {
+                let hover = match &self.clipboard {
+                    Some((from, p)) => format!("paste U{from:03} {:?} here (then Save)", p.name),
+                    None => "Copy a patch first".to_owned(),
+                };
+                if action_button(ui, "Paste", ActionKind::Neutral)
+                    .on_hover_text(hover)
+                    .clicked()
+                {
+                    actions.push(Action::PasteRow(row.slot));
+                }
+            });
+            ui.add_enabled_ui(self.editable(), |ui| {
+                if action_button(ui, "Clear", ActionKind::Caution)
+                    .on_hover_text(
+                        "reset to an empty patch (name \"Empty\", level 0, effects off), then Save",
+                    )
+                    .clicked()
+                {
+                    actions.push(Action::ClearRow(row.slot));
+                }
+            });
+            // Keep the last button clear of the vertical scrollbar, which otherwise
+            // overlays (and clips) the Clear button.
+            ui.add_space(18.0);
         });
     }
 
