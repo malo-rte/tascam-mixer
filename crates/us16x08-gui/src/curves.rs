@@ -30,16 +30,7 @@ pub(crate) fn ratio_from_label(label: &str) -> f64 {
     }
 }
 
-/// Compressor output level (dB) for an input level (dB): unity below threshold,
-/// `ratio`-compressed above it, then make-up gain.
-pub(crate) fn comp_output_db(input_db: f64, threshold_db: f64, ratio: f64, makeup_db: f64) -> f64 {
-    let shaped = if input_db <= threshold_db {
-        input_db
-    } else {
-        threshold_db + (input_db - threshold_db) / ratio
-    };
-    shaped + makeup_db
-}
+pub(crate) use rackctl_ui::comp::output_db as comp_output_db;
 
 #[cfg(test)]
 mod tests {
@@ -55,17 +46,5 @@ mod tests {
         assert!(close(ratio_from_label("2.0:1"), 2.0));
         assert!(ratio_from_label("inf:1").is_infinite());
         assert!(close(ratio_from_label("1.0:1"), 1.0));
-    }
-
-    #[test]
-    fn compressor_transfer() {
-        // Below threshold: unity (no make-up).
-        assert!(close(comp_output_db(-40.0, -20.0, 4.0, 0.0), -40.0));
-        // 8 dB over a -20 dB threshold at 4:1 -> 2 dB over -> -18 dB.
-        assert!(close(comp_output_db(-12.0, -20.0, 4.0, 0.0), -18.0));
-        // inf:1 limits to the threshold.
-        assert!(close(comp_output_db(0.0, -20.0, f64::INFINITY, 0.0), -20.0));
-        // Make-up gain adds.
-        assert!(close(comp_output_db(-40.0, -20.0, 4.0, 3.0), -37.0));
     }
 }

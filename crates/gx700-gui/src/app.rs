@@ -11,10 +11,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
-use egui_plot::{Line, Plot, PlotPoints};
+use egui_plot::{Line, LineStyle, Plot, PlotPoints};
 use rackctl_gx700::param::{EQ_MID_FREQ_VALUES, EQ_MID_Q_VALUES};
 use rackctl_gx700::typed::Patch as TypedPatch;
 use rackctl_gx700::{Block, Kind, NAME_LEN, Param, RawPatch, Value, param, units};
+use rackctl_ui::comp::output_db as comp_output_db;
 use rackctl_ui::eq::{BandType, EqBand, eq_response_db};
 use rackctl_ui::{ActionKind, action_button};
 
@@ -157,6 +158,60 @@ fn show_eq_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         .show(ui, |plot| plot.line(Line::new(PlotPoints::from(points))));
 }
 
+/// Draw an *indicative* compressor transfer curve (input dB -> output dB). The
+/// GX-700 does not publish a threshold in dB or a ratio, so the mapping is
+/// approximate: in Limiter mode the threshold byte sets a near-hard limit knee; in
+/// Compressor mode the sustain byte scales the ratio at a fixed knee. It shows how
+/// the controls reshape the response, not exact numbers.
+fn show_comp_curve(ui: &mut egui::Ui, typed: &TypedPatch, limiter: bool) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("comp-enable"), Some(Value::Bool(true)));
+    let (threshold_db, ratio) = if limiter {
+        // threshold byte 0..100 -> -40..0 dB; near-hard limiting above it.
+        (f64::from(raw("comp-threshold")).mul_add(0.4, -40.0), 20.0)
+    } else {
+        // sustain byte 0..100 -> ratio 1:1..8:1 at a fixed -30 dB knee.
+        (-30.0, f64::from(raw("comp-sustain")) / 100.0 * 7.0 + 1.0)
+    };
+    let points: Vec<[f64; 2]> = (0..=60)
+        .map(|i| {
+            let input = -60.0 + f64::from(i);
+            let output = if active {
+                comp_output_db(input, threshold_db, ratio, 0.0)
+            } else {
+                input
+            };
+            [input, output]
+        })
+        .collect();
+    Plot::new("gx700-comp")
+        .height(170.0)
+        .width(170.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_x(-60.0)
+        .include_x(2.0)
+        .include_y(-60.0)
+        .include_y(2.0)
+        .x_axis_formatter(|mark, _| format!("{:.0}", mark.value))
+        .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
+        .show(ui, |plot| {
+            plot.line(
+                Line::new(PlotPoints::from(points)).color(egui::Color32::from_rgb(90, 170, 220)),
+            );
+            // 1:1 reference diagonal (input == output).
+            plot.line(
+                Line::new(PlotPoints::from(vec![[-60.0, -60.0], [0.0, 0.0]]))
+                    .color(egui::Color32::from_gray(110))
+                    .style(LineStyle::dashed_loose()),
+            );
+        });
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -172,10 +227,10 @@ fn eq_row(
     actions: &mut Vec<Action>,
 ) {
     ui.label(name);
-    eq_gain_drag(ui, slot, gain_key, typed, enabled, actions);
+    param_drag(ui, slot, gain_key, typed, enabled, actions);
     for key in [freq_key, q_key] {
         match key {
-            Some(key) => eq_combo(ui, slot, key, typed, enabled, actions),
+            Some(key) => param_combo(ui, slot, key, typed, enabled, actions),
             None => {
                 ui.weak("—");
             }
@@ -184,8 +239,8 @@ fn eq_row(
     ui.end_row();
 }
 
-/// An EQ gain as a compact drag-value shown in dB (US-16x08 style).
-fn eq_gain_drag(
+/// An int parameter as a compact drag-value in display units (US-16x08 style).
+fn param_drag(
     ui: &mut egui::Ui,
     slot: u16,
     key: &'static str,
@@ -213,8 +268,8 @@ fn eq_gain_drag(
     });
 }
 
-/// An EQ enum (mid frequency or Q) as a dropdown of its labels.
-fn eq_combo(
+/// An enum parameter as a dropdown of its labels.
+fn param_combo(
     ui: &mut egui::Ui,
     slot: u16,
     key: &'static str,
@@ -790,6 +845,10 @@ impl App {
                 self.show_eq_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::Compressor {
+                self.show_comp_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -869,7 +928,57 @@ impl App {
                 ui.separator();
                 ui.end_row();
                 ui.label("Level");
-                eq_gain_drag(ui, slot, "eq-level", typed, connected, actions);
+                param_drag(ui, slot, "eq-level", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
+    /// The Compressor's custom UI: enable + type, an indicative transfer curve,
+    /// then the mode-relevant controls (Sustain/Attack for Compressor, Threshold/
+    /// Release for Limiter) plus Tone and Level, in the US-16x08 style.
+    fn show_comp_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.connected;
+        let enabled = block_enabled(typed, Block::Compressor);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Compressor enabled").changed() {
+                actions.push(Action::SetParam(slot, "comp-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Type");
+                param_combo(ui, slot, "comp-type", typed, connected, actions);
+            });
+        });
+        // comp-type: 0 = Compressor, 1 = Limiter.
+        let limiter = matches!(typed.get("comp-type"), Some(Value::Enum(1)));
+        show_comp_curve(ui, typed, limiter);
+        ui.add_space(6.0);
+        egui::Grid::new("gx700-comp-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                if limiter {
+                    ui.label("Threshold");
+                    param_drag(ui, slot, "comp-threshold", typed, connected, actions);
+                    ui.label("Release");
+                    param_drag(ui, slot, "comp-release", typed, connected, actions);
+                } else {
+                    ui.label("Sustain");
+                    param_drag(ui, slot, "comp-sustain", typed, connected, actions);
+                    ui.label("Attack");
+                    param_drag(ui, slot, "comp-attack", typed, connected, actions);
+                }
+                ui.end_row();
+                ui.label("Tone");
+                param_drag(ui, slot, "comp-tone", typed, connected, actions);
+                ui.label("Level");
+                param_drag(ui, slot, "comp-level", typed, connected, actions);
                 ui.end_row();
             });
     }

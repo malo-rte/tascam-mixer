@@ -92,10 +92,16 @@ reach into `preamp-master` / `preamp-volume`, which belongs in the *effect edito
   state (●/○); selecting a block shows *only that block's* parameters on the right,
   each a live widget (checkbox / slider / combo) driven by the catalog. This split
   leaves room for *custom per-block UIs* by special-casing `show_block_params` per
-  block -- the *Equalizer* block is the first: it draws a live 3-band response curve
-  (low shelf + mid peak + high shelf, with the output level shifting the whole
-  curve) above its controls, reusing the RBJ-biquad math now shared in
-  `rackctl-ui::eq` (extracted from the US-16x08 GUI's `curves.rs`). Reading current values goes through
+  block, reusing the math shared in `rackctl-ui` (extracted from the US-16x08 GUI's
+  `curves.rs`):
++
+** *Equalizer* -- a live 3-band response curve (low shelf + mid peak + high shelf,
+   with the output level shifting the whole curve) above a Gain/Freq/Q band table
+   (`rackctl-ui::eq`).
+** *Compressor* -- an enable + type selector, an *indicative* transfer curve
+   (input→output dB; the device publishes no ratio/threshold-dB, so the mapping is
+   approximate), and a mode-aware grid (Sustain/Attack for Compressor, Threshold/
+   Release for Limiter, plus Tone/Level) -- US-16x08 style (`rackctl-ui::comp`). Reading current values goes through
   the typed model (`typed::Patch::get`) and edits stage through it (`set` →
   `to_raw`), applied live via `Gx700::set` and saved/reverted with the rest of the
   row's pending changes. Still to do here: drag-to-reorder the chain (the library

@@ -6,6 +6,7 @@
 //! with the [`ActionKind`] that matches what the button does.
 #![forbid(unsafe_code)]
 
+pub mod comp;
 pub mod eq;
 
 use egui::{Button, Color32, Response, Ui, WidgetText};
