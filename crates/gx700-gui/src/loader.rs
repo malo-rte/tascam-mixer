@@ -1,7 +1,8 @@
-//! Background bank reader: reads the 100 user patch headers slot-by-slot off the
-//! UI thread, so the window keeps answering the compositor while the (slow) bank
-//! read runs. Each `read_patch_header` makes the device stream a whole patch
-//! (~0.5 s), so a full bank is ~1 minute; results stream back as they arrive.
+//! Background bank reader: reads patches slot-by-slot off the UI thread, so the
+//! window keeps answering the compositor while the (slow) bank read runs. The user
+//! bank is read *deep* (whole patches) so scenes can be captured and auditions are
+//! instant; the read-only factory presets are read *shallow* (headers only).
+//! Results stream back as they arrive (a full bank is ~1 minute).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,7 +10,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use rackctl_gx700::PatchHeader;
+use rackctl_gx700::{PatchHeader, RawPatch};
 
 use crate::device::{SharedDevice, lock};
 
@@ -36,8 +37,11 @@ const ABORT_AFTER_CONSECUTIVE: u16 = 3;
 
 /// A result from the loader.
 pub(crate) enum Loaded {
-    /// One slot's header arrived.
+    /// One slot's header arrived (shallow read).
     Header(u16, PatchHeader),
+    /// One slot's whole patch arrived (deep read — the user bank, so a scene can be
+    /// captured and auditions are instant).
+    Patch(u16, RawPatch),
     /// A slot read failed (slot, message); the load continues with the next.
     Failed(u16, String),
     /// The load gave up early because the device stopped answering (message).
@@ -54,21 +58,23 @@ pub(crate) struct Loader {
 }
 
 impl Loader {
-    /// Spawn a one-shot read of all user patch headers over `device`. Locks the
-    /// device per slot so UI actions (auditioning) interleave between reads.
+    /// Spawn a one-shot deep read of all user patches over `device` (whole patches,
+    /// so scenes can be saved and auditions are instant). Locks the device per slot
+    /// so UI actions interleave between reads.
     pub(crate) fn spawn(device: SharedDevice) -> Self {
-        Self::spawn_range(device, 1, USER_SLOTS)
+        Self::spawn_range(device, 1, USER_SLOTS, true)
     }
 
-    /// Spawn a one-shot read of the patch headers in `start..=end` (inclusive).
-    /// Used both for the user bank (`1..=100`) and the factory presets
-    /// (`101..=200`). Locks the device per slot so auditions interleave.
-    pub(crate) fn spawn_range(device: SharedDevice, start: u16, end: u16) -> Self {
+    /// Spawn a one-shot read of slots `start..=end` (inclusive). With `deep`, reads
+    /// whole patches (`Loaded::Patch`); otherwise just headers (`Loaded::Header`,
+    /// used for the read-only factory presets). Locks per slot so auditions
+    /// interleave.
+    pub(crate) fn spawn_range(device: SharedDevice, start: u16, end: u16, deep: bool) -> Self {
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = channel();
         let handle = {
             let cancel = Arc::clone(&cancel);
-            thread::spawn(move || run(&device, &cancel, &tx, start, end))
+            thread::spawn(move || run(&device, &cancel, &tx, start, end, deep))
         };
         Self {
             cancel,
@@ -92,13 +98,20 @@ impl Drop for Loader {
     }
 }
 
-fn run(device: &SharedDevice, cancel: &AtomicBool, tx: &Sender<Loaded>, start: u16, end: u16) {
+fn run(
+    device: &SharedDevice,
+    cancel: &AtomicBool,
+    tx: &Sender<Loaded>,
+    start: u16,
+    end: u16,
+    deep: bool,
+) {
     let mut consecutive_fail = 0u16;
     for slot in start..=end {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        let result = read_slot(device, cancel, slot);
+        let result = read_slot(device, cancel, slot, deep);
         let failed = matches!(result, Loaded::Failed(..));
         if tx.send(result).is_err() {
             return; // UI gone
@@ -123,14 +136,23 @@ fn run(device: &SharedDevice, cancel: &AtomicBool, tx: &Sender<Loaded>, start: u
 
 /// Read one slot's header, retrying up to [`READ_ATTEMPTS`] times before giving up
 /// so a single dropped reply skips just that slot rather than the whole bank.
-fn read_slot(device: &SharedDevice, cancel: &AtomicBool, slot: u16) -> Loaded {
+fn read_slot(device: &SharedDevice, cancel: &AtomicBool, slot: u16, deep: bool) -> Loaded {
     let mut last = String::new();
     for attempt in 1..=READ_ATTEMPTS {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        match lock(device).read_patch_header(slot) {
-            Ok(header) => return Loaded::Header(slot, header),
+        let read = if deep {
+            lock(device)
+                .read_patch(slot)
+                .map(|p| Loaded::Patch(slot, p))
+        } else {
+            lock(device)
+                .read_patch_header(slot)
+                .map(|h| Loaded::Header(slot, h))
+        };
+        match read {
+            Ok(loaded) => return loaded,
             Err(e) => last = e.to_string(),
         }
         // Pace before the next try, giving the interface time to settle.

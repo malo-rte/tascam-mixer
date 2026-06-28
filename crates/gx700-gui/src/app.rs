@@ -101,6 +101,8 @@ enum Action {
     ClearRow(u16),
     SavePatchLib,
     LoadPatchLib(String),
+    SaveScene,
+    LoadScene(String),
     ToggleBlockLib,
     SaveBlockPreset(String),
     LoadBlockPreset(String),
@@ -1421,9 +1423,10 @@ pub(crate) struct App {
     /// from different patches into a new one.
     block_clip: TypedPatch,
     clip_blocks: Vec<Block>,
-    /// Save-as name fields for the Library tab (patch / block).
+    /// Save-as name fields for the Library tab (patch / block / scene).
     lib_patch_name: String,
     lib_block_name: String,
+    lib_scene_name: String,
     /// A library file pending a delete confirmation.
     pending_delete: Option<std::path::PathBuf>,
     /// Whether the Edit tab's right panel shows the selected block's preset library
@@ -1488,6 +1491,7 @@ impl App {
             clip_blocks: Vec::new(),
             lib_patch_name: String::new(),
             lib_block_name: String::new(),
+            lib_scene_name: String::new(),
             pending_delete: None,
             block_lib_open: false,
             tab: Tab::Patches,
@@ -1870,6 +1874,76 @@ impl App {
         self.audition(slot);
         self.status =
             format!("loaded patch \u{201c}{name}\u{201d} into U{slot:03} — Save to store");
+    }
+
+    /// Save the whole user bank (all 100 slots, with staged edits) as a named scene.
+    fn save_scene(&mut self) {
+        let name = self.lib_scene_name.trim().to_owned();
+        if name.is_empty() {
+            "enter a name to save the scene".clone_into(&mut self.status);
+            return;
+        }
+        let mut patches = Vec::with_capacity(usize::from(USER_SLOTS));
+        for slot in 1..=USER_SLOTS {
+            let Some(patch) = self.effective_patch(slot) else {
+                self.status = format!(
+                    "U{slot:03} not loaded yet — wait for the bank read to finish, then save"
+                );
+                return;
+            };
+            patches.push(patch);
+        }
+        let Some(path) = config::lib_path(config::scenes_dir(), &name) else {
+            return;
+        };
+        match config::save_json(&path, &patches) {
+            Ok(()) => {
+                self.status = format!(
+                    "saved scene \u{201c}{name}\u{201d} ({} patches)",
+                    patches.len()
+                );
+                self.lib_scene_name.clear();
+            }
+            Err(e) => self.status = format!("save failed: {e}"),
+        }
+    }
+
+    /// Load a scene: stage its patches into every user slot. The bank isn't changed
+    /// on the unit until the user runs "Write changes" in BULK LOAD.
+    fn load_scene(&mut self, name: &str) {
+        let Some(path) = config::lib_path(config::scenes_dir(), name) else {
+            return;
+        };
+        let parsed =
+            config::read_text(&path).and_then(|t| serde_json::from_str::<Vec<TypedPatch>>(&t).ok());
+        let Some(patches) = parsed else {
+            self.status = format!("could not read scene \u{201c}{name}\u{201d}");
+            return;
+        };
+        let mut staged = 0u16;
+        for (i, patch) in patches.into_iter().enumerate() {
+            let Ok(slot) = u16::try_from(i + 1) else {
+                break;
+            };
+            if slot > USER_SLOTS {
+                break;
+            }
+            if let Some(row) = self.row_mut(slot) {
+                row.name_edit.clone_from(&patch.name);
+                row.pending_level = Some(patch.output_level);
+                row.pending_patch = Some(patch);
+                staged += 1;
+            }
+        }
+        // Reflect the now-playing slot's new content in the active sound.
+        if let Some(playing) = self.now_playing
+            && playing <= USER_SLOTS
+        {
+            self.audition(playing);
+        }
+        self.status = format!(
+            "loaded scene \u{201c}{name}\u{201d} — {staged} patches staged; Write changes to store"
+        );
     }
 
     /// The selected block's current data (from the now-playing patch), if any.
@@ -3603,6 +3677,46 @@ impl App {
                 Action::LoadPatchLib,
                 actions,
             );
+
+            ui.separator();
+            ui.heading("Scenes");
+            ui.label(
+                egui::RichText::new(
+                    "A scene is the whole 100-slot user bank. Load stages it into every \
+                     slot; then “Write changes to unit” stores it (in BULK LOAD).",
+                )
+                .weak(),
+            );
+            ui.horizontal(|ui| {
+                ui.label("Save current bank as:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.lib_scene_name)
+                        .hint_text("name")
+                        .desired_width(160.0),
+                );
+                ui.add_enabled_ui(
+                    self.connected && !self.lib_scene_name.trim().is_empty(),
+                    |ui| {
+                        if action_button(ui, "Save", ActionKind::Commit)
+                            .on_hover_text("snapshot all 100 user patches to a scene file")
+                            .clicked()
+                        {
+                            actions.push(Action::SaveScene);
+                        }
+                    },
+                );
+            });
+            lib_list(
+                ui,
+                &config::json_stems(config::scenes_dir()),
+                "No saved scenes yet.",
+                self.connected,
+                "stage this scene into the bank (then Write changes to the unit)",
+                config::scenes_dir().as_deref(),
+                Action::LoadScene,
+                actions,
+            );
+
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new(
@@ -3633,6 +3747,8 @@ impl App {
             Action::ClearRow(slot) => self.clear_row(slot),
             Action::SavePatchLib => self.save_patch_lib(),
             Action::LoadPatchLib(name) => self.load_patch_lib(&name),
+            Action::SaveScene => self.save_scene(),
+            Action::LoadScene(name) => self.load_scene(&name),
             Action::ToggleBlockLib => self.block_lib_open = !self.block_lib_open,
             Action::SaveBlockPreset(name) => self.save_block_preset(&name),
             Action::LoadBlockPreset(name) => self.load_block_preset(&name),
@@ -3661,6 +3777,23 @@ impl App {
         let mut aborted: Option<String> = None;
         for ev in loader.drain() {
             match ev {
+                // The user bank is read deep: keep the whole patch so scenes can be
+                // saved and auditions are instant, and derive the header fields.
+                Loaded::Patch(slot, raw) => {
+                    self.progress = self.progress.saturating_add(1);
+                    let typed = TypedPatch::from_raw(&raw);
+                    if let Some(row) = self.row_mut(slot) {
+                        let untouched = row.name_edit == row.name;
+                        row.name.clone_from(&typed.name);
+                        if untouched {
+                            row.name_edit.clone_from(&row.name);
+                        }
+                        row.stored_level = typed.output_level;
+                        row.chain = typed.chain.to_vec();
+                        row.full = Some(typed);
+                        row.failed = false;
+                    }
+                }
                 Loaded::Header(slot, header) => {
                     self.progress = self.progress.saturating_add(1);
                     if let Some(row) = self.row_mut(slot) {
@@ -3713,10 +3846,13 @@ impl App {
             && self.loader.is_none()
         {
             self.preset_progress = 0;
+            // Shallow (headers only) — presets are read-only; full content loads on
+            // demand when one is auditioned.
             self.preset_loader = Some(Loader::spawn_range(
                 Arc::clone(&self.device),
                 PRESET_START,
                 PRESET_END,
+                false,
             ));
             "reading factory presets…".clone_into(&mut self.status);
         }
@@ -3748,6 +3884,7 @@ impl App {
                     }
                     self.status = format!("{}: {msg}", slot_label(slot));
                 }
+                Loaded::Patch(..) => {} // presets are read shallow
                 Loaded::Aborted(msg) => aborted = Some(msg),
                 Loaded::Done => done = true,
             }
