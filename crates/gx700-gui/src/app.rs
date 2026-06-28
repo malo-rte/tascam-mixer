@@ -45,13 +45,14 @@ struct PatchRow {
     stored_level: u8,
     /// Chain order bytes (read with the header; not edited in this view).
     chain: Vec<u8>,
-    /// The full patch, loaded the first time the row is auditioned/edited.
-    full: Option<RawPatch>,
+    /// The full patch, loaded the first time the row is auditioned/edited. The GUI
+    /// works in the typed model; raw bytes only appear at the device boundary.
+    full: Option<TypedPatch>,
     /// A live-edited level not yet written to memory.
     pending_level: Option<u8>,
     /// A staged whole-patch replacement (from Paste or Clear) not yet written.
     /// When set, it — not `full` — is the basis for the next store.
-    pending_patch: Option<RawPatch>,
+    pending_patch: Option<TypedPatch>,
     /// Set when the bank read for this slot was skipped after exhausting retries;
     /// its name/level are stale (or empty). Cleared once a read succeeds.
     failed: bool,
@@ -131,12 +132,14 @@ enum Tab {
 
 /// Parse a saved patch file: a typed `Patch` (the readable, grouped-by-block form
 /// the GUI writes) or, as a fallback, a raw `RawPatch` (the CLI's form). Returns
-/// the patch as a `RawPatch`.
-fn parse_patch_json(text: &str) -> Option<RawPatch> {
+/// the patch in the typed model.
+fn parse_patch_json(text: &str) -> Option<TypedPatch> {
     if let Ok(typed) = serde_json::from_str::<TypedPatch>(text) {
-        return Some(typed.to_raw());
+        return Some(typed);
     }
-    serde_json::from_str::<RawPatch>(text).ok()
+    serde_json::from_str::<RawPatch>(text)
+        .ok()
+        .map(|raw| TypedPatch::from_raw(&raw))
 }
 
 /// Render a library list: each saved `name` with a Load (gated on `can_load`) and
@@ -1411,7 +1414,7 @@ pub(crate) struct App {
     presets_loaded: bool,
     now_playing: Option<u16>,
     /// The copied patch and its source slot, set by Copy and stamped by Paste.
-    clipboard: Option<(u16, RawPatch)>,
+    clipboard: Option<(u16, TypedPatch)>,
     /// Additive per-block clipboard: a scratch patch holding the blocks copied in
     /// the Edit tab, plus the list of which blocks are actually held (so Paste
     /// greys out until that block has been copied). Lets the user combine blocks
@@ -1580,10 +1583,10 @@ impl App {
     fn ensure_loaded(&mut self, slot: u16) {
         if self.row(slot).is_some_and(|r| r.full.is_none()) {
             let read = device::lock(&self.device).read_patch(slot);
-            if let Ok(patch) = read
+            if let Ok(raw) = read
                 && let Some(row) = self.row_mut(slot)
             {
-                row.full = Some(patch);
+                row.full = Some(TypedPatch::from_raw(&raw));
             }
         }
     }
@@ -1591,12 +1594,11 @@ impl App {
     /// The patch a store would write for `slot`: the staged whole-patch (from
     /// Paste or Clear) or the loaded patch, with the row's edited name and level
     /// overlaid. `None` if nothing is loaded for the row yet.
-    fn effective_patch(&self, slot: u16) -> Option<RawPatch> {
+    fn effective_patch(&self, slot: u16) -> Option<TypedPatch> {
         let row = self.row(slot)?;
         let mut patch = row.pending_patch.clone().or_else(|| row.full.clone())?;
-        let level = row.pending_level.unwrap_or(row.stored_level);
-        let _ = patch.set_output_level(level);
-        let _ = patch.set_name(&row.name_edit);
+        patch.output_level = row.pending_level.unwrap_or(row.stored_level);
+        patch.name.clone_from(&row.name_edit);
         Some(patch)
     }
 
@@ -1607,10 +1609,10 @@ impl App {
             return;
         };
         if let Some(row) = self.row_mut(slot) {
-            row.stored_level = patch.output_level();
+            row.stored_level = patch.output_level;
             row.name.clone_from(&patch.name);
             row.name_edit.clone_from(&patch.name);
-            row.chain = patch.chain();
+            row.chain = patch.chain.to_vec();
             row.full = Some(patch);
             row.pending_level = None;
             row.pending_patch = None;
@@ -1656,7 +1658,7 @@ impl App {
         let Some(patch) = self.effective_patch(slot) else {
             return;
         };
-        let written = device::lock(&self.device).write_current_patch(&patch);
+        let written = device::lock(&self.device).write_current_patch(&patch.to_raw());
         match written {
             Ok(_) => {
                 self.now_playing = Some(slot);
@@ -1701,17 +1703,15 @@ impl App {
             self.status = format!("set {key}: {e}");
             return;
         }
-        // Stage onto the row's raw base (no name/level overlay — those stay separate).
+        // Stage onto the row's base patch (no name/level overlay — those stay separate).
         let base = self
             .row(slot)
             .and_then(|r| r.pending_patch.clone().or_else(|| r.full.clone()));
-        if let Some(base) = base {
-            let mut typed = TypedPatch::from_raw(&base);
-            if typed.set(key, value).is_ok()
-                && let Some(row) = self.row_mut(slot)
-            {
-                row.pending_patch = Some(typed.to_raw());
-            }
+        if let Some(mut typed) = base
+            && typed.set(key, value).is_ok()
+            && let Some(row) = self.row_mut(slot)
+        {
+            row.pending_patch = Some(typed);
         }
         self.status = format!("U{slot:03}: {key} = {}", units::display(param, value));
     }
@@ -1729,15 +1729,16 @@ impl App {
         let Some(mut base) = base else {
             return;
         };
-        let mut chain = base.chain();
+        let mut chain = base.chain.to_vec();
         if from >= chain.len() || to >= chain.len() {
             return;
         }
         let id = chain.remove(from);
         chain.insert(to, id);
-        if base.set_chain(&chain).is_err() {
+        if chain.len() != base.chain.len() {
             return;
         }
+        base.chain.copy_from_slice(&chain);
         if let Some(row) = self.row_mut(slot) {
             row.pending_patch = Some(base);
         }
@@ -1750,10 +1751,9 @@ impl App {
         let Some(slot) = self.now_playing else {
             return;
         };
-        let Some(eff) = self.effective_patch(slot) else {
+        let Some(src) = self.effective_patch(slot) else {
             return;
         };
-        let src = TypedPatch::from_raw(&eff);
         self.block_clip.copy_block_from(&src, block);
         if !self.clip_blocks.contains(&block) {
             self.clip_blocks.push(block);
@@ -1775,8 +1775,8 @@ impl App {
             return false;
         };
         let cur = row.pending_patch.as_ref().unwrap_or(full);
-        let base = block.base();
-        cur.blocks.get(&base) != full.blocks.get(&base)
+        rackctl_gx700::typed::BlockData::from_patch(cur, block)
+            != rackctl_gx700::typed::BlockData::from_patch(full, block)
     }
 
     /// Replace `slot`'s `block` with the same block from `source`, stage it, and
@@ -1785,17 +1785,15 @@ impl App {
         let base = self
             .row(slot)
             .and_then(|r| r.pending_patch.clone().or_else(|| r.full.clone()));
-        let Some(base) = base else {
+        let Some(mut typed) = base else {
             return;
         };
-        let mut typed = TypedPatch::from_raw(&base);
         typed.copy_block_from(source, block);
-        let raw = typed.to_raw();
         if let Some(row) = self.row_mut(slot) {
-            row.pending_patch = if row.full.as_ref() == Some(&raw) {
+            row.pending_patch = if row.full.as_ref() == Some(&typed) {
                 None
             } else {
-                Some(raw)
+                Some(typed)
             };
         }
         self.audition(slot);
@@ -1813,10 +1811,9 @@ impl App {
 
     /// Revert `slot`'s `block` to its stored (on-unit) value.
     fn revert_block(&mut self, slot: u16, block: Block) {
-        let Some(full) = self.row(slot).and_then(|r| r.full.clone()) else {
+        let Some(stored) = self.row(slot).and_then(|r| r.full.clone()) else {
             return;
         };
-        let stored = TypedPatch::from_raw(&full);
         self.apply_block(slot, block, &stored);
         self.status = format!("reverted {} block", block.label());
     }
@@ -1834,10 +1831,9 @@ impl App {
             "audition a patch first".clone_into(&mut self.status);
             return;
         };
-        let Some(eff) = self.effective_patch(slot) else {
+        let Some(typed) = self.effective_patch(slot) else {
             return;
         };
-        let typed = TypedPatch::from_raw(&eff);
         let Some(path) = config::lib_path(config::patches_dir(), &name) else {
             return;
         };
@@ -1859,7 +1855,7 @@ impl App {
         let Some(path) = config::lib_path(config::patches_dir(), name) else {
             return;
         };
-        let Some(raw) = config::read_text(&path)
+        let Some(loaded) = config::read_text(&path)
             .as_deref()
             .and_then(parse_patch_json)
         else {
@@ -1867,9 +1863,9 @@ impl App {
             return;
         };
         if let Some(row) = self.row_mut(slot) {
-            row.name_edit.clone_from(&raw.name);
-            row.pending_level = Some(raw.output_level());
-            row.pending_patch = Some(raw);
+            row.name_edit.clone_from(&loaded.name);
+            row.pending_level = Some(loaded.output_level);
+            row.pending_patch = Some(loaded);
         }
         self.audition(slot);
         self.status =
@@ -1878,8 +1874,7 @@ impl App {
 
     /// The selected block's current data (from the now-playing patch), if any.
     fn current_block_data(&self) -> Option<rackctl_gx700::typed::BlockData> {
-        let eff = self.effective_patch(self.now_playing?)?;
-        let typed = TypedPatch::from_raw(&eff);
+        let typed = self.effective_patch(self.now_playing?)?;
         rackctl_gx700::typed::BlockData::from_patch(&typed, self.selected_block)
     }
 
@@ -1984,13 +1979,14 @@ impl App {
         let Some(patch) = self.effective_patch(slot) else {
             return Err(format!("U{slot:03}: patch not loaded — audition it first"));
         };
-        let write = device::lock(&self.device).write_patch(slot, &patch);
+        let raw = patch.to_raw();
+        let write = device::lock(&self.device).write_patch(slot, &raw);
         if let Err(e) = write {
             return Err(format!("write U{slot:03}: {e}"));
         }
         let readback = device::lock(&self.device).read_patch(slot);
         match readback {
-            Ok(got) if got.blocks == patch.blocks => Ok(()),
+            Ok(got) if got.blocks == raw.blocks => Ok(()),
             _ => Err(format!(
                 "U{slot:03} not stored — put the GX-700 in BULK LOAD mode \
                  (TUNER/UTILITY → MIDI BULK LOAD), then try again"
@@ -2061,7 +2057,7 @@ impl App {
             return;
         };
         let name = patch.name.clone();
-        let level = patch.output_level();
+        let level = patch.output_level;
         self.ensure_loaded(slot);
         if let Some(row) = self.row_mut(slot) {
             row.name_edit.clone_from(&name);
@@ -2082,12 +2078,9 @@ impl App {
             self.status = format!("U{slot:03}: read the bank first");
             return;
         };
-        if let Err(e) = patch.initialize() {
-            self.status = format!("U{slot:03}: cannot clear — {e}");
-            return;
-        }
+        patch.clear();
         let name = patch.name.clone();
-        let level = patch.output_level();
+        let level = patch.output_level;
         if let Some(row) = self.row_mut(slot) {
             row.name_edit.clone_from(&name);
             row.pending_level = Some(level);
@@ -2133,7 +2126,7 @@ impl App {
         for (patch, idx) in contents.into_iter().zip(lo..=hi) {
             let slot = u16::try_from(idx + 1).unwrap_or(0);
             let name = patch.name.clone();
-            let level = patch.output_level();
+            let level = patch.output_level;
             if let Some(row) = self.row_mut(slot) {
                 row.name_edit = name;
                 row.pending_level = Some(level);
@@ -2230,18 +2223,17 @@ impl App {
             ui.label("Audition a patch on the Patches tab to edit it here.");
             return;
         };
-        let Some(eff) = self.effective_patch(slot) else {
+        let Some(typed) = self.effective_patch(slot) else {
             return;
         };
-        ui.label(format!("U{slot:03}  {:?}", eff.name));
+        ui.label(format!("U{slot:03}  {:?}", typed.name));
         ui.label(egui::RichText::new("Drag the ↕ handle to re-order the chain.").weak());
         ui.separator();
-        let typed = TypedPatch::from_raw(&eff);
         // Drag-to-reorder: a separate ↕ handle per row is the drag source carrying
         // the chain index; the whole row is the drop target. Keeping the handle off
         // the name's rect means the name's click (select) isn't stolen by the drag.
         let mut reorder: Option<(usize, usize)> = None;
-        for (idx, id) in eff.chain().into_iter().enumerate() {
+        for (idx, &id) in typed.chain.iter().enumerate() {
             let Some(block) = Block::from_base(id) else {
                 continue;
             };
@@ -2292,10 +2284,9 @@ impl App {
             ui.label("Audition a patch to edit its effects.");
             return;
         };
-        let Some(eff) = self.effective_patch(slot) else {
+        let Some(typed) = self.effective_patch(slot) else {
             return;
         };
-        let typed = TypedPatch::from_raw(&eff);
         let block = self.selected_block;
         // Title row: the block name, with right-aligned Copy / Paste / Revert (the
         // additive block clipboard) and Library (this block type's preset library).
