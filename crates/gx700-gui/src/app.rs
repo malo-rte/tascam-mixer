@@ -119,6 +119,8 @@ enum Action {
     ConfirmDelete,
     CancelDelete,
     Refresh,
+    ConfirmRefresh,
+    CancelRefresh,
     Retry,
     OpenBulkPrompt,
     CloseBulkPrompt,
@@ -1475,6 +1477,8 @@ pub(crate) struct App {
     /// Whether the Edit tab's right panel shows the selected block's preset library
     /// (toggled by the per-block "Library" button) instead of its parameters.
     block_lib_open: bool,
+    /// A Refresh is awaiting confirmation because it would discard staged edits.
+    confirm_refresh: bool,
     /// Which screen is showing.
     tab: Tab,
     /// The effect block selected in the Edit tab.
@@ -1544,6 +1548,7 @@ impl App {
             lib_scene_name: String::new(),
             pending_delete: None,
             block_lib_open: false,
+            confirm_refresh: false,
             tab: Tab::Patches,
             selected_block: Block::Compressor,
             bulk_prompt: false,
@@ -1681,6 +1686,16 @@ impl App {
     }
 
     /// Spawn (or restart) the background bank read.
+    /// Drop every row's staged edits, returning each to its last-stored state. Used
+    /// when a Refresh is confirmed (the re-read would overwrite them anyway).
+    fn discard_edits(&mut self) {
+        for row in &mut self.rows {
+            row.pending_patch = None;
+            row.pending_level = None;
+            row.name_edit.clone_from(&row.name);
+        }
+    }
+
     fn start_load(&mut self) {
         if !self.connected {
             return;
@@ -3971,7 +3986,21 @@ impl App {
             Action::RequestDelete(path) => self.pending_delete = Some(path),
             Action::ConfirmDelete => self.confirm_delete(),
             Action::CancelDelete => self.pending_delete = None,
-            Action::Refresh => self.start_load(),
+            Action::Refresh => {
+                // Re-reading replaces every row's stored patch with what the unit
+                // holds; staged edits would be silently lost, so warn first.
+                if self.dirty_count() > 0 {
+                    self.confirm_refresh = true;
+                } else {
+                    self.start_load();
+                }
+            }
+            Action::ConfirmRefresh => {
+                self.confirm_refresh = false;
+                self.discard_edits();
+                self.start_load();
+            }
+            Action::CancelRefresh => self.confirm_refresh = false,
             Action::Retry => self.retry(),
             Action::OpenBulkPrompt => self.bulk_prompt = true,
             Action::CloseBulkPrompt => self.bulk_prompt = false,
@@ -4225,6 +4254,7 @@ impl eframe::App for App {
 
         self.show_bulk_modals(ctx, &mut actions);
         self.show_delete_modal(ctx, &mut actions);
+        self.show_refresh_modal(ctx, &mut actions);
 
         for action in actions {
             self.apply(action);
@@ -4291,6 +4321,34 @@ impl App {
                     }
                     if action_button(ui, "Cancel", ActionKind::Neutral).clicked() {
                         actions.push(Action::CancelDelete);
+                    }
+                });
+            });
+    }
+
+    /// Warn before a Refresh that would discard staged edits (re-reading the bank
+    /// replaces every row's stored patch with what the unit holds).
+    fn show_refresh_modal(&self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        if !self.confirm_refresh {
+            return;
+        }
+        let n = self.dirty_count();
+        egui::Window::new("Discard unsaved changes?")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "Refreshing re-reads the bank from the unit and will discard {n} \
+                     unsaved change{}.",
+                    if n == 1 { "" } else { "s" }
+                ));
+                ui.horizontal(|ui| {
+                    if action_button(ui, "Discard & refresh", ActionKind::Destructive).clicked() {
+                        actions.push(Action::ConfirmRefresh);
+                    }
+                    if action_button(ui, "Cancel", ActionKind::Neutral).clicked() {
+                        actions.push(Action::CancelRefresh);
                     }
                 });
             });
