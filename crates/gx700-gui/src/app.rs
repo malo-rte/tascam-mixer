@@ -142,6 +142,7 @@ enum Action {
     ComposeAssignBank(usize, u16),
     ComposeCopy(usize),
     ComposePaste(usize),
+    ComposeRevert(usize),
     ComposeSave,
     ComposeSaveOver(String),
     ComposeApply,
@@ -1543,6 +1544,9 @@ pub(crate) struct App {
     /// offline (independent of the live bank) until applied to the unit or saved.
     /// Always `USER_SLOTS` long; an untouched slot holds an INIT (default) patch.
     compose: Vec<TypedPatch>,
+    /// Baseline for the composer — its state when the scene was last established
+    /// (New / Capture / Load / Save). Per-slot Revert restores from this.
+    compose_base: Vec<TypedPatch>,
     /// Save-as / loaded-scene name for the composer.
     compose_name: String,
     /// What the Edit tab is editing: a bank slot (live, preview when in BULK LOAD),
@@ -1625,6 +1629,7 @@ impl App {
             block_lib_open: false,
             confirm_refresh: false,
             compose: vec![TypedPatch::default(); usize::from(USER_SLOTS)],
+            compose_base: vec![TypedPatch::default(); usize::from(USER_SLOTS)],
             compose_name: String::new(),
             edit_slot: None,
             edit_scratch: TypedPatch::default(),
@@ -2213,6 +2218,7 @@ impl App {
     /// Start a fresh scene: every slot reset to an INIT (default) patch.
     fn compose_new(&mut self) {
         self.compose = vec![TypedPatch::default(); usize::from(USER_SLOTS)];
+        self.compose_base = self.compose.clone();
         self.compose_name.clear();
         "started a new scene (all slots INIT)".clone_into(&mut self.status);
     }
@@ -2221,6 +2227,7 @@ impl App {
     fn compose_capture(&mut self) {
         if let Some(bank) = self.current_bank() {
             self.compose = bank;
+            self.compose_base = self.compose.clone();
             "captured the current bank into the composer".clone_into(&mut self.status);
         }
     }
@@ -2245,6 +2252,7 @@ impl App {
         // A scene file may be short or long; normalise to exactly one patch per slot.
         slots.resize(usize::from(USER_SLOTS), TypedPatch::default());
         self.compose = slots;
+        self.compose_base = self.compose.clone();
         name.clone_into(&mut self.compose_name);
         self.status = format!("loaded scene \u{201c}{name}\u{201d} into the composer");
     }
@@ -2321,13 +2329,29 @@ impl App {
     fn compose_save(&mut self) {
         let name = self.compose_name.clone();
         let scene = self.compose.clone();
-        self.save_scene_named(&name, &scene);
+        if self.save_scene_named(&name, &scene) {
+            // The saved state is the new baseline for Revert.
+            self.compose_base = scene;
+        }
     }
 
     /// Overwrite an existing scene file `name` with the current composer.
     fn compose_save_over(&mut self, name: &str) {
         let scene = self.compose.clone();
-        self.save_scene_named(name, &scene);
+        if self.save_scene_named(name, &scene) {
+            self.compose_base = scene;
+        }
+    }
+
+    /// Revert composer slot `idx` to its baseline (last New / Capture / Load / Save).
+    fn compose_revert(&mut self, idx: usize) {
+        let Some(base) = self.compose_base.get(idx).cloned() else {
+            return;
+        };
+        if let Some(slot) = self.compose.get_mut(idx) {
+            *slot = base;
+            self.status = format!("reverted U{:03}", idx + 1);
+        }
     }
 
     // ---- Offline patch editing (the Edit tab on a non-bank patch) ----
@@ -4320,6 +4344,7 @@ impl App {
             Action::ComposeAssignBank(idx, slot) => self.compose_assign_bank(idx, slot),
             Action::ComposeCopy(idx) => self.compose_copy(idx),
             Action::ComposePaste(idx) => self.compose_paste(idx),
+            Action::ComposeRevert(idx) => self.compose_revert(idx),
             Action::ComposeSave => self.compose_save(),
             Action::ComposeSaveOver(name) => self.compose_save_over(&name),
             Action::ComposeApply => self.compose_apply(),
@@ -4769,6 +4794,8 @@ impl App {
                 } else {
                     patch.name.clone()
                 };
+                // Whether this slot differs from its baseline (enables Revert).
+                let changed = self.compose_base.get(idx) != Some(patch);
                 let inner = ui.horizontal(|ui| {
                     let drag_id = egui::Id::new(("scene-slot", slot));
                     ui.dnd_drag_source(drag_id, SceneDrag::Slot(idx), |ui| {
@@ -4798,6 +4825,14 @@ impl App {
                     {
                         actions.push(Action::EditComposerSlot(idx));
                     }
+                    ui.add_enabled_ui(changed, |ui| {
+                        if action_button(ui, "Revert", ActionKind::Caution)
+                            .on_hover_text("restore this slot to its last saved/loaded state")
+                            .clicked()
+                        {
+                            actions.push(Action::ComposeRevert(idx));
+                        }
+                    });
                     if action_button(ui, "Clear", ActionKind::Caution)
                         .on_hover_text("reset this slot to INIT")
                         .clicked()
@@ -5145,6 +5180,16 @@ mod tests {
         app.edit_device_patch(1);
         assert_eq!(app.edit_slot, Some(1));
         assert!(app.tab == Tab::Edit);
+    }
+
+    #[test]
+    fn compose_revert_restores_a_slot_to_its_baseline() {
+        let mut app = test_app();
+        // Baseline starts as all-INIT; dirty a slot.
+        app.compose.get_mut(3).expect("slot").name = "EDITED".to_owned();
+        assert_ne!(app.compose.get(3), app.compose_base.get(3));
+        app.compose_revert(3);
+        assert_eq!(app.compose.get(3), app.compose_base.get(3));
     }
 
     #[test]
