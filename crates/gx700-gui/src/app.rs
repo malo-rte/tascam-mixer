@@ -4414,3 +4414,80 @@ impl Drop for App {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+    use rackctl_gx700::typed::BlockData;
+
+    /// Wrap a payload JSON string in a library envelope for `device`.
+    fn envelope_for(device: &str, payload: &str) -> String {
+        format!(r#"{{"version":1,"device":"{device}","payload":{payload}}}"#)
+    }
+
+    /// Wrap a payload in a well-formed envelope for this device.
+    fn envelope(payload: &str) -> String {
+        envelope_for("gx700", payload)
+    }
+
+    #[test]
+    fn parse_patch_reads_bare_and_enveloped_typed() {
+        let patch = TypedPatch::default();
+        let bare = serde_json::to_string(&patch).unwrap();
+        assert_eq!(parse_patch_text(&bare).unwrap(), patch);
+        assert_eq!(parse_patch_text(&envelope(&bare)).unwrap(), patch);
+    }
+
+    #[test]
+    fn parse_patch_falls_back_to_a_raw_patch() {
+        // The CLI's / older form is a bare RawPatch, converted to typed on load.
+        let raw = TypedPatch::default().to_raw();
+        let text = serde_json::to_string(&raw).unwrap();
+        assert!(parse_patch_text(&text).is_ok());
+    }
+
+    #[test]
+    fn parse_patch_rejects_a_foreign_device() {
+        let bare = serde_json::to_string(&TypedPatch::default()).unwrap();
+        assert!(parse_patch_text(&envelope_for("us16x08", &bare)).is_err());
+    }
+
+    #[test]
+    fn parse_patch_rejects_garbage() {
+        assert!(parse_patch_text("not a patch file").is_err());
+    }
+
+    #[test]
+    fn parse_block_reads_bare_and_enveloped() {
+        let block = BlockData::from_patch(&TypedPatch::default(), Block::Reverb).unwrap();
+        let bare = serde_json::to_string(&block).unwrap();
+        assert_eq!(parse_block_text(&bare).unwrap(), block);
+        assert_eq!(parse_block_text(&envelope(&bare)).unwrap(), block);
+    }
+
+    #[test]
+    fn parse_block_rejects_a_foreign_device() {
+        let block = BlockData::from_patch(&TypedPatch::default(), Block::Reverb).unwrap();
+        let bare = serde_json::to_string(&block).unwrap();
+        assert!(parse_block_text(&envelope_for("us16x08", &bare)).is_err());
+    }
+
+    #[test]
+    fn parse_block_rejects_garbage() {
+        assert!(parse_block_text("not a block file").is_err());
+    }
+
+    #[test]
+    fn parse_scene_reads_bare_and_enveloped() {
+        let bank = vec![TypedPatch::default(), TypedPatch::default()];
+        let bare = serde_json::to_string(&bank).unwrap();
+        assert_eq!(parse_scene_text(&bare).unwrap().len(), 2);
+        assert_eq!(parse_scene_text(&envelope(&bare)).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn parse_scene_rejects_garbage() {
+        assert!(parse_scene_text("not a scene file").is_err());
+    }
+}

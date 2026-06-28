@@ -242,3 +242,84 @@ pub(crate) fn load_item<T: DeserializeOwned>(text: &str) -> Option<Result<T, Str
 pub(crate) fn delete_file(path: &Path) -> Result<(), String> {
     std::fs::remove_file(path).map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct Payload {
+        a: u32,
+        b: String,
+    }
+
+    fn payload() -> Payload {
+        Payload {
+            a: 7,
+            b: "hi".to_owned(),
+        }
+    }
+
+    #[test]
+    fn save_item_writes_an_envelope_that_load_item_round_trips() {
+        let path = std::env::temp_dir().join("rackctl-gx700-save-round-trip.json");
+        save_item(&path, &payload()).expect("save");
+        let text = read_text(&path).expect("read back");
+        let got: Payload = load_item(&text)
+            .expect("is an envelope")
+            .expect("compatible");
+        assert_eq!(got, payload());
+        let _ = delete_file(&path);
+    }
+
+    #[test]
+    fn load_item_accepts_the_current_device_and_version() {
+        let text = format!(
+            r#"{{"version":{LIB_VERSION},"device":"{DEVICE_ID}","payload":{{"a":9,"b":"ok"}}}}"#
+        );
+        let got: Payload = load_item(&text)
+            .expect("is an envelope")
+            .expect("compatible");
+        assert_eq!(
+            got,
+            Payload {
+                a: 9,
+                b: "ok".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn load_item_rejects_a_different_device() {
+        let text = r#"{"version":1,"device":"us16x08","payload":{"a":1,"b":"x"}}"#;
+        let res: Option<Result<Payload, String>> = load_item(text);
+        let err = res.expect("is an envelope").expect_err("wrong device");
+        assert!(
+            err.contains("us16x08"),
+            "reason should name the device: {err}"
+        );
+    }
+
+    #[test]
+    fn load_item_rejects_a_newer_version() {
+        let text = format!(
+            r#"{{"version":{},"device":"{DEVICE_ID}","payload":{{"a":1,"b":"x"}}}}"#,
+            LIB_VERSION + 1
+        );
+        let res: Option<Result<Payload, String>> = load_item(&text);
+        let err = res.expect("is an envelope").expect_err("newer version");
+        assert!(
+            err.contains("newer"),
+            "reason should mention the version: {err}"
+        );
+    }
+
+    #[test]
+    fn load_item_returns_none_for_a_bare_payload() {
+        // A file that is not one of our envelopes; the caller falls back to a bare parse.
+        let text = r#"{"a":1,"b":"x"}"#;
+        let res: Option<Result<Payload, String>> = load_item(text);
+        assert!(res.is_none());
+    }
+}
