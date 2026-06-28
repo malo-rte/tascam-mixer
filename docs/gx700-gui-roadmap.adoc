@@ -6,6 +6,10 @@
 Roadmap for the *graphical patch editor* for the BOSS GX-700 (Rackctl Stage 4),
 `crates/gx700-gui` (binary `rackctl-gx700-gui`).
 
+TIP: For the suite-wide model this editor instantiates -- the scene / patch / block
+hierarchy, the per-level libraries, clipboards and staging -- see
+`architecture.adoc`.
+
 *Status:* the **patch librarian + level balancer** (the headline feature below) is
 **implemented** -- a one-screen list of all 100 user patches with one-click
 audition, an *editable patch name*, and inline output-level balancing. Each row has

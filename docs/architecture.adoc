@@ -1,0 +1,284 @@
+= Rackctl — shared architecture
+:toc: left
+:icons: font
+:source-highlighter: rouge
+
+The architecture shared by every product in the suite. Rackctl controls several
+hardware devices (an effects processor, a mixer, more to come), each with a command-
+line tool and a graphical editor. They all rest on one *model* — a device's editable
+state as a four-level hierarchy where *every level has its own on-disk library* — and
+each device plugs into that model through a single *adapter*.
+
+This document is device-independent. The device-specific behaviour lives behind the
+adapter (see <<The device>> and <<Device interface>>); concrete devices map onto the
+model in <<Device mapping>>, and the code that realises it is laid out in
+<<Code structure>>.
+
+NOTE: This is the target architecture. The model, libraries, clipboards and staging
+are fully realised for the BOSS GX-700; the mixer (US-16x08) shares the UI primitives
+and the same shape. New devices converge on the contracts described here.
+
+== The model
+
+A device's editable state is a hierarchy. You build an item at one level by composing
+items from the level below — optionally pulled from that lower level's library — and
+any item can be saved to, or loaded from, its own library on the computer, independent
+of the hardware.
+
+.The four-level model
+[plantuml, fig-model, svg]
+----
+@startuml
+skinparam monochrome true
+skinparam shadowing false
+skinparam linetype ortho
+rectangle "Scene library" as SL
+rectangle "Scene\n(whole-device snapshot)" as SC
+rectangle "Patch\n(one slot)" as PA
+rectangle "patch-global\nparameters" as PG
+rectangle "Block\n(one sub-function)" as BL
+rectangle "parameters" as PR
+SL "1" *-- "many" SC
+SC "1" *-- "many" PA
+PA *-- PG
+PA "1" *-- "many" BL
+BL *-- PR
+@enduml
+----
+
+----
+Scene library
+└─ Scene                      a complete snapshot of the device's editable state
+   └─ Patch        (× many)   one recallable unit of state
+      ├─ patch-global parameters
+      └─ Block      (× many)  the parameters of one sub-function
+         └─ parameters
+----
+
+The names _scene / patch / block_ are the suite's vocabulary; each device maps its own
+terms onto them (see <<Device mapping>>).
+
+== Library (the common pattern)
+
+A _library_ is a named, on-disk collection of saved items of one level. Every library
+— scene, patch, and per-block-type — supports the same operations:
+
+* *Insert / Save as new* — store the current item under a new name.
+* *Load* — bring a saved item into the editor, or onto its target.
+* *Save / Update* — overwrite a saved item with the current one.
+* *Copy / Paste* — copy an item to a clipboard, then paste it (onto a target, or as a
+  new library item).
+* *Delete* — remove a saved item (confirmed).
+
+Libraries are files on the computer, grouped per device and per level, e.g.
+`<config>/rackctl/<device>/{scenes,patches,blocks/<block-type>}/`. They are pure
+computer state — nothing here touches the hardware until an explicit _Write_ (see
+<<The device>>). Items are stored in a self-describing, human-readable form (see
+<<File format & versioning>>).
+
+== Scene library
+
+A library of *scenes* — many complete device setups kept on the computer, so the
+hardware can be switched between entirely different states (e.g. one scene per gig,
+room, or project).
+
+== Scene
+
+A complete snapshot of the device's editable state: the full set of its recallable
+*patches*, one per slot. A scene maps 1:1 to what the device stores.
+
+* *Compose* — arrange and reorder patches across the slots (drag, or drop in patches
+  from the patch library / the current device state).
+* *Capture* — read the device's current state into a scene and save it.
+* *Apply to device* — load a whole scene to the hardware, *replacing its entire state*.
+  A batch commit, verified per slot (see <<Compatibility & failure semantics>>).
+
+== Patch
+
+One recallable unit of device state, occupying one slot. A patch contains:
+
+* *Patch-global parameters* — the unit's own settings (its name/label, an output or
+  master level, internal routing/order, control assignments, …).
+* *A fixed set of blocks* — one per available sub-function. The set is fixed per
+  device: blocks are configured and enabled/bypassed, never added or removed.
+
+A patch has its own *patch library*. On a slot you can also recall it live, and
+Copy / Paste / Clear / Revert it. Edits are staged until written.
+
+== Block
+
+A named group of parameters for one sub-function of a patch (an effect, a channel
+section, a stage, …). A device defines its block types and each block's parameters.
+
+* *Each block type has its own preset library* — only same-type presets are
+  interchangeable.
+* A block can be enabled/bypassed, edited, Copy/Paste'd between patches, Reverted to
+  its stored value, and saved/loaded as a preset.
+* A block may itself select among *sub-modes*, each exposing a different set of
+  parameters; the editor shows only the active mode's settings.
+
+== The device
+
+Every device is described by three concerns the model drives:
+
+* *Store* — the device's persistent slots of patches (its _bank_). May also expose
+  read-only *factory* content that can be auditioned and copied but not overwritten.
+* *Live / active* — the currently-active state the hardware is producing (a current
+  sound, a live mixer, …). The app can write a patch here to audition it without
+  disturbing the store.
+* *Commit* — how an edit is persisted to the store. This may be immediate, or may
+  require putting the device into a specific mode first. The app keeps the device in
+  whatever state makes reading, auditioning and committing work without per-edit mode
+  switching, where possible.
+
+*Staging.* Edits live on the computer (a pending copy of each patch) and are mirrored
+to the _live_ area for instant feedback, but only persisted to the _store_ on an
+explicit _Write_. So nothing is lost, and nothing is written by accident.
+
+== Device interface
+
+A device is added to the suite by providing one *adapter* — the seam everything else
+is written against. It _declares_ the device's shape and _exposes_ a small set of
+operations; the scenes, patches, blocks, libraries, clipboards and staging above are
+shared and unchanged.
+
+The adapter declares:
+
+* *Identity* — a stable model id (e.g. `gx700`), used to scope libraries and check
+  compatibility.
+* *Layout* — the number of patch slots (bank size), any read-only factory slots, the
+  fixed list of block types, and the patch-global parameters.
+* *Parameter catalog* — every parameter: its block, range, encoding, default and
+  display unit. This drives validation, display, and the generic editors.
+
+The adapter exposes:
+
+* *read patch / write patch* — the store (writing a slot is the commit).
+* *read live / write live* — the active area (write = audition). On a device with no
+  separate live area these collapse onto the store / an immediate write.
+* *commit readiness* — how to enter the commit state, if any, and confirm the device is
+  ready, so the app can guide the user and never silently no-op a write.
+* *factory access* — read-only reads of factory slots, where the device has them.
+
+A patch is exchanged as a device-neutral, *byte-exact* value (the typed model), so the
+same patch round-trips through files, the live area and the store without loss.
+
+== File format & versioning
+
+Library items are JSON files — one item per file, the filename being the sanitised
+item name, under the per-device, per-level directories.
+
+Each file carries, alongside its payload:
+
+* a *format version* — bumped whenever the on-disk shape changes;
+* the *device-model id* it was saved from;
+* (for a block preset) its *block type*.
+
+Rules:
+
+* The payload is the *typed* form — grouped by block, human-readable, hand-editable. It
+  must re-encode to the exact device bytes (*byte-exact round-trip*), so saving and
+  reloading never alters a patch.
+* On load, an older format version is *migrated forward*; an unknown (newer) version is
+  *refused with a clear message* rather than mis-read. Unknown fields are ignored where
+  safe; missing fields take catalog defaults.
+* Files are independent and self-describing, so they can be copied, shared, kept in
+  version control, or edited by hand.
+
+== Compatibility & failure semantics
+
+*Compatibility.* Libraries are scoped per device model. An item records its model id
+(and, for a block preset, its block type); loading checks they match the target. A
+mismatch is *refused, not silently coerced* — patches and presets are not portable
+between different device models unless an explicit conversion is provided. Block
+presets are interchangeable only within the same `(model, block-type)`.
+
+*Source of truth & sync.* On connect the device is authoritative: the app reads the
+bank into a baseline, and the computer's *staged* edits are the working copy until
+written. The app does not auto-detect changes made on the device's own panel; a
+*Refresh* re-reads the device, warning if it would discard unsaved staged edits.
+Writing commits the staged edits and makes them the new baseline.
+
+*Failure semantics.*
+
+* Every store write is *verified by read-back*; a write that didn't take (e.g. the
+  device isn't in its commit state) is reported and the edit stays staged for retry.
+* Batch / destructive operations (apply a whole scene) attempt *every* item, continue
+  past failures, and report exactly which failed — successful writes are kept (*no
+  automatic rollback*). Re-applying is idempotent, so a partial failure is fixed by
+  running it again.
+* A read that times out skips just that item, not the whole operation.
+
+*Model assumptions.* The model assumes each patch has a *fixed set of blocks*
+(configured and enabled/bypassed, never added or removed) and a *fixed slot count*. A
+device that violates either (e.g. variable-length insert chains) needs an explicit
+extension to the model, not just a new adapter.
+
+== Composition & clipboards
+
+The levels compose downward, and clipboards let parts move between items:
+
+* Build a *scene* from patches — the current device state, or the patch library.
+* Build a *patch* from blocks — an _additive_ block clipboard holds one copied block
+  per type, so blocks taken from several patches can be combined into a new one.
+* Any level's library can seed the next level up: block presets → a patch, patches → a
+  scene.
+
+== Device mapping
+
+Each device maps the abstract model onto its own terms and mechanics.
+
+[cols="1,2,2",options="header"]
+|===
+| Concept | Effects processor (GX-700) | Mixer (US-16x08)
+| Scene         | the whole writable patch bank   | a whole-mixer snapshot
+| Patch         | one user patch (a slot)         | one channel strip
+| Block         | one effect (Reverb, Delay, …)   | a strip section (EQ, comp)
+| Patch-global  | name, output level, chain order | channel name, fader, mute
+| Factory       | read-only preset patches        | -- (none)
+| Live / active | the temporary buffer            | the live mixer state
+| Commit        | a dedicated bulk-write mode     | immediate (writes on change)
+|===
+
+A new device type is supported by filling in this row: its slot/block counts, its
+parameter catalog, and the behaviour of its store / live / commit concerns. The
+scene/patch/block model, the libraries, the clipboards and the staging flow are shared
+unchanged.
+
+== Code structure
+
+The workspace is layered so the model is independent of any one device:
+
+[cols="1,3",options="header"]
+|===
+| Crate | Role
+| `rackctl-ui` (`crates/ui-common`) | Cross-product UI primitives: the button colour
+  scheme (consequence-coloured actions) and the shared DSP math used by editors
+  (EQ/biquad response, compressor transfer).
+| `rackctl-<device>` (`crates/<device>`) | The *device adapter*: the parameter catalog,
+  the patch model (a byte-exact _raw_ form and a _typed_ form grouped by block), the
+  transport/codec, and the device facade (read/write patch, read/write live, factory,
+  commit). This is what a new device implements.
+| `rackctl-<device>-cli` | The command-line tool over the device library.
+| `rackctl-<device>-gui` | The graphical editor over the device library: the tabbed
+  patch/edit/presets/library UI, the per-block editors, the on-disk libraries,
+  clipboards and staging.
+|===
+
+The device-neutral _model_ — scene/patch/block, the library operations, the clipboards
+and the staging flow — is what this document specifies; today each GUI implements it
+against its own device library, and the shared pieces (UI primitives, DSP math) live in
+`rackctl-ui`. Extracting more of the model into a shared crate, as a second and third
+device land, is the direction of travel.
+
+The GUIs follow an _action-collected-then-applied_ pattern: rendering pushes
+`Action` values into a list (never mutating device or model state mid-frame), which are
+applied after the frame. This keeps the borrow rules simple and the device I/O off the
+render path.
+
+== See also
+
+* `gx700-gui-roadmap.adoc` — the GX-700 editor's feature roadmap and status.
+* `gx700-sysex-protocol.adoc`, `gx700-patch-data-format.adoc` — the GX-700 device
+  details behind its adapter.
+* `user-manual.adoc` — the US-16x08 mixer model and signal flow.
