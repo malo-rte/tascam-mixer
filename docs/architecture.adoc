@@ -163,6 +163,39 @@ The adapter exposes:
 A patch is exchanged as a device-neutral, *byte-exact* value (the typed model), so the
 same patch round-trips through files, the live area and the store without loss.
 
+== Representations
+
+Each device's patch has two representations, and the boundary between them is a firm
+rule for *every product*:
+
+* *Typed model* — a structured value: the patch as named per-block sub-structs plus
+  patch-global fields, every parameter typed and range-checked. This is the _working_
+  representation; the editors, clipboards, libraries and the CLI all operate on it.
+* *Raw form* — the exact device bytes (the on-the-wire encoding). Byte-exact and
+  opaque: it carries _every_ byte, including any the parameter catalog does not model.
+
+The rules:
+
+. *Work in the typed model everywhere.* All application and UI logic — editing,
+  staging, copy/paste, reorder, library save/load — uses the typed model. Raw bytes do
+  not leak into application code.
+. *Convert only at the device boundary.* The raw form appears in exactly two places:
+  decoding a patch just read from the device (raw → typed) and encoding one about to be
+  written (typed → raw). The transport speaks raw; nothing else does. (Accepting an
+  older on-disk _raw_ form on load is the only other place a raw value is taken, and it
+  is converted to typed immediately.)
+. *The conversion is byte-exact.* `typed → raw → typed` and `raw → typed → raw` both
+  reproduce the input exactly, verified against real device data. A patch therefore
+  survives any number of round-trips through files, the editor and the device without
+  drift — and the typed model is a safe canonical form even for bytes it does not name.
+. *Persist the typed model as JSON.* On-disk libraries store the _typed_ form as
+  human-readable, hand-editable, versioned JSON (see <<File format & versioning>>),
+  never raw bytes.
+
+This keeps application code type-safe and device-neutral, keeps files readable and
+durable, and isolates each device's encoding quirks to one thin codec behind the
+adapter.
+
 == File format & versioning
 
 Library items are JSON files — one item per file, the filename being the sanitised
