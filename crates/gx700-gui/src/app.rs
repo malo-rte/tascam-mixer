@@ -4094,16 +4094,12 @@ impl App {
                             actions.push(Action::SetName(row.slot, name));
                         }
 
-                        // Column 3: output-level slider. Give it a fixed allocation
-                        // so it does not expand to fill the row and starve the name
-                        // field (an egui Slider grows to its available width).
+                        // Column 3: output level as a compact drag-value (a slider
+                        // here grows to fill the row and bloats the list).
                         let mut level = i32::from(row.pending_level.unwrap_or(row.stored_level));
-                        let slider = egui::Slider::new(&mut level, 0..=100).suffix("%");
-                        let size = [220.0, ui.spacing().interact_size.y];
+                        let drag = egui::DragValue::new(&mut level).range(0..=100).suffix("%");
                         let changed = ui
-                            .add_enabled_ui(self.editable(), |ui| {
-                                ui.add_sized(size, slider).changed()
-                            })
+                            .add_enabled_ui(self.editable(), |ui| ui.add(drag).changed())
                             .inner;
                         if changed {
                             let level = u8::try_from(level.clamp(0, 100)).unwrap_or(0);
