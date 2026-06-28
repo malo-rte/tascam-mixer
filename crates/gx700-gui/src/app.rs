@@ -94,16 +94,16 @@ enum OfflineSource {
     Library(String),
 }
 
-/// Drag-and-drop payload: a patch-library name being dragged from the Scene tab's
-/// library panel onto a slot. A newtype so it can't be confused with the slot-index
-/// payload below (egui resolves drops by payload type).
+/// Drag-and-drop payload in the Scene tab: either a patch dragged from the library
+/// palette (assign), or a composer slot dragged onto another slot (re-order). One
+/// payload type so a single `dnd_drop_zone` per row handles both.
 #[derive(Clone)]
-struct LibPatchDrag(String);
-
-/// Drag-and-drop payload: a composer slot index being dragged onto another slot to
-/// re-order the scene.
-#[derive(Clone, Copy)]
-struct SceneSlotDrag(usize);
+enum SceneDrag {
+    /// A patch-library name dragged from the palette onto a slot.
+    Lib(String),
+    /// A composer slot index dragged onto another slot to re-order.
+    Slot(usize),
+}
 
 /// A UI interaction to apply after the render pass (avoids borrowing `self`
 /// mutably while iterating the rows).
@@ -140,6 +140,8 @@ enum Action {
     ComposeAssign(usize, String),
     ComposeClear(usize),
     ComposeReorder(usize, usize),
+    ComposeCopy(usize),
+    ComposePaste(usize),
     ComposeSave,
     ComposeApply,
     EditComposerSlot(usize),
@@ -2329,6 +2331,26 @@ impl App {
         move_within(&mut self.compose, from, to);
     }
 
+    /// Copy composer slot `idx`'s patch to the shared patch clipboard.
+    fn compose_copy(&mut self, idx: usize) {
+        if let Some(patch) = self.compose.get(idx).cloned() {
+            self.clipboard = Some((0, patch));
+            self.status = format!("copied U{:03}", idx + 1);
+        }
+    }
+
+    /// Paste the clipboard patch into composer slot `idx`.
+    fn compose_paste(&mut self, idx: usize) {
+        let Some((_, patch)) = self.clipboard.clone() else {
+            "clipboard is empty — Copy a patch first".clone_into(&mut self.status);
+            return;
+        };
+        if let Some(slot) = self.compose.get_mut(idx) {
+            *slot = patch;
+            self.status = format!("pasted into U{:03}", idx + 1);
+        }
+    }
+
     /// Save the composed scene to the scene library under its current name.
     fn compose_save(&mut self) {
         let name = self.compose_name.clone();
@@ -4327,6 +4349,8 @@ impl App {
             Action::ComposeAssign(idx, name) => self.compose_assign(idx, &name),
             Action::ComposeClear(idx) => self.compose_clear(idx),
             Action::ComposeReorder(from, to) => self.compose_reorder(from, to),
+            Action::ComposeCopy(idx) => self.compose_copy(idx),
+            Action::ComposePaste(idx) => self.compose_paste(idx),
             Action::ComposeSave => self.compose_save(),
             Action::ComposeApply => self.compose_apply(),
             Action::EditComposerSlot(idx) => self.edit_composer_slot(idx),
@@ -4644,8 +4668,8 @@ impl App {
         egui::ScrollArea::vertical().show(ui, |ui| {
             for name in &names {
                 let id = egui::Id::new(("scene-palette", name));
-                ui.dnd_drag_source(id, LibPatchDrag(name.clone()), |ui| {
-                    ui.add(egui::Label::new(name).truncate());
+                ui.dnd_drag_source(id, SceneDrag::Lib(name.clone()), |ui| {
+                    ui.add(egui::Label::new(name).truncate().sense(egui::Sense::drag()));
                 });
             }
         });
@@ -4713,6 +4737,20 @@ impl App {
                 });
         });
         ui.separator();
+        ui.label(
+            egui::RichText::new(
+                "Drag a patch from the left onto a slot, drag the ↕ handle to re-order, \
+                 or use Copy / Paste.",
+            )
+            .weak(),
+        );
+        self.show_scene_rows(ui, actions);
+    }
+
+    /// The composer's 100-slot grid: each slot a drop zone (assign / re-order) with
+    /// Copy / Paste / Edit / Clear.
+    fn show_scene_rows(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let can_paste = self.clipboard.is_some();
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (idx, patch) in self.compose.iter().enumerate() {
                 let slot = idx + 1;
@@ -4721,15 +4759,29 @@ impl App {
                 } else {
                     patch.name.clone()
                 };
-                let row = ui.horizontal(|ui| {
+                let inner = ui.horizontal(|ui| {
                     let drag_id = egui::Id::new(("scene-slot", slot));
-                    ui.dnd_drag_source(drag_id, SceneSlotDrag(idx), |ui| {
+                    ui.dnd_drag_source(drag_id, SceneDrag::Slot(idx), |ui| {
                         ui.label(egui::RichText::new("↕").weak());
                     })
                     .response
                     .on_hover_text("drag onto another slot to re-order");
                     ui.label(egui::RichText::new(format!("U{slot:03}")).monospace());
-                    ui.add_sized([240.0, 18.0], egui::Label::new(label).truncate());
+                    ui.add_sized([220.0, 18.0], egui::Label::new(label).truncate());
+                    if action_button(ui, "Copy", ActionKind::Read)
+                        .on_hover_text("copy this slot's patch")
+                        .clicked()
+                    {
+                        actions.push(Action::ComposeCopy(idx));
+                    }
+                    ui.add_enabled_ui(can_paste, |ui| {
+                        if action_button(ui, "Paste", ActionKind::Neutral)
+                            .on_hover_text("paste the copied patch into this slot")
+                            .clicked()
+                        {
+                            actions.push(Action::ComposePaste(idx));
+                        }
+                    });
                     if action_button(ui, "Edit", ActionKind::Read)
                         .on_hover_text("edit this slot's patch offline (no device)")
                         .clicked()
@@ -4743,13 +4795,23 @@ impl App {
                         actions.push(Action::ComposeClear(idx));
                     }
                 });
-                // The whole row is a drop target: a library patch assigns, a dragged
-                // slot re-orders. egui picks the branch by payload type.
-                let resp = row.response;
-                if let Some(p) = resp.dnd_release_payload::<LibPatchDrag>() {
-                    actions.push(Action::ComposeAssign(idx, p.0.clone()));
-                } else if let Some(p) = resp.dnd_release_payload::<SceneSlotDrag>() {
-                    actions.push(Action::ComposeReorder(p.0, idx));
+                // Re-interact the whole row rect as a hover-sensing drop target, so a
+                // released drag registers anywhere on the row (including over its
+                // buttons) — the layout response alone misses drops there.
+                let drop = ui.interact(
+                    inner.response.rect,
+                    egui::Id::new(("scene-drop", idx)),
+                    egui::Sense::hover(),
+                );
+                if let Some(p) = drop.dnd_release_payload::<SceneDrag>() {
+                    match &*p {
+                        SceneDrag::Lib(name) => {
+                            actions.push(Action::ComposeAssign(idx, name.clone()));
+                        }
+                        SceneDrag::Slot(from) => {
+                            actions.push(Action::ComposeReorder(*from, idx));
+                        }
+                    }
                 }
             }
         });
