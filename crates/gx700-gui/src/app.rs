@@ -2040,48 +2040,40 @@ impl App {
         };
         let typed = TypedPatch::from_raw(&eff);
         let block = self.selected_block;
-        ui.heading(block.label());
-        // Per-block Copy / Paste / Revert. The clipboard is additive (one slot per
-        // block type), so you can copy blocks from several patches and paste them
-        // here to combine them into a new patch.
+        // Title row: the block name, with right-aligned Copy / Paste / Revert (the
+        // additive block clipboard — copy blocks from several patches and paste them
+        // here to combine them into a new patch).
         ui.horizontal(|ui| {
-            let edit = self.editable();
-            ui.add_enabled_ui(edit, |ui| {
-                if action_button(ui, "Copy", ActionKind::Read)
-                    .on_hover_text("copy this block to the clipboard")
-                    .clicked()
-                {
-                    actions.push(Action::CopyBlock(block));
-                }
-            });
-            ui.add_enabled_ui(edit && self.has_block_clip(block), |ui| {
-                let hover = if self.has_block_clip(block) {
-                    format!("paste the copied {} block here", block.label())
-                } else {
-                    format!("copy a {} block first", block.label())
-                };
-                if action_button(ui, "Paste", ActionKind::Neutral)
-                    .on_hover_text(hover)
-                    .clicked()
-                {
-                    actions.push(Action::PasteBlock(slot, block));
-                }
-            });
-            ui.add_enabled_ui(edit && self.block_changed(slot, block), |ui| {
-                if action_button(ui, "Revert", ActionKind::Caution)
-                    .on_hover_text("discard this block's edits, back to the stored values")
-                    .clicked()
-                {
-                    actions.push(Action::RevertBlock(slot, block));
-                }
+            ui.heading(block.label());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let edit = self.editable();
+                // Added right-to-left, so they read Copy · Paste · Revert.
+                ui.add_enabled_ui(edit && self.block_changed(slot, block), |ui| {
+                    if action_button(ui, "Revert", ActionKind::Caution)
+                        .on_hover_text("discard this block's edits, back to the stored values")
+                        .clicked()
+                    {
+                        actions.push(Action::RevertBlock(slot, block));
+                    }
+                });
+                ui.add_enabled_ui(edit && self.has_block_clip(block), |ui| {
+                    if action_button(ui, "Paste", ActionKind::Neutral)
+                        .on_hover_text(format!("paste the copied {} block here", block.label()))
+                        .clicked()
+                    {
+                        actions.push(Action::PasteBlock(slot, block));
+                    }
+                });
+                ui.add_enabled_ui(edit, |ui| {
+                    if action_button(ui, "Copy", ActionKind::Read)
+                        .on_hover_text("copy this block (combine blocks from other patches)")
+                        .clicked()
+                    {
+                        actions.push(Action::CopyBlock(block));
+                    }
+                });
             });
         });
-        ui.label(
-            egui::RichText::new(
-                "Copy blocks from different patches, then Paste to combine them here.",
-            )
-            .weak(),
-        );
         ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
             // The Equalizer gets a custom band-table layout (curve + Gain/Freq/Q
