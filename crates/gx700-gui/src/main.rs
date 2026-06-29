@@ -64,9 +64,12 @@ fn install_fonts(ctx: &eframe::egui::Context) {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let (mock, port, offline) = (cli.mock, cli.port, cli.offline);
+    let (mock, offline) = (cli.mock, cli.offline);
+    // `--port` overrides the saved port; otherwise reuse the last-used one.
+    let port = cli.port.or_else(|| config::load().port);
     // Lets the app (re)open the device on demand (Retry / Connect button).
-    let reopen: app::Reopen = Box::new(move || device::open(mock, port.as_deref()));
+    let reopen_port = port.clone();
+    let reopen: app::Reopen = Box::new(move || device::open(mock, reopen_port.as_deref()));
     // Open now if we can; otherwise start disconnected with a never-read
     // placeholder and let the user Retry (e.g. after passing the right port).
     // `--offline` skips the connect attempt entirely and starts in offline mode.
@@ -97,7 +100,7 @@ fn main() -> Result<()> {
         options,
         Box::new(move |cc| {
             install_fonts(&cc.egui_ctx);
-            let app = app::App::new(dev, connected, reopen, offline);
+            let app = app::App::new(dev, connected, reopen, offline, port);
             cc.egui_ctx.set_zoom_factor(app.zoom());
             cc.egui_ctx
                 .style_mut(|style| style.spacing.slider_width = 160.0);

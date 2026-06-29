@@ -20,6 +20,14 @@ pub(crate) struct GuiConfig {
     /// the default size.
     #[serde(default)]
     pub window: Option<[f32; 2]>,
+    /// Stable key of the last-active tab (see `Tab::as_key`), restored on startup;
+    /// `None` falls back to the default tab.
+    #[serde(default)]
+    pub tab: Option<String>,
+    /// Last ALSA rawmidi port used (`hw:CARD,DEV`), reused on next launch when no
+    /// `--port` is given. `None` until a port has been used.
+    #[serde(default)]
+    pub port: Option<String>,
 }
 
 impl Default for GuiConfig {
@@ -27,6 +35,8 @@ impl Default for GuiConfig {
         Self {
             zoom: DEFAULT_ZOOM,
             window: None,
+            tab: None,
+            port: None,
         }
     }
 }

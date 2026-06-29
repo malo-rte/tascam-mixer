@@ -199,6 +199,32 @@ enum Tab {
     Scene,
 }
 
+impl Tab {
+    /// Stable key for persistence (see `config::GuiConfig::tab`). `Edit` returns
+    /// `None` — it's a transient screen entered via a per-patch Edit button, not a
+    /// destination to restore to.
+    fn as_key(self) -> Option<&'static str> {
+        match self {
+            Tab::Patches => Some("patches"),
+            Tab::Presets => Some("presets"),
+            Tab::Library => Some("library"),
+            Tab::Scene => Some("scene"),
+            Tab::Edit => None,
+        }
+    }
+
+    /// The tab for a persisted key, or `None` if unknown.
+    fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "patches" => Some(Tab::Patches),
+            "presets" => Some(Tab::Presets),
+            "library" => Some(Tab::Library),
+            "scene" => Some(Tab::Scene),
+            _ => None,
+        }
+    }
+}
+
 /// Parse a saved patch file: a typed `Patch` (the readable, grouped-by-block form
 /// the GUI writes) — checked for device + version — or, as a fallback, a bare typed
 /// `Patch` or a raw `RawPatch` (the CLI's / older form). `Err` with a reason (e.g.
@@ -1596,14 +1622,34 @@ pub(crate) struct App {
     /// Launched with `--offline`: started without connecting, for scene/library
     /// editing. The top bar offers Connect instead of Retry.
     offline: bool,
+    /// The rawmidi port in use (resolved from `--port` or the saved config),
+    /// persisted so the next launch reuses it.
+    port: Option<String>,
     status: String,
     zoom: f32,
     window: Option<[f32; 2]>,
 }
 
 impl App {
-    pub(crate) fn new(device: Device, connected: bool, reopen: Reopen, offline: bool) -> Self {
+    pub(crate) fn new(
+        device: Device,
+        connected: bool,
+        reopen: Reopen,
+        offline: bool,
+        port: Option<String>,
+    ) -> Self {
         let cfg = config::load();
+        // Restore the last-active tab. Offline forces the Scene tab unless the saved
+        // tab also works offline (Scene/Library); the device tabs are useless then.
+        let saved_tab = cfg.tab.as_deref().and_then(Tab::from_key);
+        let tab = if offline {
+            match saved_tab {
+                Some(t @ (Tab::Scene | Tab::Library)) => t,
+                _ => Tab::Scene,
+            }
+        } else {
+            saved_tab.unwrap_or(Tab::Patches)
+        };
         let mut rows: Vec<PatchRow> = (1..=USER_SLOTS).map(PatchRow::empty).collect();
         let mut presets: Vec<PatchRow> = (PRESET_START..=PRESET_END).map(PatchRow::empty).collect();
         // Show the cached bank instantly, before the (slow) re-read fills it in.
@@ -1655,8 +1701,7 @@ impl App {
             edit_scratch: TypedPatch::default(),
             edit_base: TypedPatch::default(),
             edit_source: None,
-            // Offline starts on the Scene tab — the screen that works without a unit.
-            tab: if offline { Tab::Scene } else { Tab::Patches },
+            tab,
             selected_block: Block::Compressor,
             bulk_prompt: false,
             writer: None,
@@ -1666,6 +1711,7 @@ impl App {
             bulk_ok: None,
             last_probe: 0.0,
             offline,
+            port,
             status: if connected {
                 "checking BULK LOAD mode…".to_owned()
             } else if offline {
@@ -5070,6 +5116,8 @@ impl Drop for App {
         config::save(&GuiConfig {
             zoom: self.zoom,
             window: self.window,
+            tab: self.tab.as_key().map(str::to_owned),
+            port: self.port.clone(),
         });
     }
 }
@@ -5181,6 +5229,7 @@ mod tests {
             false,
             Box::new(|| crate::device::open(true, None)),
             false,
+            None,
         )
     }
 
@@ -5228,10 +5277,23 @@ mod tests {
             true,
             Box::new(|| crate::device::open(true, None)),
             false,
+            None,
         );
         app.edit_device_patch(1);
         assert_eq!(app.edit_slot, Some(1));
         assert!(app.tab == Tab::Edit);
+    }
+
+    #[test]
+    fn tab_keys_round_trip_and_edit_is_transient() {
+        for t in [Tab::Patches, Tab::Presets, Tab::Library, Tab::Scene] {
+            let key = t.as_key().expect("main tab has a key");
+            assert!(Tab::from_key(key) == Some(t));
+        }
+        // Edit isn't a persistable destination.
+        assert!(Tab::Edit.as_key().is_none());
+        assert!(Tab::from_key("edit").is_none());
+        assert!(Tab::from_key("bogus").is_none());
     }
 
     #[test]
@@ -5241,6 +5303,7 @@ mod tests {
             false,
             Box::new(|| crate::device::open(true, None)),
             true,
+            None,
         );
         assert!(app.offline);
         assert!(!app.connected);
@@ -5266,6 +5329,7 @@ mod tests {
             true,
             Box::new(|| crate::device::open(true, None)),
             false,
+            None,
         );
         app.ensure_loaded(1); // deep-read bank slot 1 from the mock
         let bank = app.effective_patch(1).expect("loaded");
