@@ -289,7 +289,17 @@ fn lib_list(
         return;
     }
     for name in names {
+        // Canonical action order (shared by every list): Edit, Load, Save, Copy,
+        // Delete. (Edit is offline-capable, so it stays enabled regardless of
+        // `can_use`; Delete only needs a directory.)
         ui.horizontal(|ui| {
+            if let Some(make_edit) = make_edit
+                && action_button(ui, icon::EDIT, ActionKind::Read)
+                    .on_hover_text("edit this patch offline (no device)")
+                    .clicked()
+            {
+                actions.push(make_edit(name.clone()));
+            }
             ui.add_enabled_ui(can_use, |ui| {
                 if action_button(ui, icon::LOAD, ActionKind::Read)
                     .on_hover_text(load_hover)
@@ -310,14 +320,6 @@ fn lib_list(
                     actions.push(make_copy(name.clone()));
                 }
             });
-            // Edit is offline (no device), so it stays enabled regardless of `can_use`.
-            if let Some(make_edit) = make_edit
-                && action_button(ui, icon::EDIT, ActionKind::Read)
-                    .on_hover_text("edit this patch offline (no device)")
-                    .clicked()
-            {
-                actions.push(make_edit(name.clone()));
-            }
             if action_button(ui, icon::DELETE, ActionKind::Destructive)
                 .on_hover_text("delete this from the library")
                 .clicked()
@@ -4873,7 +4875,7 @@ impl App {
     }
 
     /// The composer's 100-slot grid: each slot a drop zone (assign / re-order) with
-    /// Copy / Paste / Edit / Clear.
+    /// Edit / Revert / Copy / Paste / Clear.
     fn show_scene_rows(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         let can_paste = self.clipboard.is_some();
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -4887,21 +4889,8 @@ impl App {
                 // Whether this slot differs from its baseline (enables Revert).
                 let changed = self.compose_base.get(idx) != Some(patch);
                 let inner = ui.horizontal(|ui| {
-                    // Action buttons first (left-aligned, like every other list).
-                    if action_button(ui, icon::COPY, ActionKind::Read)
-                        .on_hover_text("copy this slot's patch")
-                        .clicked()
-                    {
-                        actions.push(Action::ComposeCopy(idx));
-                    }
-                    ui.add_enabled_ui(can_paste, |ui| {
-                        if action_button(ui, icon::PASTE, ActionKind::Neutral)
-                            .on_hover_text("paste the copied patch into this slot")
-                            .clicked()
-                        {
-                            actions.push(Action::ComposePaste(idx));
-                        }
-                    });
+                    // Canonical action order (shared by every list): Edit, Revert,
+                    // Copy, Paste, Clear.
                     if action_button(ui, icon::EDIT, ActionKind::Read)
                         .on_hover_text("edit this slot's patch offline (no device)")
                         .clicked()
@@ -4914,6 +4903,20 @@ impl App {
                             .clicked()
                         {
                             actions.push(Action::ComposeRevert(idx));
+                        }
+                    });
+                    if action_button(ui, icon::COPY, ActionKind::Read)
+                        .on_hover_text("copy this slot's patch")
+                        .clicked()
+                    {
+                        actions.push(Action::ComposeCopy(idx));
+                    }
+                    ui.add_enabled_ui(can_paste, |ui| {
+                        if action_button(ui, icon::PASTE, ActionKind::Neutral)
+                            .on_hover_text("paste the copied patch into this slot")
+                            .clicked()
+                        {
+                            actions.push(Action::ComposePaste(idx));
                         }
                     });
                     if action_button(ui, icon::CLEAR, ActionKind::Destructive)
