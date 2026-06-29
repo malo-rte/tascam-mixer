@@ -4026,7 +4026,10 @@ impl App {
                 .show(ui, |ui| {
                     for row in &self.rows {
                         let playing = self.now_playing == Some(row.slot);
-                        // Column 1: the slot id, click to audition. A slot whose read
+                        // Column 1: per-row action buttons (left-aligned, like the
+                        // library lists).
+                        self.patch_row_buttons(ui, row, actions);
+                        // Column 2: the slot id, click to audition. A slot whose read
                         // was skipped is marked with a warning glyph + tint.
                         let label = if row.failed {
                             egui::RichText::new(format!("⚠ U{:03}", row.slot))
@@ -4070,7 +4073,7 @@ impl App {
                             actions.push(Action::ReorderPatch(*from, row.slot));
                         }
 
-                        // Column 2: editable patch name (egui keeps the cursor by
+                        // Column 3: editable patch name (egui keeps the cursor by
                         // widget id, so a per-frame clone of the buffer is fine). Use
                         // a fixed allocation: inside a Grid, TextEdit::desired_width
                         // gets clamped to the (initially tiny) available width and
@@ -4089,29 +4092,31 @@ impl App {
                             actions.push(Action::SetName(row.slot, name));
                         }
 
-                        // Column 3: output level as a compact drag-value (a slider
+                        // Column 4: output level as a compact drag-value (a slider
                         // here grows to fill the row and bloats the list).
                         let mut level = i32::from(row.pending_level.unwrap_or(row.stored_level));
                         let drag = egui::DragValue::new(&mut level).range(0..=100).suffix("%");
                         let changed = ui
-                            .add_enabled_ui(self.editable(), |ui| ui.add(drag).changed())
+                            .add_enabled_ui(self.editable(), |ui| {
+                                let r = ui.add(drag).changed();
+                                // Keep the value clear of the vertical scrollbar.
+                                ui.add_space(18.0);
+                                r
+                            })
                             .inner;
                         if changed {
                             let level = u8::try_from(level.clamp(0, 100)).unwrap_or(0);
                             actions.push(Action::SetLevel(row.slot, level));
                         }
-
-                        // Column 4: per-row actions.
-                        self.patch_row_buttons(ui, row, actions);
                         ui.end_row();
                     }
                 });
         });
     }
 
-    /// A patch row's action buttons (column 4): Save/Revert (enabled only when the
-    /// row has an unsaved edit — their state is the "modified" indicator), and
-    /// Copy/Paste/Clear (Paste also needs something on the clipboard).
+    /// A patch row's action buttons (the leftmost column): Edit, Save/Revert (enabled
+    /// only when the row has an unsaved edit — their state is the "modified"
+    /// indicator), and Copy/Paste/Clear (Paste also needs something on the clipboard).
     fn patch_row_buttons(&self, ui: &mut egui::Ui, row: &PatchRow, actions: &mut Vec<Action>) {
         ui.horizontal(|ui| {
             ui.add_enabled_ui(self.editable(), |ui| {
@@ -4170,9 +4175,6 @@ impl App {
                     actions.push(Action::ClearRow(row.slot));
                 }
             });
-            // Keep the last button clear of the vertical scrollbar, which otherwise
-            // overlays (and clips) the Clear button.
-            ui.add_space(18.0);
         });
     }
 
@@ -4203,6 +4205,18 @@ impl App {
                 .show(ui, |ui| {
                     for row in &self.presets {
                         let playing = self.now_playing == Some(row.slot);
+                        // Action button first (left-aligned, like every other list).
+                        ui.add_enabled_ui(self.editable(), |ui| {
+                            if action_button(ui, "Copy", ActionKind::Read)
+                                .on_hover_text(
+                                    "copy this preset to the clipboard, then Paste it onto a \
+                                     user slot on the Patches tab",
+                                )
+                                .clicked()
+                            {
+                                actions.push(Action::CopyRow(row.slot));
+                            }
+                        });
                         let label = if row.failed {
                             egui::RichText::new(format!("⚠ {}", slot_label(row.slot)))
                                 .color(egui::Color32::from_rgb(0xE0, 0xA0, 0x30))
@@ -4222,20 +4236,9 @@ impl App {
                             row.name.clone()
                         };
                         ui.label(name);
-                        ui.label(format!("{}%", row.stored_level));
                         ui.horizontal(|ui| {
-                            ui.add_enabled_ui(self.editable(), |ui| {
-                                if action_button(ui, "Copy", ActionKind::Read)
-                                    .on_hover_text(
-                                        "copy this preset to the clipboard, then Paste it onto a \
-                                         user slot on the Patches tab",
-                                    )
-                                    .clicked()
-                                {
-                                    actions.push(Action::CopyRow(row.slot));
-                                }
-                            });
-                            // Keep the button clear of the vertical scrollbar.
+                            ui.label(format!("{}%", row.stored_level));
+                            // Keep the value clear of the vertical scrollbar.
                             ui.add_space(18.0);
                         });
                         ui.end_row();
@@ -4797,14 +4800,7 @@ impl App {
                 // Whether this slot differs from its baseline (enables Revert).
                 let changed = self.compose_base.get(idx) != Some(patch);
                 let inner = ui.horizontal(|ui| {
-                    let drag_id = egui::Id::new(("scene-slot", slot));
-                    ui.dnd_drag_source(drag_id, SceneDrag::Slot(idx), |ui| {
-                        ui.label(egui::RichText::new("↕").weak());
-                    })
-                    .response
-                    .on_hover_text("drag onto another slot to re-order");
-                    ui.label(egui::RichText::new(format!("U{slot:03}")).monospace());
-                    ui.add_sized([220.0, 18.0], egui::Label::new(label).truncate());
+                    // Action buttons first (left-aligned, like every other list).
                     if action_button(ui, "Copy", ActionKind::Read)
                         .on_hover_text("copy this slot's patch")
                         .clicked()
@@ -4839,9 +4835,15 @@ impl App {
                     {
                         actions.push(Action::ComposeClear(idx));
                     }
-                    // Keep the last button clear of the vertical scrollbar, which
-                    // otherwise overlays and clips it.
-                    ui.add_space(18.0);
+                    ui.separator();
+                    let drag_id = egui::Id::new(("scene-slot", slot));
+                    ui.dnd_drag_source(drag_id, SceneDrag::Slot(idx), |ui| {
+                        ui.label(egui::RichText::new("↕").weak());
+                    })
+                    .response
+                    .on_hover_text("drag onto another slot to re-order");
+                    ui.label(egui::RichText::new(format!("U{slot:03}")).monospace());
+                    ui.add_sized([220.0, 18.0], egui::Label::new(label).truncate());
                 });
                 // Re-interact the whole row rect as a hover-sensing drop target, so a
                 // released drag registers anywhere on the row (including over its
