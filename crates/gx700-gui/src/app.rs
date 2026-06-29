@@ -4562,11 +4562,13 @@ impl eframe::App for App {
         if self.bulk_ok == Some(false) {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
-        // Capture view state for persistence on exit.
+        // Capture view state for persistence on exit. Use `screen_rect` (always
+        // available) rather than the viewport's `inner_rect`, which is `None` on
+        // some platforms (e.g. Wayland) and left the window size unsaved. screen_rect
+        // is in egui points (scaled by zoom); a window inner size is logical points.
         self.zoom = ctx.zoom_factor();
-        if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
-            self.window = Some([rect.width(), rect.height()]);
-        }
+        let size = ctx.screen_rect().size() * self.zoom;
+        self.window = Some([size.x, size.y]);
 
         let mut actions: Vec<Action> = Vec::new();
 
