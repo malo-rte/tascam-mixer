@@ -130,6 +130,7 @@ enum Action {
     SetParam(u16, &'static str, Value),
     SelectTab(Tab),
     SelectBlock(Block),
+    SelectAssign(usize),
     CopyBlock(Block),
     PasteBlock(u16, Block),
     RevertBlock(u16, Block),
@@ -1399,111 +1400,204 @@ fn eq_row(
     ui.end_row();
 }
 
-/// A schematic of how one control assign maps a *Source* controller to a *Target*
-/// parameter: the Target holds at *Min* until the Source reaches *Action lo*, ramps
-/// up to *Max* across the *Action lo..hi* window, then holds at *Max*. (*Mode* sets
-/// how the assign latches.) Generic — it illustrates the relationship, not live
-/// values.
-fn show_assign_schematic(ui: &mut egui::Ui) {
+/// The Level/Chain assign grid: field label (a row) and the four `assignN-*` keys
+/// for it (the columns). Mode is an enum (combo); every other field is a drag-value.
+const ASSIGN_ROWS: [(&str, [&str; 4]); 7] = [
+    (
+        "Target",
+        [
+            "assign1-target",
+            "assign2-target",
+            "assign3-target",
+            "assign4-target",
+        ],
+    ),
+    (
+        "Source",
+        [
+            "assign1-source",
+            "assign2-source",
+            "assign3-source",
+            "assign4-source",
+        ],
+    ),
+    (
+        "Mode",
+        [
+            "assign1-mode",
+            "assign2-mode",
+            "assign3-mode",
+            "assign4-mode",
+        ],
+    ),
+    (
+        "Min",
+        ["assign1-min", "assign2-min", "assign3-min", "assign4-min"],
+    ),
+    (
+        "Max",
+        ["assign1-max", "assign2-max", "assign3-max", "assign4-max"],
+    ),
+    (
+        "Action lo",
+        [
+            "assign1-act-lo",
+            "assign2-act-lo",
+            "assign3-act-lo",
+            "assign4-act-lo",
+        ],
+    ),
+    (
+        "Action hi",
+        [
+            "assign1-act-hi",
+            "assign2-act-hi",
+            "assign3-act-hi",
+            "assign4-act-hi",
+        ],
+    ),
+];
+
+/// A schematic of one control assign, reflecting its live values and mode. `lo`/`hi`
+/// are the Action lo/hi (Source `0..127`); `up` is whether Max >= Min (ramp
+/// direction). **Normal** ramps the Target Min->Max across the Action lo..hi window;
+/// **Toggle** flips the Target between the Min/Max states on each operation.
+// A cohesive drawing routine (axes, reference lines, the two mode layouts, labels);
+// splitting it would only scatter the shared painter/geometry locals.
+#[allow(clippy::too_many_lines)]
+fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, up: bool, toggle: bool) {
     let w = ui.available_width().min(440.0);
     let (resp, painter) = ui.allocate_painter(egui::vec2(w, 170.0), egui::Sense::hover());
     let rect = resp.rect;
     let v = ui.visuals();
     let axis = egui::Stroke::new(1.0, v.text_color());
     let refln = egui::Stroke::new(1.0, v.weak_text_color());
-    let curve = egui::Stroke::new(2.5, egui::Color32::from_rgb(90, 160, 230));
-    let txt = v.text_color();
-    let weak = v.weak_text_color();
+    let accent = egui::Color32::from_rgb(90, 160, 230);
+    let (txt, weak) = (v.text_color(), v.weak_text_color());
     let font = egui::FontId::proportional(11.0);
 
     let plot = egui::Rect::from_min_max(
-        rect.min + egui::vec2(64.0, 16.0),
+        rect.min + egui::vec2(64.0, 18.0),
         rect.max - egui::vec2(56.0, 28.0),
     );
     let px = |fx: f32| plot.left() + fx * plot.width();
     let py = |fy: f32| plot.bottom() - fy * plot.height();
-    // Representative positions (fractions of the plot box).
-    let (lo, hi) = (0.28_f32, 0.78_f32); // Action lo / hi on X (Source)
-    let (min_y, max_y) = (0.16_f32, 0.84_f32); // Min / Max on Y (Target)
+    let frac = |val: i32| f32::from(u8::try_from(val.clamp(0, 127)).unwrap_or(0)) / 127.0;
+    let lo_x = frac(lo);
+    let hi_x = frac(hi).max(lo_x);
+    let (low, high) = (0.16_f32, 0.84_f32);
+    let dashed = |a: egui::Pos2, b: egui::Pos2| egui::Shape::dashed_line(&[a, b], refln, 4.0, 4.0);
+    let lbl = |pos: egui::Pos2, anchor: egui::Align2, s: &str, c: egui::Color32| {
+        painter.text(pos, anchor, s, font.clone(), c);
+    };
 
-    // Axes.
     painter.line_segment([plot.left_top(), plot.left_bottom()], axis);
     painter.line_segment([plot.left_bottom(), plot.right_bottom()], axis);
-    // Reference lines: verticals at Action lo/hi, horizontals at Min/Max.
-    for x in [lo, hi] {
-        painter.extend(egui::Shape::dashed_line(
-            &[
-                egui::pos2(px(x), plot.bottom()),
-                egui::pos2(px(x), plot.top()),
-            ],
-            refln,
-            4.0,
-            4.0,
-        ));
-    }
-    for y in [min_y, max_y] {
-        painter.extend(egui::Shape::dashed_line(
-            &[
+
+    if toggle {
+        // Two latched states; the Source flips the Target between them.
+        for (y, name) in [(low, "Min"), (high, "Max")] {
+            painter.extend(dashed(
                 egui::pos2(plot.left(), py(y)),
                 egui::pos2(plot.right(), py(y)),
+            ));
+            lbl(
+                egui::pos2(plot.left() - 6.0, py(y)),
+                egui::Align2::RIGHT_CENTER,
+                name,
+                txt,
+            );
+        }
+        let x = px(lo_x);
+        painter.line_segment(
+            [egui::pos2(x, py(low)), egui::pos2(x, py(high))],
+            egui::Stroke::new(2.0, accent),
+        );
+        let head = |tip: egui::Pos2, dy: f32| {
+            egui::Shape::convex_polygon(
+                vec![
+                    tip,
+                    egui::pos2(tip.x - 5.0, tip.y + dy),
+                    egui::pos2(tip.x + 5.0, tip.y + dy),
+                ],
+                accent,
+                egui::Stroke::NONE,
+            )
+        };
+        painter.add(head(egui::pos2(x, py(high)), 6.0));
+        painter.add(head(egui::pos2(x, py(low)), -6.0));
+        lbl(
+            egui::pos2(x, py(low) + 8.0),
+            egui::Align2::CENTER_TOP,
+            &format!("Trigger ({lo})"),
+            txt,
+        );
+        lbl(
+            egui::pos2(plot.center().x, plot.top() - 4.0),
+            egui::Align2::CENTER_BOTTOM,
+            "Toggle — flips Min\u{2194}Max each operation",
+            weak,
+        );
+        lbl(
+            egui::pos2(plot.center().x, rect.bottom()),
+            egui::Align2::CENTER_BOTTOM,
+            "Source (trigger)",
+            weak,
+        );
+    } else {
+        // Normal: ramp from Min to Max across the Action window.
+        let (y_min, y_max) = if up { (low, high) } else { (high, low) };
+        for x in [lo_x, hi_x] {
+            painter.extend(dashed(
+                egui::pos2(px(x), plot.bottom()),
+                egui::pos2(px(x), plot.top()),
+            ));
+        }
+        for (y, name) in [(y_min, "Min"), (y_max, "Max")] {
+            painter.extend(dashed(
+                egui::pos2(plot.left(), py(y)),
+                egui::pos2(plot.right(), py(y)),
+            ));
+            lbl(
+                egui::pos2(plot.left() - 6.0, py(y)),
+                egui::Align2::RIGHT_CENTER,
+                name,
+                txt,
+            );
+        }
+        painter.add(egui::Shape::line(
+            vec![
+                egui::pos2(px(0.0), py(y_min)),
+                egui::pos2(px(lo_x), py(y_min)),
+                egui::pos2(px(hi_x), py(y_max)),
+                egui::pos2(px(1.0), py(y_max)),
             ],
-            refln,
-            4.0,
-            4.0,
+            egui::Stroke::new(2.5, accent),
         ));
+        lbl(
+            egui::pos2(px(lo_x), plot.bottom() + 3.0),
+            egui::Align2::CENTER_TOP,
+            &format!("lo {lo}"),
+            txt,
+        );
+        lbl(
+            egui::pos2(px(hi_x), plot.bottom() + 3.0),
+            egui::Align2::CENTER_TOP,
+            &format!("hi {hi}"),
+            txt,
+        );
+        lbl(
+            egui::pos2(plot.center().x, rect.bottom()),
+            egui::Align2::CENTER_BOTTOM,
+            "Source (controller)",
+            weak,
+        );
     }
-    // The transfer curve: flat at Min, ramp across the window, flat at Max.
-    painter.add(egui::Shape::line(
-        vec![
-            egui::pos2(px(0.0), py(min_y)),
-            egui::pos2(px(lo), py(min_y)),
-            egui::pos2(px(hi), py(max_y)),
-            egui::pos2(px(1.0), py(max_y)),
-        ],
-        curve,
-    ));
-    // Axis titles and value labels.
-    painter.text(
-        egui::pos2(plot.center().x, rect.bottom()),
-        egui::Align2::CENTER_BOTTOM,
-        "Source (controller)",
-        font.clone(),
-        weak,
-    );
-    painter.text(
+    lbl(
         egui::pos2(rect.left(), plot.top() - 2.0),
         egui::Align2::LEFT_BOTTOM,
         "Target",
-        font.clone(),
         weak,
-    );
-    painter.text(
-        egui::pos2(plot.left() - 6.0, py(min_y)),
-        egui::Align2::RIGHT_CENTER,
-        "Min",
-        font.clone(),
-        txt,
-    );
-    painter.text(
-        egui::pos2(plot.left() - 6.0, py(max_y)),
-        egui::Align2::RIGHT_CENTER,
-        "Max",
-        font.clone(),
-        txt,
-    );
-    painter.text(
-        egui::pos2(px(lo), plot.bottom() + 3.0),
-        egui::Align2::CENTER_TOP,
-        "Action lo",
-        font.clone(),
-        txt,
-    );
-    painter.text(
-        egui::pos2(px(hi), plot.bottom() + 3.0),
-        egui::Align2::CENTER_TOP,
-        "Action hi",
-        font,
-        txt,
     );
 }
 
@@ -1716,6 +1810,8 @@ pub(crate) struct App {
     tab: Tab,
     /// The effect block selected in the Edit tab.
     selected_block: Block,
+    /// Which control assign (0..=3) the Level/Chain schematic illustrates.
+    selected_assign: usize,
     bulk_prompt: bool,
     /// The background batch write (scene / "Write changes"), while it runs, plus its
     /// running tally for the progress bar and final report.
@@ -1813,6 +1909,7 @@ impl App {
             edit_source: None,
             tab,
             selected_block: Block::Compressor,
+            selected_assign: 0,
             bulk_prompt: false,
             writer: None,
             write_progress: 0,
@@ -3149,63 +3246,6 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        // Field labels (grid rows) and the four `assignN-*` keys per field (columns).
-        // Mode is an enum (combo); every other field is a drag-value.
-        const ROWS: [(&str, [&str; 4]); 7] = [
-            (
-                "Target",
-                [
-                    "assign1-target",
-                    "assign2-target",
-                    "assign3-target",
-                    "assign4-target",
-                ],
-            ),
-            (
-                "Source",
-                [
-                    "assign1-source",
-                    "assign2-source",
-                    "assign3-source",
-                    "assign4-source",
-                ],
-            ),
-            (
-                "Mode",
-                [
-                    "assign1-mode",
-                    "assign2-mode",
-                    "assign3-mode",
-                    "assign4-mode",
-                ],
-            ),
-            (
-                "Min",
-                ["assign1-min", "assign2-min", "assign3-min", "assign4-min"],
-            ),
-            (
-                "Max",
-                ["assign1-max", "assign2-max", "assign3-max", "assign4-max"],
-            ),
-            (
-                "Action lo",
-                [
-                    "assign1-act-lo",
-                    "assign2-act-lo",
-                    "assign3-act-lo",
-                    "assign4-act-lo",
-                ],
-            ),
-            (
-                "Action hi",
-                [
-                    "assign1-act-hi",
-                    "assign2-act-hi",
-                    "assign3-act-hi",
-                    "assign4-act-hi",
-                ],
-            ),
-        ];
         let enabled = self.edit_enabled();
         egui::Grid::new("gx700-lc-level")
             .num_columns(2)
@@ -3224,19 +3264,26 @@ impl App {
             )
             .weak(),
         );
-        show_assign_schematic(ui);
-        ui.add_space(4.0);
         egui::Grid::new("gx700-assigns")
             .num_columns(5)
             .spacing([12.0, 6.0])
             .striped(true)
             .show(ui, |ui| {
                 ui.label("");
-                for n in 1..=4 {
-                    ui.label(egui::RichText::new(format!("Assign {n}")).strong());
+                for i in 0..4 {
+                    if ui
+                        .selectable_label(
+                            self.selected_assign == i,
+                            egui::RichText::new(format!("Assign {}", i + 1)).strong(),
+                        )
+                        .on_hover_text("show this assign in the schematic below")
+                        .clicked()
+                    {
+                        actions.push(Action::SelectAssign(i));
+                    }
                 }
                 ui.end_row();
-                for (label, keys) in ROWS {
+                for (label, keys) in ASSIGN_ROWS {
                     ui.label(label);
                     for key in keys {
                         if key.ends_with("-mode") {
@@ -3248,6 +3295,27 @@ impl App {
                     ui.end_row();
                 }
             });
+
+        // Schematic for the selected assign — value- and mode-aware.
+        let n = self.selected_assign + 1;
+        let raw = |suffix: &str| -> i32 {
+            match typed.get(&format!("assign{n}-{suffix}")) {
+                Some(Value::Int(v) | Value::Enum(v)) => v,
+                _ => 0,
+            }
+        };
+        let (lo, hi) = (raw("act-lo"), raw("act-hi"));
+        let toggle = raw("mode") == 1;
+        let up = raw("max") >= raw("min");
+        ui.add_space(6.0);
+        ui.label(
+            egui::RichText::new(format!(
+                "Assign {n} — {}",
+                if toggle { "Toggle" } else { "Normal" }
+            ))
+            .strong(),
+        );
+        show_assign_schematic(ui, lo, hi, up, toggle);
     }
 
     fn show_block_params(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
@@ -4659,6 +4727,7 @@ impl App {
             Action::SetParam(slot, key, value) => self.set_param(slot, key, value),
             Action::SelectTab(tab) => self.tab = tab,
             Action::SelectBlock(block) => self.selected_block = block,
+            Action::SelectAssign(idx) => self.selected_assign = idx,
             Action::CopyBlock(block) => self.copy_block(block),
             Action::PasteBlock(slot, block) => self.paste_block(slot, block),
             Action::RevertBlock(slot, block) => self.revert_block(slot, block),
