@@ -3031,9 +3031,9 @@ impl App {
         ui.separator();
     }
 
-    /// The patch-common Level/Chain editor: output level, then each of the four
-    /// control assigns as its own labelled group (target, source, mode, the min/max
-    /// the target sweeps between, and the action lo/hi range that arms it).
+    /// The patch-common Level/Chain editor: output level, then the four control
+    /// assigns as a grid — one row per field (target, source, mode, the min/max the
+    /// target sweeps between, the action lo/hi range), one column per assign.
     fn show_levelchain_editor(
         &self,
         ui: &mut egui::Ui,
@@ -3041,55 +3041,62 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        // Per-assign field labels, in the same order as the keys below. Mode is an
-        // enum (combo); every other field is a drag-value.
-        const LABELS: [&str; 7] = [
-            "Target",
-            "Source",
-            "Mode",
-            "Min",
-            "Max",
-            "Action lo",
-            "Action hi",
-        ];
-        // Static `assignN-<suffix>` keys (param_drag/param_combo need `&'static str`).
-        const KEYS: [[&str; 7]; 4] = [
-            [
-                "assign1-target",
-                "assign1-source",
-                "assign1-mode",
-                "assign1-min",
-                "assign1-max",
-                "assign1-act-lo",
-                "assign1-act-hi",
-            ],
-            [
-                "assign2-target",
-                "assign2-source",
-                "assign2-mode",
-                "assign2-min",
-                "assign2-max",
-                "assign2-act-lo",
-                "assign2-act-hi",
-            ],
-            [
-                "assign3-target",
-                "assign3-source",
-                "assign3-mode",
-                "assign3-min",
-                "assign3-max",
-                "assign3-act-lo",
-                "assign3-act-hi",
-            ],
-            [
-                "assign4-target",
-                "assign4-source",
-                "assign4-mode",
-                "assign4-min",
-                "assign4-max",
-                "assign4-act-lo",
-                "assign4-act-hi",
-            ],
+        // Field labels (grid rows) and the four `assignN-*` keys per field (columns).
+        // Mode is an enum (combo); every other field is a drag-value.
+        const ROWS: [(&str, [&str; 4]); 7] = [
+            (
+                "Target",
+                [
+                    "assign1-target",
+                    "assign2-target",
+                    "assign3-target",
+                    "assign4-target",
+                ],
+            ),
+            (
+                "Source",
+                [
+                    "assign1-source",
+                    "assign2-source",
+                    "assign3-source",
+                    "assign4-source",
+                ],
+            ),
+            (
+                "Mode",
+                [
+                    "assign1-mode",
+                    "assign2-mode",
+                    "assign3-mode",
+                    "assign4-mode",
+                ],
+            ),
+            (
+                "Min",
+                ["assign1-min", "assign2-min", "assign3-min", "assign4-min"],
+            ),
+            (
+                "Max",
+                ["assign1-max", "assign2-max", "assign3-max", "assign4-max"],
+            ),
+            (
+                "Action lo",
+                [
+                    "assign1-act-lo",
+                    "assign2-act-lo",
+                    "assign3-act-lo",
+                    "assign4-act-lo",
+                ],
+            ),
+            (
+                "Action hi",
+                [
+                    "assign1-act-hi",
+                    "assign2-act-hi",
+                    "assign3-act-hi",
+                    "assign4-act-hi",
+                ],
+            ),
         ];
         let enabled = self.edit_enabled();
         egui::Grid::new("gx700-lc-level")
@@ -3109,28 +3116,28 @@ impl App {
             )
             .weak(),
         );
-        for (n, keys) in KEYS.iter().enumerate() {
-            ui.add_space(2.0);
-            egui::CollapsingHeader::new(format!("Assign {}", n + 1))
-                .id_salt(("gx700-assign", n))
-                .default_open(n == 0)
-                .show(ui, |ui| {
-                    egui::Grid::new(("gx700-assign-grid", n))
-                        .num_columns(2)
-                        .spacing([12.0, 6.0])
-                        .show(ui, |ui| {
-                            for (&label, &key) in LABELS.iter().zip(keys.iter()) {
-                                ui.label(label);
-                                if key.ends_with("-mode") {
-                                    param_combo(ui, slot, key, typed, enabled, actions);
-                                } else {
-                                    param_drag(ui, slot, key, typed, enabled, actions);
-                                }
-                                ui.end_row();
-                            }
-                        });
-                });
-        }
+        egui::Grid::new("gx700-assigns")
+            .num_columns(5)
+            .spacing([12.0, 6.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("");
+                for n in 1..=4 {
+                    ui.label(egui::RichText::new(format!("Assign {n}")).strong());
+                }
+                ui.end_row();
+                for (label, keys) in ROWS {
+                    ui.label(label);
+                    for key in keys {
+                        if key.ends_with("-mode") {
+                            param_combo(ui, slot, key, typed, enabled, actions);
+                        } else {
+                            param_drag(ui, slot, key, typed, enabled, actions);
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
     }
 
     fn show_block_params(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
