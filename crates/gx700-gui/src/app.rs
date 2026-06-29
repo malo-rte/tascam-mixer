@@ -1762,6 +1762,12 @@ impl App {
             && self.bulk_ok != Some(false)
     }
 
+    /// Whether every user-bank row holds a loaded patch (so the whole bank can be
+    /// captured/snapshotted). Independent of the device — true from cache offline.
+    fn bank_loaded(&self) -> bool {
+        self.rows.iter().all(|r| r.full.is_some())
+    }
+
     /// Probe the unit's BULK LOAD mode and react: start the bank read once it's in
     /// BULK LOAD (or if the probe can't run, e.g. on the mock), otherwise mark it
     /// not-yet-ready so the blocking dialog stays up. Restores the probed slot.
@@ -2635,48 +2641,24 @@ impl App {
         }
     }
 
-    /// Write one patch (its edited name + level) to its memory slot and verify by
-    /// read-back. `Ok` on success; `Err(message)` if the patch isn't loaded or the
-    /// unit isn't in BULK LOAD mode (the write is silently ignored there).
-    fn store_one(&self, slot: u16) -> Result<(), String> {
-        let Some(patch) = self.effective_patch(slot) else {
-            return Err(format!("U{slot:03}: patch not loaded — audition it first"));
-        };
-        let raw = patch.to_raw();
-        let write = device::lock(&self.device).write_patch(slot, &raw);
-        if let Err(e) = write {
-            return Err(format!("write U{slot:03}: {e}"));
-        }
-        let readback = device::lock(&self.device).read_patch(slot);
-        match readback {
-            Ok(got) if got.blocks == raw.blocks => Ok(()),
-            _ => Err(format!(
-                "U{slot:03} not stored — put the GX-700 in BULK LOAD mode \
-                 (TUNER/UTILITY → MIDI BULK LOAD), then try again"
-            )),
-        }
-    }
-
     fn set_name_edit(&mut self, slot: u16, name: String) {
         if let Some(row) = self.row_mut(slot) {
             row.name_edit = name;
         }
     }
 
-    /// Save one patch (name + level) to the unit (per-row Save button).
+    /// Save one patch (name + level) to the unit (per-row Save button), via the
+    /// background writer — so the write + read-back verify never blocks the UI.
     fn save_row(&mut self, slot: u16) {
         if !self.row(slot).is_some_and(PatchRow::dirty) {
             return;
         }
         self.ensure_loaded(slot);
-        match self.store_one(slot) {
-            Ok(()) => {
-                self.commit_row(slot);
-                self.status = format!("stored U{slot:03}");
-                self.save_cache();
-            }
-            Err(msg) => self.status = msg,
-        }
+        let Some(raw) = self.effective_patch(slot).map(|t| t.to_raw()) else {
+            self.status = format!("U{slot:03}: patch not loaded — audition it first");
+            return;
+        };
+        self.start_write_for(vec![(slot, raw)]);
     }
 
     /// Revert one patch's edits (name, level, and any staged Paste/Clear) back to
@@ -2820,6 +2802,13 @@ impl App {
             .filter(|&slot| self.row(slot).is_some_and(PatchRow::dirty))
             .filter_map(|slot| self.effective_patch(slot).map(|t| (slot, t.to_raw())))
             .collect();
+        self.start_write_for(writes);
+    }
+
+    /// Spawn the background writer for `writes` (off the UI thread, with read-back
+    /// verify and a progress bar). Rows commit / fail as `drain_write` processes the
+    /// results. Shared by the batch "Write changes" and the per-row Save.
+    fn start_write_for(&mut self, writes: Vec<(u16, RawPatch)>) {
         if writes.is_empty() {
             "no pending changes to store".clone_into(&mut self.status);
             return;
@@ -2951,8 +2940,15 @@ impl App {
                     actions.push(Action::SelectBlock(block));
                 }
             });
+            // Explicit hover-sensing drop target over the row (a bare layout response
+            // misses drops released over the row's interactive children).
+            let drop = ui.interact(
+                cell.response.rect,
+                egui::Id::new(("chain-drop", idx)),
+                egui::Sense::hover(),
+            );
             if self.edit_enabled()
-                && let Some(from) = cell.response.dnd_release_payload::<usize>()
+                && let Some(from) = drop.dnd_release_payload::<usize>()
             {
                 reorder = Some((*from, idx));
             }
@@ -4137,10 +4133,16 @@ impl App {
                                 actions.push(Action::Audition(row.slot));
                             }
                         });
-                        // The whole cell is the drop target, so releasing anywhere on
-                        // the row re-orders.
+                        // Re-interact the cell rect as a hover-sensing drop target, so
+                        // a drop released over its SelectableLabel still registers (a
+                        // bare layout response misses drops over interactive children).
+                        let drop = ui.interact(
+                            cell.response.rect,
+                            egui::Id::new(("patch-drop", row.slot)),
+                            egui::Sense::hover(),
+                        );
                         if self.editable()
-                            && let Some(from) = cell.response.dnd_release_payload::<u16>()
+                            && let Some(from) = drop.dnd_release_payload::<u16>()
                         {
                             actions.push(Action::ReorderPatch(*from, row.slot));
                         }
@@ -4803,9 +4805,11 @@ impl App {
             {
                 actions.push(Action::ComposeNew);
             }
-            ui.add_enabled_ui(self.connected, |ui| {
+            // Capture reads the already-loaded rows, not the device, so gate on the
+            // bank being loaded (works from cache offline) rather than on connection.
+            ui.add_enabled_ui(self.bank_loaded(), |ui| {
                 if action_button(ui, "Capture bank", ActionKind::Read)
-                    .on_hover_text("copy the current device bank into the composer")
+                    .on_hover_text("copy the current bank into the composer")
                     .clicked()
                 {
                     actions.push(Action::ComposeCapture);
