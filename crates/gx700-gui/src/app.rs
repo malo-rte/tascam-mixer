@@ -1459,13 +1459,14 @@ const ASSIGN_ROWS: [(&str, [&str; 4]); 7] = [
 ];
 
 /// A schematic of one control assign, reflecting its live values and mode. `lo`/`hi`
-/// are the Action lo/hi (Source `0..127`); `up` is whether Max >= Min (ramp
-/// direction). **Normal** ramps the Target Min->Max across the Action lo..hi window;
-/// **Toggle** flips the Target between the Min/Max states on each operation.
+/// are the Action lo/hi (Source `0..127`); `min`/`max` are the Target values
+/// (`0..16383`), positioned on the Y axis so they move the graph. **Normal** ramps
+/// the Target Min->Max across the Action lo..hi window; **Toggle** flips the Target
+/// between the Min/Max states on each operation.
 // A cohesive drawing routine (axes, reference lines, the two mode layouts, labels);
 // splitting it would only scatter the shared painter/geometry locals.
 #[allow(clippy::too_many_lines)]
-fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, up: bool, toggle: bool) {
+fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, min: i32, max: i32, toggle: bool) {
     let w = ui.available_width().min(440.0);
     let (resp, painter) = ui.allocate_painter(egui::vec2(w, 170.0), egui::Sense::hover());
     let rect = resp.rect;
@@ -1483,9 +1484,12 @@ fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, up: bool, toggle: 
     let px = |fx: f32| plot.left() + fx * plot.width();
     let py = |fy: f32| plot.bottom() - fy * plot.height();
     let frac = |val: i32| f32::from(u8::try_from(val.clamp(0, 127)).unwrap_or(0)) / 127.0;
+    // Map a Min/Max value (0..16383) onto the Y axis, kept off the edges so labels fit.
+    let lvl =
+        |val: i32| 0.1 + 0.8 * f32::from(u16::try_from(val.clamp(0, 16383)).unwrap_or(0)) / 16383.0;
     let lo_x = frac(lo);
     let hi_x = frac(hi).max(lo_x);
-    let (low, high) = (0.16_f32, 0.84_f32);
+    let (y_min, y_max) = (lvl(min), lvl(max));
     let dashed = |a: egui::Pos2, b: egui::Pos2| egui::Shape::dashed_line(&[a, b], refln, 4.0, 4.0);
     let lbl = |pos: egui::Pos2, anchor: egui::Align2, s: &str, c: egui::Color32| {
         painter.text(pos, anchor, s, font.clone(), c);
@@ -1493,24 +1497,25 @@ fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, up: bool, toggle: 
 
     painter.line_segment([plot.left_top(), plot.left_bottom()], axis);
     painter.line_segment([plot.left_bottom(), plot.right_bottom()], axis);
+    for (y, name) in [(y_min, "Min"), (y_max, "Max")] {
+        painter.extend(dashed(
+            egui::pos2(plot.left(), py(y)),
+            egui::pos2(plot.right(), py(y)),
+        ));
+        lbl(
+            egui::pos2(plot.left() - 6.0, py(y)),
+            egui::Align2::RIGHT_CENTER,
+            name,
+            txt,
+        );
+    }
 
     if toggle {
         // Two latched states; the Source flips the Target between them.
-        for (y, name) in [(low, "Min"), (high, "Max")] {
-            painter.extend(dashed(
-                egui::pos2(plot.left(), py(y)),
-                egui::pos2(plot.right(), py(y)),
-            ));
-            lbl(
-                egui::pos2(plot.left() - 6.0, py(y)),
-                egui::Align2::RIGHT_CENTER,
-                name,
-                txt,
-            );
-        }
         let x = px(lo_x);
+        let (top, bot) = (py(y_min).min(py(y_max)), py(y_min).max(py(y_max)));
         painter.line_segment(
-            [egui::pos2(x, py(low)), egui::pos2(x, py(high))],
+            [egui::pos2(x, top), egui::pos2(x, bot)],
             egui::Stroke::new(2.0, accent),
         );
         let head = |tip: egui::Pos2, dy: f32| {
@@ -1524,10 +1529,10 @@ fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, up: bool, toggle: 
                 egui::Stroke::NONE,
             )
         };
-        painter.add(head(egui::pos2(x, py(high)), 6.0));
-        painter.add(head(egui::pos2(x, py(low)), -6.0));
+        painter.add(head(egui::pos2(x, top), 6.0));
+        painter.add(head(egui::pos2(x, bot), -6.0));
         lbl(
-            egui::pos2(x, py(low) + 8.0),
+            egui::pos2(x, bot + 8.0),
             egui::Align2::CENTER_TOP,
             &format!("Trigger ({lo})"),
             txt,
@@ -1546,24 +1551,11 @@ fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, up: bool, toggle: 
         );
     } else {
         // Normal: ramp from Min to Max across the Action window.
-        let (y_min, y_max) = if up { (low, high) } else { (high, low) };
         for x in [lo_x, hi_x] {
             painter.extend(dashed(
                 egui::pos2(px(x), plot.bottom()),
                 egui::pos2(px(x), plot.top()),
             ));
-        }
-        for (y, name) in [(y_min, "Min"), (y_max, "Max")] {
-            painter.extend(dashed(
-                egui::pos2(plot.left(), py(y)),
-                egui::pos2(plot.right(), py(y)),
-            ));
-            lbl(
-                egui::pos2(plot.left() - 6.0, py(y)),
-                egui::Align2::RIGHT_CENTER,
-                name,
-                txt,
-            );
         }
         painter.add(egui::Shape::line(
             vec![
@@ -3305,8 +3297,8 @@ impl App {
             }
         };
         let (lo, hi) = (raw("act-lo"), raw("act-hi"));
+        let (min, max) = (raw("min"), raw("max"));
         let toggle = raw("mode") == 1;
-        let up = raw("max") >= raw("min");
         ui.add_space(6.0);
         ui.label(
             egui::RichText::new(format!(
@@ -3315,7 +3307,7 @@ impl App {
             ))
             .strong(),
         );
-        show_assign_schematic(ui, lo, hi, up, toggle);
+        show_assign_schematic(ui, lo, hi, min, max, toggle);
     }
 
     fn show_block_params(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
