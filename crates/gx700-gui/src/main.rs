@@ -22,6 +22,31 @@ struct Cli {
     port: Option<String>,
 }
 
+/// Install the `JetBrains Mono Nerd Font`: as the monospace text face, and as a fallback
+/// on the proportional face so the Nerd Font icon glyphs (used on list buttons)
+/// resolve everywhere. The font is vendored under `assets/fonts/` (SIL OFL 1.1).
+fn install_fonts(ctx: &eframe::egui::Context) {
+    use eframe::egui::{FontData, FontDefinitions, FontFamily};
+    const NERD: &str = "jetbrains-mono-nerd";
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        NERD.to_owned(),
+        FontData::from_static(include_bytes!(
+            "../assets/fonts/JetBrainsMonoNerdFont-Regular.ttf"
+        )),
+    );
+    // Monospace: JetBrains Mono first (the visible monospace face).
+    if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
+        mono.insert(0, NERD.to_owned());
+    }
+    // Proportional: keep the default UI face first, append the Nerd Font as a
+    // fallback so icon code points still render in proportional text (buttons).
+    if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
+        prop.push(NERD.to_owned());
+    }
+    ctx.set_fonts(fonts);
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let (mock, port) = (cli.mock, cli.port);
@@ -51,6 +76,7 @@ fn main() -> Result<()> {
         "BOSS GX-700 Patch Editor",
         options,
         Box::new(move |cc| {
+            install_fonts(&cc.egui_ctx);
             let app = app::App::new(dev, connected, reopen);
             cc.egui_ctx.set_zoom_factor(app.zoom());
             cc.egui_ctx

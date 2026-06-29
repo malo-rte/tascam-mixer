@@ -85,6 +85,21 @@ impl PatchRow {
 /// patch", not a real bank slot. Real slots are `1..=200`, so `0` is free.
 const SCRATCH: u16 = 0;
 
+/// Nerd Font (Font Awesome) glyphs for the per-row list buttons, one consistent
+/// outline family. Rendered by the vendored `JetBrains Mono Nerd Font`; each button
+/// keeps a text tooltip, so the icon never stands alone. (Verified present in the
+/// embedded font's cmap.)
+mod icon {
+    pub const EDIT: &str = "\u{f044}"; // pencil-in-box
+    pub const SAVE: &str = "\u{f0c7}"; // floppy
+    pub const COPY: &str = "\u{f0c5}"; // overlapping pages
+    pub const PASTE: &str = "\u{f0ea}"; // clipboard
+    pub const REVERT: &str = "\u{f0e2}"; // undo arrow
+    pub const CLEAR: &str = "\u{f12d}"; // eraser
+    pub const DELETE: &str = "\u{f014}"; // trash can
+    pub const LOAD: &str = "\u{f019}"; // download
+}
+
 /// Where an offline edit (the Edit tab's scratch patch) is saved back to.
 #[derive(Clone)]
 enum OfflineSource {
@@ -250,19 +265,19 @@ fn lib_list(
     for name in names {
         ui.horizontal(|ui| {
             ui.add_enabled_ui(can_use, |ui| {
-                if action_button(ui, "Load", ActionKind::Read)
+                if action_button(ui, icon::LOAD, ActionKind::Read)
                     .on_hover_text(load_hover)
                     .clicked()
                 {
                     actions.push(make_load(name.clone()));
                 }
-                if action_button(ui, "Save", ActionKind::Commit)
+                if action_button(ui, icon::SAVE, ActionKind::Commit)
                     .on_hover_text("overwrite this with the current one")
                     .clicked()
                 {
                     actions.push(make_save(name.clone()));
                 }
-                if action_button(ui, "Copy", ActionKind::Read)
+                if action_button(ui, icon::COPY, ActionKind::Read)
                     .on_hover_text("copy this to the clipboard")
                     .clicked()
                 {
@@ -271,13 +286,15 @@ fn lib_list(
             });
             // Edit is offline (no device), so it stays enabled regardless of `can_use`.
             if let Some(make_edit) = make_edit
-                && action_button(ui, "Edit", ActionKind::Read)
+                && action_button(ui, icon::EDIT, ActionKind::Read)
                     .on_hover_text("edit this patch offline (no device)")
                     .clicked()
             {
                 actions.push(make_edit(name.clone()));
             }
-            if action_button(ui, "Delete", ActionKind::Destructive).clicked()
+            if action_button(ui, icon::DELETE, ActionKind::Destructive)
+                .on_hover_text("delete this from the library")
+                .clicked()
                 && let Some(d) = dir
             {
                 actions.push(Action::RequestDelete(
@@ -3126,25 +3143,27 @@ impl App {
         egui::ScrollArea::vertical().show(ui, |ui| {
             for name in &names {
                 ui.horizontal(|ui| {
-                    if action_button(ui, "Load", ActionKind::Read)
+                    if action_button(ui, icon::LOAD, ActionKind::Read)
                         .on_hover_text("apply this preset to the block")
                         .clicked()
                     {
                         actions.push(Action::LoadBlockPreset(name.clone()));
                     }
-                    if action_button(ui, "Save", ActionKind::Commit)
+                    if action_button(ui, icon::SAVE, ActionKind::Commit)
                         .on_hover_text("overwrite this preset with the current block")
                         .clicked()
                     {
                         actions.push(Action::SaveBlockPreset(name.clone()));
                     }
-                    if action_button(ui, "Copy", ActionKind::Read)
+                    if action_button(ui, icon::COPY, ActionKind::Read)
                         .on_hover_text("copy this preset to the clipboard")
                         .clicked()
                     {
                         actions.push(Action::CopyBlockPreset(name.clone()));
                     }
-                    if action_button(ui, "Delete", ActionKind::Destructive).clicked()
+                    if action_button(ui, icon::DELETE, ActionKind::Destructive)
+                        .on_hover_text("delete this preset")
+                        .clicked()
                         && let Some(dir) = block_presets_dir(block)
                     {
                         actions.push(Action::RequestDelete(
@@ -4120,7 +4139,7 @@ impl App {
     fn patch_row_buttons(&self, ui: &mut egui::Ui, row: &PatchRow, actions: &mut Vec<Action>) {
         ui.horizontal(|ui| {
             ui.add_enabled_ui(self.editable(), |ui| {
-                if action_button(ui, "Edit", ActionKind::Read)
+                if action_button(ui, icon::EDIT, ActionKind::Read)
                     .on_hover_text("edit this patch's effects (auditions it live)")
                     .clicked()
                 {
@@ -4129,13 +4148,13 @@ impl App {
             });
             ui.separator();
             ui.add_enabled_ui(self.editable() && row.dirty(), |ui| {
-                let save = action_button(ui, "Save", ActionKind::Commit).on_hover_text(
+                let save = action_button(ui, icon::SAVE, ActionKind::Commit).on_hover_text(
                     "store this patch (name + level) to the unit (needs BULK LOAD mode)",
                 );
                 if save.clicked() {
                     actions.push(Action::SaveRow(row.slot));
                 }
-                let revert = action_button(ui, "Revert", ActionKind::Caution)
+                let revert = action_button(ui, icon::REVERT, ActionKind::Caution)
                     .on_hover_text("discard edits, back to the values stored on the unit");
                 if revert.clicked() {
                     actions.push(Action::RevertRow(row.slot));
@@ -4143,7 +4162,7 @@ impl App {
             });
             ui.separator();
             ui.add_enabled_ui(self.editable(), |ui| {
-                if action_button(ui, "Copy", ActionKind::Read)
+                if action_button(ui, icon::COPY, ActionKind::Read)
                     .on_hover_text("copy this patch to the clipboard")
                     .clicked()
                 {
@@ -4157,7 +4176,7 @@ impl App {
                     }
                     None => "Copy a patch first".to_owned(),
                 };
-                if action_button(ui, "Paste", ActionKind::Neutral)
+                if action_button(ui, icon::PASTE, ActionKind::Neutral)
                     .on_hover_text(hover)
                     .clicked()
                 {
@@ -4165,7 +4184,7 @@ impl App {
                 }
             });
             ui.add_enabled_ui(self.editable(), |ui| {
-                if action_button(ui, "Clear", ActionKind::Destructive)
+                if action_button(ui, icon::CLEAR, ActionKind::Destructive)
                     .on_hover_text(
                         "blank this patch to Empty (name \"Empty\", level 0, effects off); \
                          staged — Revert restores it, Save overwrites the stored patch",
@@ -4207,7 +4226,7 @@ impl App {
                         let playing = self.now_playing == Some(row.slot);
                         // Action button first (left-aligned, like every other list).
                         ui.add_enabled_ui(self.editable(), |ui| {
-                            if action_button(ui, "Copy", ActionKind::Read)
+                            if action_button(ui, icon::COPY, ActionKind::Read)
                                 .on_hover_text(
                                     "copy this preset to the clipboard, then Paste it onto a \
                                      user slot on the Patches tab",
@@ -4801,35 +4820,35 @@ impl App {
                 let changed = self.compose_base.get(idx) != Some(patch);
                 let inner = ui.horizontal(|ui| {
                     // Action buttons first (left-aligned, like every other list).
-                    if action_button(ui, "Copy", ActionKind::Read)
+                    if action_button(ui, icon::COPY, ActionKind::Read)
                         .on_hover_text("copy this slot's patch")
                         .clicked()
                     {
                         actions.push(Action::ComposeCopy(idx));
                     }
                     ui.add_enabled_ui(can_paste, |ui| {
-                        if action_button(ui, "Paste", ActionKind::Neutral)
+                        if action_button(ui, icon::PASTE, ActionKind::Neutral)
                             .on_hover_text("paste the copied patch into this slot")
                             .clicked()
                         {
                             actions.push(Action::ComposePaste(idx));
                         }
                     });
-                    if action_button(ui, "Edit", ActionKind::Read)
+                    if action_button(ui, icon::EDIT, ActionKind::Read)
                         .on_hover_text("edit this slot's patch offline (no device)")
                         .clicked()
                     {
                         actions.push(Action::EditComposerSlot(idx));
                     }
                     ui.add_enabled_ui(changed, |ui| {
-                        if action_button(ui, "Revert", ActionKind::Caution)
+                        if action_button(ui, icon::REVERT, ActionKind::Caution)
                             .on_hover_text("restore this slot to its last saved/loaded state")
                             .clicked()
                         {
                             actions.push(Action::ComposeRevert(idx));
                         }
                     });
-                    if action_button(ui, "Clear", ActionKind::Destructive)
+                    if action_button(ui, icon::CLEAR, ActionKind::Destructive)
                         .on_hover_text("reset this slot to INIT")
                         .clicked()
                     {
