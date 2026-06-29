@@ -102,8 +102,12 @@ fn main() -> Result<()> {
             install_fonts(&cc.egui_ctx);
             let app = app::App::new(dev, connected, reopen, offline, port);
             cc.egui_ctx.set_zoom_factor(app.zoom());
-            cc.egui_ctx
-                .style_mut(|style| style.spacing.slider_width = 160.0);
+            cc.egui_ctx.style_mut(|style| {
+                style.spacing.slider_width = 160.0;
+                // Reserve a gutter for scrollbars instead of floating them over the
+                // content, so a list's scrollbar never clips the trailing names.
+                style.spacing.scroll.floating = false;
+            });
             Ok(Box::new(app))
         }),
     )
