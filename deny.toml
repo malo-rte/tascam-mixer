@@ -15,6 +15,11 @@ ignore = [
     # paste. Nothing we depend on directly; drop this once eframe's tree moves off
     # paste. https://rustsec.org/advisories/RUSTSEC-2024-0436
     "RUSTSEC-2024-0436",
+    # `ttf-parser` is unmaintained (not vulnerable, no safe upgrade available). It is
+    # pulled in transitively by the GUI font stack: eframe -> egui -> epaint ->
+    # ttf-parser. Nothing we depend on directly; drop this once epaint's tree moves
+    # off it. https://rustsec.org/advisories/RUSTSEC-2026-0192
+    "RUSTSEC-2026-0192",
 ]
 
 [licenses]
