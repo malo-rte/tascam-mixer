@@ -4203,7 +4203,6 @@ impl App {
                     actions.push(Action::EditDevicePatch(row.slot));
                 }
             });
-            ui.separator();
             ui.add_enabled_ui(self.editable() && row.dirty(), |ui| {
                 let save = action_button(ui, icon::SAVE, ActionKind::Commit).on_hover_text(
                     "store this patch (name + level) to the unit (needs BULK LOAD mode)",
@@ -4217,7 +4216,6 @@ impl App {
                     actions.push(Action::RevertRow(row.slot));
                 }
             });
-            ui.separator();
             ui.add_enabled_ui(self.editable(), |ui| {
                 if action_button(ui, icon::COPY, ActionKind::Read)
                     .on_hover_text("copy this patch to the clipboard")
