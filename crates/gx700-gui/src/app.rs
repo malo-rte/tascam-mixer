@@ -1399,6 +1399,114 @@ fn eq_row(
     ui.end_row();
 }
 
+/// A schematic of how one control assign maps a *Source* controller to a *Target*
+/// parameter: the Target holds at *Min* until the Source reaches *Action lo*, ramps
+/// up to *Max* across the *Action lo..hi* window, then holds at *Max*. (*Mode* sets
+/// how the assign latches.) Generic — it illustrates the relationship, not live
+/// values.
+fn show_assign_schematic(ui: &mut egui::Ui) {
+    let w = ui.available_width().min(440.0);
+    let (resp, painter) = ui.allocate_painter(egui::vec2(w, 170.0), egui::Sense::hover());
+    let rect = resp.rect;
+    let v = ui.visuals();
+    let axis = egui::Stroke::new(1.0, v.text_color());
+    let refln = egui::Stroke::new(1.0, v.weak_text_color());
+    let curve = egui::Stroke::new(2.5, egui::Color32::from_rgb(90, 160, 230));
+    let txt = v.text_color();
+    let weak = v.weak_text_color();
+    let font = egui::FontId::proportional(11.0);
+
+    let plot = egui::Rect::from_min_max(
+        rect.min + egui::vec2(64.0, 16.0),
+        rect.max - egui::vec2(56.0, 28.0),
+    );
+    let px = |fx: f32| plot.left() + fx * plot.width();
+    let py = |fy: f32| plot.bottom() - fy * plot.height();
+    // Representative positions (fractions of the plot box).
+    let (lo, hi) = (0.28_f32, 0.78_f32); // Action lo / hi on X (Source)
+    let (min_y, max_y) = (0.16_f32, 0.84_f32); // Min / Max on Y (Target)
+
+    // Axes.
+    painter.line_segment([plot.left_top(), plot.left_bottom()], axis);
+    painter.line_segment([plot.left_bottom(), plot.right_bottom()], axis);
+    // Reference lines: verticals at Action lo/hi, horizontals at Min/Max.
+    for x in [lo, hi] {
+        painter.extend(egui::Shape::dashed_line(
+            &[
+                egui::pos2(px(x), plot.bottom()),
+                egui::pos2(px(x), plot.top()),
+            ],
+            refln,
+            4.0,
+            4.0,
+        ));
+    }
+    for y in [min_y, max_y] {
+        painter.extend(egui::Shape::dashed_line(
+            &[
+                egui::pos2(plot.left(), py(y)),
+                egui::pos2(plot.right(), py(y)),
+            ],
+            refln,
+            4.0,
+            4.0,
+        ));
+    }
+    // The transfer curve: flat at Min, ramp across the window, flat at Max.
+    painter.add(egui::Shape::line(
+        vec![
+            egui::pos2(px(0.0), py(min_y)),
+            egui::pos2(px(lo), py(min_y)),
+            egui::pos2(px(hi), py(max_y)),
+            egui::pos2(px(1.0), py(max_y)),
+        ],
+        curve,
+    ));
+    // Axis titles and value labels.
+    painter.text(
+        egui::pos2(plot.center().x, rect.bottom()),
+        egui::Align2::CENTER_BOTTOM,
+        "Source (controller)",
+        font.clone(),
+        weak,
+    );
+    painter.text(
+        egui::pos2(rect.left(), plot.top() - 2.0),
+        egui::Align2::LEFT_BOTTOM,
+        "Target",
+        font.clone(),
+        weak,
+    );
+    painter.text(
+        egui::pos2(plot.left() - 6.0, py(min_y)),
+        egui::Align2::RIGHT_CENTER,
+        "Min",
+        font.clone(),
+        txt,
+    );
+    painter.text(
+        egui::pos2(plot.left() - 6.0, py(max_y)),
+        egui::Align2::RIGHT_CENTER,
+        "Max",
+        font.clone(),
+        txt,
+    );
+    painter.text(
+        egui::pos2(px(lo), plot.bottom() + 3.0),
+        egui::Align2::CENTER_TOP,
+        "Action lo",
+        font.clone(),
+        txt,
+    );
+    painter.text(
+        egui::pos2(px(hi), plot.bottom() + 3.0),
+        egui::Align2::CENTER_TOP,
+        "Action hi",
+        font,
+        txt,
+    );
+}
+
 /// An int parameter as a compact drag-value in display units (US-16x08 style).
 fn param_drag(
     ui: &mut egui::Ui,
@@ -3116,6 +3224,8 @@ impl App {
             )
             .weak(),
         );
+        show_assign_schematic(ui);
+        ui.add_space(4.0);
         egui::Grid::new("gx700-assigns")
             .num_columns(5)
             .spacing([12.0, 6.0])
