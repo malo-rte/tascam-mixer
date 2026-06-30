@@ -212,17 +212,19 @@ impl RawMidi {
         Ok(())
     }
 
-    /// Bulk-read a whole block of the current patch: send `01 <block>` and return
-    /// the block's payload (everything after the echoed block id in the reply).
-    /// Block `0x01` is the full packed patch; `0x05` is the rig name.
+    /// Bulk-read a block of the current patch: send `01 <addr>` and return the
+    /// block's payload (everything after the echoed address in the reply). A
+    /// 1-byte `addr` reads a whole block (`[0x01]` the full packed patch, `[0x05]`
+    /// the name); a multi-byte `addr` reads a sub-entry (`[0x04, hi, lo]` is the
+    /// directory entry for a slot).
     ///
     /// # Errors
     /// [`Error::Timeout`] if the unit does not answer; [`Error::Transport`] on a
     /// link failure.
-    pub fn read_block(&mut self, block: u8) -> Result<Vec<u8>> {
+    pub fn read_block(&mut self, addr: &[u8]) -> Result<Vec<u8>> {
         self.drain_input();
         self.port
-            .write_all(&sysex::build_read_request(self.device_id, &[block]))
+            .write_all(&sysex::build_read_request(self.device_id, addr))
             .map_err(midi_err)?;
         let mut framer = Framer::new();
         let mut buf = [0u8; 512];
@@ -237,7 +239,7 @@ impl RawMidi {
                         if parsed.opcode != READ_REPLY {
                             continue;
                         }
-                        if let Some(rest) = parsed.payload.strip_prefix(&[block]) {
+                        if let Some(rest) = parsed.payload.strip_prefix(addr) {
                             return Ok(rest.to_vec());
                         }
                     }

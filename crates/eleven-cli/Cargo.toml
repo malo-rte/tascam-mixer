@@ -23,6 +23,7 @@ alsa = ["rackctl-eleven/alsa"]
 rackctl-eleven = { workspace = true }
 rackctl-eleven-lib = { workspace = true }
 clap.workspace = true
+clap_complete.workspace = true
 anyhow.workspace = true
 
 [lints]
