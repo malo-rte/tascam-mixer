@@ -31,10 +31,15 @@ Rules are SHOULD unless marked MUST. Stable IDs `GUI-NN`.
 
 ## The device edge (I/O off the UI thread)
 
-- **GUI-10** MUST NOT block the UI thread on device I/O. Run reads/writes on a
-  background thread that locks the device **per item** and streams results back over a
+- **GUI-10** MUST NOT block the UI thread on device I/O — **any** read or write, not
+  just the obvious big ones. A whole-bank read is seconds-to-minutes, but a *single*
+  read blocks too: an absent or silent unit blocks each request to its full timeout, so
+  one-shot **mode probes** and **lazy single-item loads** hitch the window just as
+  badly — and a probe you re-run on a timer hitches *repeatedly*. Run all device I/O on
+  a background thread that locks the device **per item** and streams results back over a
   channel; the UI drains the channel each frame and requests a repaint while work is in
-  flight. A whole-bank read is seconds-to-minutes — the window must stay responsive.
+  flight. Pump every background task (probe, bank/preset/on-demand read, batch write)
+  from one place so none can be forgotten.
 - **GUI-11** Read **incrementally** and show partial results (the list fills
   slot-by-slot). Cache the last-read state to disk so a relaunch shows it instantly,
   before the re-read fills it in.
@@ -44,6 +49,15 @@ Rules are SHOULD unless marked MUST. Stable IDs `GUI-NN`.
 - **GUI-13** Convert at the edge only: the **typed model** lives in the app; serialise
   to the device wire form only when talking to the device (architecture.adoc
   *Representations*). On-disk storage is JSON of the typed model.
+- **GUI-14** When an action needs an item that isn't loaded yet (a lazily-read row),
+  **defer it — never read synchronously inside the handler** (GUI-10). Stash the action,
+  kick off a one-shot background read, and re-run the action when the item lands —
+  re-dispatch through the same `apply`/handler so it takes its normal, now-loaded path.
+  Guard against a re-defer loop: a *failed* read must not re-trigger the read. Keep any
+  synchronous `ensure_loaded`-style fallback only where it's **provably unreachable**
+  (e.g. rows a prior bulk read already filled, with edits gated until that read
+  finished) — and say so in a comment, so the synchronous path isn't mistaken for a
+  live one.
 
 ## Editing & staging
 
@@ -56,6 +70,19 @@ Rules are SHOULD unless marked MUST. Stable IDs `GUI-NN`.
 - **GUI-22** Allow **offline editing** of anything that doesn't need the device
   (library items, composed scenes) via a scratch buffer that saves back to its source,
   with no preview. A sentinel "slot" can route the shared editor at the scratch.
+- **GUI-23** **Selection follows edit.** When a detail view (a preview, graph,
+  schematic) is driven by a current selection, editing any member value should
+  **auto-select its owner** so the view tracks what's being changed — don't make the
+  user reselect to see the effect. Have the value widget **report whether it changed**
+  and push a select action on change; in the collected-then-applied loop that's a
+  returned `bool`, not logic in the callback (GUI-2).
+- **GUI-24** For a parameter whose effect is **non-obvious** (a routing/assign, a
+  transfer curve, a mode that reinterprets other fields), draw a small **schematic**
+  beside the controls that is **mode-, value- and range-aware**: it reads the same
+  values being edited and redraws live. Scale it to the target's **real** value range
+  (from the catalog), not a fixed span — a fixed span makes the picture lie (every
+  value hugs one edge, or a moved bound doesn't move the line). A static legend doesn't
+  teach the interaction; a live one does.
 
 ## Connection & mode gating
 
@@ -91,6 +118,12 @@ Rules are SHOULD unless marked MUST. Stable IDs `GUI-NN`.
   into one cell). Keep a real monospace face for cell-aligned text (diagrams, tables).
 - **GUI-44** In dense rows prefer a **`DragValue`** over a `Slider` — a slider grows to
   fill the row and bloats the list.
+- **GUI-45** Show a device **id/enum as a name, not a raw number** — a target/source/
+  type field reads `Distortion: Drive`, not `22`. **Derive** the name from the typed
+  catalog (block label + parameter) rather than keeping a parallel hand-transcribed
+  id→name table: one source of truth, names can't drift from the (tested) mapping, and
+  there's no second transcription to get wrong. Fall back to the number only for
+  genuinely unmapped ids.
 
 ## Layout & scrolling
 
