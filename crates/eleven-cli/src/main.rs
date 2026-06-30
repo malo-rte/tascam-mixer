@@ -32,6 +32,13 @@ enum Command {
         /// Address bytes in hex, space- or comma-separated.
         addr: String,
     },
+    /// Write a value byte at a hex address, then read it back to verify.
+    Set {
+        /// Address bytes in hex, e.g. `"11 21 07"`.
+        addr: String,
+        /// New value byte `b0` in hex (0..7F for a knob).
+        value: String,
+    },
     /// Scan a block: read `<prefix> 00`..`<prefix> 7F` and print the answers.
     Scan {
         /// Leading address bytes in hex, e.g. `"11 21"`.
@@ -65,6 +72,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match &cli.command {
         Command::Read { addr } => read(cli.port.as_deref(), addr),
+        Command::Set { addr, value } => set(cli.port.as_deref(), addr, value),
         Command::Scan { prefix, from, to } => scan(cli.port.as_deref(), prefix, from, to),
         Command::Monitor => monitor(cli.port.as_deref()),
         Command::Identity => identity(cli.port.as_deref()),
@@ -109,6 +117,25 @@ fn read(port: Option<&str>, addr: &str) -> Result<()> {
         "{} -> {}  (word {word:#x} = {word})",
         addr.trim(),
         hex(raw.as_bytes())
+    );
+    Ok(())
+}
+
+/// Write a knob value (`b0`) at an address, then read it back to verify.
+fn set(port: Option<&str>, addr: &str, value: &str) -> Result<()> {
+    let bytes = parse_addr(addr)?;
+    let b0 = parse_byte(value)?;
+    let mut dev = open_device(port)?;
+    // Knob-parameter value form: b0 in the low byte, with the 0x10 type tag.
+    let want = rackctl_eleven::RawValue::from_bytes([b0, 0, 0, 0, 0x10]);
+    dev.write_raw(&bytes, &want)?;
+    let got = dev.read_raw(&bytes)?;
+    let ok = got.as_bytes().first() == Some(&b0);
+    println!(
+        "set {} = {b0:#04X} -> read back {}  [{}]",
+        addr.trim(),
+        hex(got.as_bytes()),
+        if ok { "verified" } else { "MISMATCH" }
     );
     Ok(())
 }

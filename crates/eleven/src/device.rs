@@ -40,8 +40,6 @@ impl<T: Transport> Eleven<T> {
 
     /// Write `word` to the parameter at `addr`.
     ///
-    /// CAUTION: the write opcode is unconfirmed; treat as set + read-back.
-    ///
     /// # Errors
     /// Propagates the transport's error.
     pub fn write(&mut self, addr: &[u8], word: u64) -> Result<()> {

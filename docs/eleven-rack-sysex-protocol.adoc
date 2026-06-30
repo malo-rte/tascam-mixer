@@ -117,7 +117,7 @@ Decoded reply: device id `0x0F`; manufacturer `0x13`; family `0x000B` (LSB-first
 | `0x01` | Read request | host -> unit: `F0 13 0B 0F 01 <addr> F7`. Ask for one address.
 | `0x12` | Read reply | unit -> host: `F0 13 0B 0F 12 <addr> <value> F7`. Solicited answer to `0x01`.
 | `0x02` | Change report | unit -> host: `F0 13 0B 0F 02 <addr> <value> F7`. Unsolicited, when a knob moves.
-| `0x03` | Write (set) | *Unconfirmed.* Presumed host -> unit set; verify by set + read-back, then restore.
+| `0x00` | Write (set) | host -> unit: `F0 13 0B 0F 00 <addr> <value> F7`. Confirmed by set + read-back (amp Gain `11 21 07`).
 |===
 
 .Confirmed read round-trip (amp Gain)

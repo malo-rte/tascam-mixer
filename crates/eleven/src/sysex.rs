@@ -29,8 +29,9 @@ pub const READ_REQUEST: u8 = 0x01;
 pub const READ_REPLY: u8 = 0x12;
 /// Opcode: change report (unit -> host), unsolicited when a knob moves.
 pub const CHANGE_REPORT: u8 = 0x02;
-/// Opcode: write/set (host -> unit). **Unconfirmed** — verify by set + read-back.
-pub const WRITE: u8 = 0x03;
+/// Opcode: write/set (host -> unit), `F0 13 0B <dev> 00 <addr> <value> F7`.
+/// Confirmed against hardware by set + read-back (amp Gain at `11 21 07`).
+pub const WRITE: u8 = 0x00;
 
 /// Universal Identity Request, the safe first probe: `F0 7E 7F 06 01 F7`.
 const UNIVERSAL_NON_REALTIME: u8 = 0x7E;
@@ -106,10 +107,7 @@ pub fn build_read_request(device_id: u8, addr: &[u8]) -> Vec<u8> {
     build(device_id, READ_REQUEST, addr, &[])
 }
 
-/// Build a write/set: `F0 13 0B <dev> 03 <addr> <value> F7`.
-///
-/// CAUTION: the write opcode is *unconfirmed*; this builds the presumed frame
-/// for hardware testing (set + read-back + restore), not a verified write.
+/// Build a write/set: `F0 13 0B <dev> 00 <addr> <value> F7`.
 #[must_use]
 pub fn build_write(device_id: u8, addr: &[u8], value: &RawValue) -> Vec<u8> {
     build(device_id, WRITE, addr, value.as_bytes())

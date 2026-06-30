@@ -28,9 +28,6 @@ pub trait Transport {
     fn read(&mut self, addr: &[u8]) -> Result<RawValue>;
 
     /// Write `value` at `addr`.
-    ///
-    /// CAUTION: the Eleven Rack write opcode is *unconfirmed*; on hardware this
-    /// should be used only as set + read-back + restore until verified.
     fn write(&mut self, addr: &[u8], value: &RawValue) -> Result<()>;
 
     /// Read a batch of addresses, returning one `(address, value)` pair for each

@@ -4,7 +4,7 @@
 //! The Eleven Rack is edited over USB-MIDI using Digidesign address-mapped System
 //! Exclusive: `F0 13 0B <dev> <opcode> <addr..> <value..> F7`, where `13` is
 //! Digidesign, `0B` the Eleven Rack model id, `01` a read request, `12` its read
-//! reply, `02` an unsolicited change report, and `03` a (still-unconfirmed) write.
+//! reply, `02` an unsolicited change report, and `00` a write/set.
 //! This crate wraps that surface in a typed API: the `SysEx` codec ([`sysex`]), a
 //! [`Transport`] seam with a mock and a real ALSA-rawmidi implementation, and an
 //! [`Eleven`] device facade.
