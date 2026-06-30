@@ -289,7 +289,13 @@ addresses, but the chart's *parameter names, per-model structure and value seman
 * Full block/address map beyond the amp block.
 * Per-parameter value type / range / units (int vs. float vs. packed) — the
   MIDI CC reference (above) gives names and value semantics to cross-check against.
-* Any whole-rig *bulk* read/write over the editor SysEx (rig *select* is solved:
-  CC 32 bank + Program Change).
+* *Whole-patch bulk dump.* The original editor reportedly triggered a full-patch
+  dump, and it was a *chain of messages* (a handshake / sequence, not a single
+  opcode) — the unit streams the patch in reply. Finding the trigger would replace
+  per-parameter polling (and avoid the flood-induced dormancy) with one exchange.
+  Likely connected to the port-open reports below. Hunt for it with a gentle probe:
+  watch (passively) for a large reply burst while trying truncated read addresses
+  (`01 11 3D`, `01 11`), unused opcodes, and replaying the handshake.
 * Meaning of the spontaneous reports emitted on port open
-  (`F0 13 0B 0F 02 3F 00 F7`, `... 39 01`, `... 37 00 01`, `... 37 01 00`).
+  (`F0 13 0B 0F 02 3F 00 F7`, `... 39 01`, `... 37 00 01`, `... 37 01 00`) — these
+  may be the unit's half of the bulk-dump handshake, expecting a reply.
