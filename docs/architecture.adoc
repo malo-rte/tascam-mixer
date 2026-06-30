@@ -280,29 +280,52 @@ unchanged.
 
 == Code structure
 
-The workspace is layered so the model is independent of any one device:
+A standing goal of the project is to produce *reusable components for future projects*,
+not just the CLI and GUI shipped today. Shared logic is therefore pushed *down* into
+libraries and the frontends are kept thin, so a later tool — a different device, a
+daemon, another UI — can compose the same crates without re-implementing them.
+
+The workspace is layered so the model is independent of any one device, and so a
+device's *protocol*, its *on-disk libraries*, and its *frontends* are separable:
 
 [cols="1,3",options="header"]
 |===
 | Crate | Role
-| `rackctl-ui` (`crates/ui-common`) | Cross-product UI primitives: the button colour
-  scheme (consequence-coloured actions) and the shared DSP math used by editors
-  (EQ/biquad response, compressor transfer).
-| `rackctl-<device>` (`crates/<device>`) | The *device adapter*: the parameter catalog,
-  the patch model (a byte-exact _raw_ form and a _typed_ form grouped by block), the
-  transport/codec, and the device facade (read/write patch, read/write live, factory,
-  commit). This is what a new device implements.
-| `rackctl-<device>-cli` | The command-line tool over the device library.
-| `rackctl-<device>-gui` | The graphical editor over the device library: the tabbed
-  patch/edit/presets/library UI, the per-block editors, the on-disk libraries,
-  clipboards and staging.
+| `rackctl-core` (`crates/core`) | *Device-neutral on-disk library.* The
+  self-identifying file-format envelope (format version + device id + typed payload)
+  and the `<config>/rackctl/<device>/<kind>/` path conventions, with generic
+  save/load/list/delete. Knows nothing about MIDI, patches or blocks, so any Rackctl
+  tool can reuse it (see <<File format & versioning>>).
+| `rackctl-ui` (`crates/ui-common`) | Cross-product UI primitives: the
+  consequence-coloured button scheme, the shared embedded UI font + action icons, and
+  the DSP math used by editors (EQ/biquad response, compressor transfer).
+| `rackctl-<device>` (`crates/<device>`) | The *device adapter* — pure protocol: the
+  parameter catalog, the patch model (a byte-exact _raw_ form and a _typed_ form
+  grouped by block), the transport/codec, and the device facade (read/write patch,
+  read/write live, factory, commit). The `Transport` trait is the seam (see below).
+  This is what a new device implements.
+| `rackctl-<device>-lib` (`crates/<device>-lib`) | The device's *library and
+  management* layer, atop `rackctl-core` + the adapter: the saved-file formats with
+  multi-format parsing (envelope, bare typed, legacy), the named patch/scene/block
+  libraries, and the device-touching management operations (back up a bank,
+  capture/restore a scene, copy a slot).
+| `rackctl-<device>-cli` / `-gui` | Thin frontends over the device library — the CLI
+  commands, and the tabbed graphical editor (per-block editors, clipboards, staging).
 |===
 
+*Reserved for later — the link layer.* Talking to the hardware is isolated behind the
+adapter's `Transport` trait, so it can be swapped without touching anything above it. A
+small `rackctl-midi` crate (the trait plus a direct rawmidi link and the mock) and a
+`rackctld` daemon that owns the device and serves several clients are planned: a client
+reaches the daemon through a `DaemonClient` transport, so the device facade, the
+protocol and the management layer are identical whether the link is direct or via the
+daemon. This is also what lets two tools (CLI and GUI) share one busy MIDI port.
+
 The device-neutral _model_ — scene/patch/block, the library operations, the clipboards
-and the staging flow — is what this document specifies; today each GUI implements it
-against its own device library, and the shared pieces (UI primitives, DSP math) live in
-`rackctl-ui`. Extracting more of the model into a shared crate, as a second and third
-device land, is the direction of travel.
+and the staging flow — is what this document specifies. The file format and the on-disk
+libraries are realised once, in `rackctl-core` + `rackctl-<device>-lib`, for both
+frontends to build on; pulling the remaining model logic (clipboards, staging) down
+into shared crates as more devices land is the continuing direction.
 
 The GUIs follow an _action-collected-then-applied_ pattern: rendering pushes
 `Action` values into a list (never mutating device or model state mid-frame), which are

@@ -82,13 +82,15 @@ Cargo.toml                 # Rust workspace (+ shared lint policy)
 clippy.toml, deny.toml     # project lint / supply-chain config
 flake.nix                  # Nix flake: packages, apps, dev shell
 crates/
+  core/                    # rackctl-core: device-neutral on-disk library (format + paths)
+  ui-common/               # rackctl-ui: shared UI primitives (button colours, font/icons, DSP)
   us16x08/                 # the control-surface library (rackctl-us16x08)
   us16x08-cli/             # the `rackctl-us16x08` command-line tool
   us16x08-gui/             # the `rackctl-us16x08-gui` graphical mixer
-  gx700/                   # the GX-700 SysEx/patch library (rackctl-gx700)
+  gx700/                   # the GX-700 device adapter: SysEx codec + patch model (rackctl-gx700)
+  gx700-lib/               # rackctl-gx700-lib: GX-700 libraries + patch management
   gx700-cli/               # the `rackctl-gx700` command-line tool
   gx700-gui/               # the `rackctl-gx700-gui` patch editor
-  ui-common/               # shared GUI helpers (ActionKind button colours)
 packaging/                 # desktop entries + packaging notes
 ----
 
