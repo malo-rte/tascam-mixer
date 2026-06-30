@@ -325,6 +325,57 @@ buffer, then run this store sequence. (Captured against firmware `0157`; all thr
 sample saves targeted `00 00`, so the exact bank/slot byte order is to be confirmed on a
 second slot.)
 
+== Startup sequence and directories
+
+A USB capture of the Windows editor connecting shows it has *no special wake/init* —
+it just reads, in order:
+
+. `01 22` -> device info (one byte; `0x41` on the captured unit).
+. `01 20 <0x00..0x40>` -> the *model catalog* (65 entries; read-only).
+. `01 04 <slot>` -> the *patch directory* for every slot (~208), each entry a flag
+  byte + the slot's name.
+. then the current patch's blocks (`01 21`, `01 05`, …) and its parameters
+  (`01 11 <model> <index>`).
+
+So two read-only directory blocks anchor everything: *`0x20` = the model catalog*
+(every amp/effect/input the unit knows, indexed) and *`0x04` = the patch directory*
+(every slot's name). Reading `0x04` is a faster way to list the whole library than
+iterating Program Change. Block `0x04` is *also* the slot a save targets (see *Storing
+a patch*).
+
+=== Model catalog (block `0x20`)
+
+`01 20 <index>` returns `12 20 <index> <internal-id (12 bytes)> <…flags…> <display
+name> 00`. The 65 models on firmware `0157`:
+
+[cols="1,3,1,3",options="header"]
+|===
+| Idx | Name | Idx | Name
+| `00` | Eleven (amp engine) | `21` | Dyn Delay
+| `01`-`03` | C1 Chorus/Vibrato | `22` | Dyn Delay
+| `04`-`06` | Multi Chorus | `23` | Shine Wah
+| `07`-`08` | Flanger | `24` | Black Wah
+| `09`-`0A` | Vibe Phaser | `25` | Tuner
+| `0B`-`0C` | Orange Phaser | `26`-`27` | Blackpanel Spring Reverb
+| `0D`-`0F` | Roto Speaker | `28`-`2A` | Eleven SR (reverb)
+| `10`-`11` | Graphic EQ | `2B`-`2C` | Volume Pedal
+| `12`-`13` | Parametric EQ | `2D`-`33` | FX Loop (routing variants)
+| `14` | Gray Compressor | `34` | DSP2 Copier
+| `15`-`16` | Dyn3 Compressor | `35` | Dummy
+| `17` | Tri-Knob Fuzz | `36` | Mute
+| `18` | Black Op Distortion | `37` | Guitar In
+| `19` | Green JRC Overdrive | `38` | Mic In
+| `1A` | White Boost | `39` | FakeStereo In
+| `1B` | DC Distortion | `3A` | PtLe Guitar In
+| `1C`-`1D` | EP Tape Echo | `3B`-`3D` | Line L/R/S In
+| `1E`-`1F` | BBD Delay | `3E`-`40` | Digital L/R/S In
+| `20` | Dyn Delay | |
+|===
+
+(Duplicate indices per name are the per-slot instances — e.g. an effect usable in the
+MOD vs FX1 vs FX2 slot, matching the User Guide's "as MOD / as FX1 / as FX2" columns.
+The internal ids like `DigiDstrTS8u`, `DigiSprnSpru` disambiguate them.)
+
 == MIDI CC reference (foot-controller control)
 
 Separately from the editor's address-mapped SysEx, the unit exposes many parameters
