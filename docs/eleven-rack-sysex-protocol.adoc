@@ -180,16 +180,78 @@ Sanity checks from a live amp-block scan:
 | `11 21 0D` | `6D 00 00 00 10` | low 7 bits = `0x6D` (Gain), plus a high tag bit
 |===
 
-What the 32-bit word *means* per parameter is *not yet uniform*: some parameters
-are small integers (`0..127`, e.g. a knob position in the low 7 bits with a high
-tag bit set), others appear to be 32-bit floats or packed multi-field words. A
-naive IEEE-754 read of the whole word yields NaN, so the encoding is *not* a plain
-float in this bit order.
+For the front-panel controls mapped so far the value lives in *b0* alone, with the
+upper bytes a constant type tag (`00 00 00 10`):
 
-IMPORTANT: Pinning each parameter's type, range and units is open reverse-engineering
-work. The method: turn one knob through min / centre / max, capture the reports, and
-correlate the same rig's stored values from its `.tfx` file
-(see `eleven-rack-rig-format.adoc`).
+* *Knob* parameters: `b0` = `0..127` (e.g. amp Gain sweeps `0x00..0x7F`).
+* *Switch / bypass* parameters: `b0` = `0x3F` (off) / `0x40` (on) — the same
+  `0-63 = off, 64-127 = on` split the User Guide's CC reference uses.
+
+Some other parameters use the full 32-bit word (multi-field or float-like); those
+are not a plain IEEE-754 float in this bit order (a naive read yields NaN) and their
+scaling is still being decoded. The on-disk `.tfx` stores the *effect* parameters as
+32-bit floats (see `eleven-rack-rig-format.adoc`).
+
+[TIP]
+====
+The reliable, safe way to identify a parameter's address is *passive listening* —
+it sends no read requests, so it can never overrun or wedge the unit:
+
+----
+aseqdump -p <client>:0        # the "Eleven Rack Rig" sequencer port
+----
+
+Turn one control; the unit emits `F0 13 0B 0F 02 <addr> <value> F7` and the address
+is that control's. Sweeping the knob min->max also gives its range. (Polling the unit
+with read requests is fine in small bursts but a sustained flood makes its editor
+parser go dormant — see the caution below.)
+====
+
+CAUTION: Do *not* flood the unit with read requests. A large sustained scan (thousands
+of `0x01` requests) overruns its MIDI parser and the editor interface goes *dormant* —
+it keeps answering the Universal Identity request but stops answering parameter reads,
+and a power-cycle may not revive it (re-enumerating the USB cable does). Keep reads
+paced and in small bursts, and prefer passive listening for discovery.
+
+== Parameter catalog (in progress)
+
+Mapped live by passive listening on preset *A1*, amp model *DC Modern* (firmware
+`0157`). The amp model determines its block id; this model answers at SysEx block
+`0x3D`.
+
+.Amp model "DC Modern" — block `0x3D`
+[cols="2,2,2",options="header"]
+|===
+| Address | Control | Value
+| `11 3D 07` | Gain | 0..127
+| `11 3D 09` | Master | 0..127
+| `11 3D 0A` | Treble | 0..127
+| `11 3D 0B` | Middle | 0..127
+| `11 3D 0C` | Bass | 0..127
+| `11 3D 0D` | Presence | 0..127
+| `11 3D 0E` | Bright | `0x3F` off / `0x40` on
+|===
+
+.Effect bypass (parameter `01` of each effect block; `0x3F` off / `0x40` on)
+[cols="2,3",options="header"]
+|===
+| Address | Effect
+| `11 49 01` | Distortion bypass
+| `11 4B 01` | FX-loop bypass
+| `11 4C 01` | FX1 bypass
+| `11 4D 01` | FX2 bypass
+| `11 4E 01` | Modulation bypass
+| `11 4F 01` | Delay bypass
+| `11 50 01` | Reverb bypass
+| `11 2E 03` | Amp Output level (0..127)
+|===
+
+NOTE: Block ids are model/slot-specific: this rig's amp is `0x3D` and its effect slots
+are `0x49`..`0x50`; a different rig had its amp at `0x21`. Output routing ("To Amp 1/2")
+lives in *section `0x36`* and touches many addresses at once (a routing matrix). The
+front-panel *Rig Volume* emits only short physical-position reports, not an addressable
+`0x11` parameter. Completing the catalog (effect-internal params, the other amp models)
+is the remaining `#56` work.
 
 == Rig selection
 
