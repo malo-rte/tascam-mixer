@@ -35,6 +35,8 @@
 //! decoded through its encoding — against a real 100-patch bank, and the multi-byte
 //! and assign/scale values were live-round-tripped on hardware.
 
+use crate::error::{Error, Result};
+
 /// Base address (`08 00 00 00`) of the *individual* temporary buffer: writing one
 /// parameter here edits the current sound live, with immediate effect.
 pub const TEMP_INDIVIDUAL_BASE: [u8; 4] = [0x08, 0x00, 0x00, 0x00];
@@ -678,6 +680,64 @@ impl Param {
         if let Some(slot) = block_bytes.get_mut(off..off + n) {
             slot.copy_from_slice(buf.get(..n).unwrap_or(&buf));
         }
+    }
+
+    /// Interpret a raw device value as a typed [`Value`] by this parameter's kind.
+    #[must_use]
+    pub const fn value_from_raw(self, raw: i32) -> Value {
+        match self.kind() {
+            Kind::Bool => Value::Bool(raw != 0),
+            Kind::Int { .. } => Value::Int(raw),
+            Kind::Enum { .. } => Value::Enum(raw),
+        }
+    }
+
+    /// Validate `value` against this parameter's kind and range, returning the raw
+    /// device value to write.
+    ///
+    /// # Errors
+    /// - [`Error::TypeMismatch`] if `value`'s kind does not match this parameter.
+    /// - [`Error::ValueOutOfRange`] if an int/enum value is out of range.
+    pub fn checked_raw(self, value: Value) -> Result<i32> {
+        let key = self.key();
+        match (self.kind(), value) {
+            (Kind::Bool, Value::Bool(b)) => Ok(i32::from(b)),
+            (Kind::Int { min, max, .. }, Value::Int(v)) => {
+                range_check(key, v, min, max)?;
+                Ok(v)
+            }
+            (Kind::Enum { values, .. }, Value::Enum(v)) => {
+                let max = i32::try_from(values.len().saturating_sub(1)).unwrap_or(0);
+                range_check(key, v, 0, max)?;
+                Ok(v)
+            }
+            (kind, _) => Err(Error::TypeMismatch {
+                param: key,
+                expected: kind_name(kind),
+            }),
+        }
+    }
+}
+
+/// Reject a value outside `min..=max`.
+fn range_check(param: &'static str, value: i32, min: i32, max: i32) -> Result<()> {
+    if value < min || value > max {
+        return Err(Error::ValueOutOfRange {
+            param,
+            value,
+            min,
+            max,
+        });
+    }
+    Ok(())
+}
+
+/// Human-readable name for a [`Kind`], for error messages.
+const fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Bool => "boolean",
+        Kind::Int { .. } => "integer",
+        Kind::Enum { .. } => "enum",
     }
 }
 

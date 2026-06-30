@@ -1,0 +1,18 @@
+[package]
+name = "rackctl-gx700-model"
+version.workspace = true
+description = "BOSS GX-700 data model: the typed per-block patch structs, the raw byte-exact form, the parameter catalog, and the lossless conversion between them. Pure data — no MIDI, no I/O — so any tool can read, edit and validate GX-700 patches without the device layer."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false             # internal support crate (path dependency), not for crates.io
+
+[dependencies]
+serde = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

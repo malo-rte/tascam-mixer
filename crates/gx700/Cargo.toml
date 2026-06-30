@@ -21,10 +21,9 @@ default = ["alsa"]
 alsa = ["dep:rackctl-midi"]
 
 [dependencies]
+rackctl-gx700-model = { workspace = true }
 rackctl-midi = { workspace = true, optional = true }
-serde = { workspace = true }
 serde_json.workspace = true
-thiserror.workspace = true
 
 [lints]
 workspace = true

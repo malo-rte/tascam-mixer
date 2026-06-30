@@ -1,14 +1,20 @@
-//! Error and result types for the crate.
+//! Error and result types for the GX-700 stack.
+//!
+//! This is the shared error vocabulary for the whole GX-700 stack (model and
+//! protocol). It lives in the model crate so both layers can use one `Error`; the
+//! data model produces the validation/patch variants, and the protocol crate
+//! produces the transport ones (mapping its link errors in — see
+//! `rackctl-gx700`'s `RawMidi`).
 
 use thiserror::Error;
 
-/// Convenience alias for results returned across this crate.
+/// Convenience alias for results returned across the GX-700 crates.
 pub type Result<T> = core::result::Result<T, Error>;
 
-/// Everything that can go wrong while talking to a BOSS GX-700.
+/// Everything that can go wrong while modelling or talking to a BOSS GX-700.
 ///
 /// The variants deliberately avoid exposing backend-specific error types
-/// (e.g. `alsa::Error` or `std::io::Error`) so the public surface stays
+/// (e.g. `alsa::Error` or `std::io::Error`) so the surface stays
 /// transport-agnostic (rust-coding-rules RS-63); a transport folds its own
 /// errors into [`Error::Transport`].
 #[derive(Debug, Error)]
@@ -69,17 +75,4 @@ pub enum Error {
     /// a value that does not fit it).
     #[error("patch error: {0}")]
     Patch(String),
-}
-
-/// Map a byte-level MIDI link error onto this crate's [`enum@Error`], so the Roland
-/// transport can use `?` over `rackctl-midi` calls.
-#[cfg(feature = "alsa")]
-impl From<rackctl_midi::MidiError> for Error {
-    fn from(e: rackctl_midi::MidiError) -> Self {
-        match e {
-            rackctl_midi::MidiError::PortBusy(p) => Error::PortBusy(p),
-            rackctl_midi::MidiError::PortNotFound(p) => Error::PortNotFound(p),
-            rackctl_midi::MidiError::Io(s) => Error::Transport(s),
-        }
-    }
 }

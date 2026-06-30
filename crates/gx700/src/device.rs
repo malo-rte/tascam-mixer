@@ -1,8 +1,8 @@
 //! The typed device facade over a [`Transport`].
 
 use crate::backend::Transport;
-use crate::error::{Error, Result};
-use crate::param::{Kind, Param, Value};
+use crate::error::Result;
+use crate::param::{Param, Value};
 
 /// A BOSS GX-700, addressed through typed [`Param`]s.
 ///
@@ -23,26 +23,22 @@ impl<T: Transport> Gx700<T> {
     /// Read a parameter's current value.
     ///
     /// # Errors
-    /// Propagates transport errors, and [`Error::Sysex`]/[`Error::Timeout`] from
+    /// Propagates transport errors, and [`crate::Error::Sysex`]/[`crate::Error::Timeout`] from
     /// a hardware transport if the reply is malformed or absent.
     pub fn get(&mut self, param: Param) -> Result<Value> {
         let bytes = self.transport.request(&param.address(), param.width())?;
         let raw = param.encoding().decode(&bytes);
-        Ok(match param.kind() {
-            Kind::Bool => Value::Bool(raw != 0),
-            Kind::Int { .. } => Value::Int(raw),
-            Kind::Enum { .. } => Value::Enum(raw),
-        })
+        Ok(param.value_from_raw(raw))
     }
 
     /// Write a parameter's value, validating its kind and range.
     ///
     /// # Errors
-    /// - [`Error::TypeMismatch`] if `value`'s kind does not match `param`.
-    /// - [`Error::ValueOutOfRange`] if an int/enum value is out of range.
+    /// - [`crate::Error::TypeMismatch`] if `value`'s kind does not match `param`.
+    /// - [`crate::Error::ValueOutOfRange`] if an int/enum value is out of range.
     /// - Transport errors otherwise.
     pub fn set(&mut self, param: Param, value: Value) -> Result<()> {
-        let raw = encode(param, value)?;
+        let raw = param.checked_raw(value)?;
         let mut buf = [0u8; 2];
         let n = param.encoding().encode(raw, &mut buf);
         let data: &[u8] = &buf;
@@ -82,54 +78,9 @@ impl Gx700<crate::backend::RawMidi> {
     /// Open a GX-700 on the rawmidi `port` (`hw:CARD,DEV`) and wrap it.
     ///
     /// # Errors
-    /// [`Error::PortNotFound`]/[`Error::Transport`] if the port cannot be opened.
+    /// [`crate::Error::PortNotFound`]/[`crate::Error::Transport`] if the port cannot be opened.
     pub fn open(port: &str) -> Result<Self> {
         Ok(Self::new(crate::backend::RawMidi::open(port)?))
-    }
-}
-
-/// Validate `value` against `param` and return the raw device value. The byte
-/// layout (single byte, MIDI-14-bit, or nibblized) is applied by the caller via
-/// [`rackctl_gx700::Encoding::encode`](crate::param::Encoding::encode).
-fn encode(param: Param, value: Value) -> Result<i32> {
-    let key = param.key();
-    match (param.kind(), value) {
-        (Kind::Bool, Value::Bool(b)) => Ok(i32::from(b)),
-        (Kind::Int { min, max, .. }, Value::Int(v)) => {
-            range_check(key, v, min, max)?;
-            Ok(v)
-        }
-        (Kind::Enum { values, .. }, Value::Enum(v)) => {
-            let max = i32::try_from(values.len().saturating_sub(1)).unwrap_or(0);
-            range_check(key, v, 0, max)?;
-            Ok(v)
-        }
-        (kind, _) => Err(Error::TypeMismatch {
-            param: key,
-            expected: kind_name(kind),
-        }),
-    }
-}
-
-/// Reject a value outside `min..=max`.
-fn range_check(param: &'static str, value: i32, min: i32, max: i32) -> Result<()> {
-    if value < min || value > max {
-        return Err(Error::ValueOutOfRange {
-            param,
-            value,
-            min,
-            max,
-        });
-    }
-    Ok(())
-}
-
-/// Human-readable name for a [`Kind`], for error messages.
-const fn kind_name(kind: Kind) -> &'static str {
-    match kind {
-        Kind::Bool => "boolean",
-        Kind::Int { .. } => "integer",
-        Kind::Enum { .. } => "enum",
     }
 }
 
@@ -138,6 +89,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
     use crate::backend::MockTransport;
+    use crate::error::Error;
     use crate::param;
 
     fn dev() -> Gx700<MockTransport> {

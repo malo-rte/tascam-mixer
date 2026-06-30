@@ -41,26 +41,25 @@
 
 mod backend;
 mod device;
-mod error;
-mod patch;
+mod patch_io;
 
 pub mod monitor;
-pub mod param;
-pub mod scene;
 pub mod sysex;
-pub mod typed;
-pub mod units;
+
+// The data model lives in `rackctl-gx700-model`; re-export it so this crate's
+// public surface is unchanged (`rackctl_gx700::typed::Compressor`, `::param`, the
+// `RawPatch`/`Patch` types, the shared `Error`, …). Internally, `crate::param`,
+// `crate::error`, etc. resolve to these re-exports too.
+pub use rackctl_gx700_model::{
+    Block, Encoding, Error, Kind, NAME_LEN, PATCH_VERSION, Param, Patch, PatchHeader, RawPatch,
+    Result, SCENE_VERSION, Scalar, Scene, USER_PATCH_COUNT, Value, decode_name, encode_name,
+    patch_base,
+};
+pub use rackctl_gx700_model::{error, param, patch, scene, typed, units};
 
 #[cfg(feature = "alsa")]
 pub use backend::RawMidi;
 pub use backend::{MockTransport, Transport};
 pub use device::Gx700;
-pub use error::{Error, Result};
 pub use monitor::MidiDecoder;
-pub use param::{Block, Encoding, Kind, Param, Value};
-pub use patch::{
-    NAME_LEN, PATCH_VERSION, Patch, PatchHeader, RawPatch, Scalar, decode_name, encode_name,
-    patch_base,
-};
-pub use scene::{SCENE_VERSION, Scene, USER_PATCH_COUNT};
 pub use sysex::{Framer, RolandMessage};

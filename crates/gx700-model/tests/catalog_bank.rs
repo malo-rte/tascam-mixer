@@ -12,7 +12,7 @@
 
 use std::path::PathBuf;
 
-use rackctl_gx700::{Kind, RawPatch, param};
+use rackctl_gx700_model::{Kind, RawPatch, param};
 
 /// Load every `U*.json` fixture as a `RawPatch`.
 fn bank() -> Vec<(String, RawPatch)> {

@@ -51,6 +51,17 @@ const STREAM_QUIET_POLLS: u32 = 300;
 /// patch stream is complete.
 const LAST_SUB_BLOCK: u8 = 0x0D;
 
+/// Fold a byte-level link error into this crate's [`Error`]. (The shared `Error`
+/// lives in `rackctl-gx700-model`, so a blanket `From<MidiError>` would be an
+/// orphan impl; map it here at the protocol edge instead.)
+fn midi_err(e: rackctl_midi::MidiError) -> Error {
+    match e {
+        rackctl_midi::MidiError::PortBusy(p) => Error::PortBusy(p),
+        rackctl_midi::MidiError::PortNotFound(p) => Error::PortNotFound(p),
+        rackctl_midi::MidiError::Io(s) => Error::Transport(s),
+    }
+}
+
 /// A live connection to a GX-700: the Roland protocol over a [`MidiPort`].
 #[derive(Debug)]
 pub struct RawMidi {
@@ -66,7 +77,7 @@ impl RawMidi {
     /// [`Error::Transport`] if ALSA reports an error while iterating cards or
     /// devices.
     pub fn ports() -> Result<Vec<String>> {
-        Ok(MidiPort::list_ports()?)
+        MidiPort::list_ports().map_err(midi_err)
     }
 
     /// Open the rawmidi port at `port` (a `hw:CARD,DEV` address) for both input
@@ -78,7 +89,7 @@ impl RawMidi {
     /// [`Error::Transport`] if ALSA cannot open the input or output stream.
     pub fn open(port: &str) -> Result<Self> {
         Ok(Self {
-            port: MidiPort::open(port)?,
+            port: MidiPort::open(port).map_err(midi_err)?,
             device_id: DEFAULT_DEVICE_ID,
         })
     }
@@ -94,7 +105,7 @@ impl RawMidi {
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
         loop {
-            match self.port.read(&mut buf)? {
+            match self.port.read(&mut buf).map_err(midi_err)? {
                 0 => sleep(POLL_INTERVAL),
                 n => {
                     let chunk = buf.get(..n).unwrap_or(&[]);
@@ -117,7 +128,7 @@ impl RawMidi {
         let mut decoder = crate::monitor::MidiDecoder::new();
         let mut buf = [0u8; 256];
         loop {
-            match self.port.read(&mut buf)? {
+            match self.port.read(&mut buf).map_err(midi_err)? {
                 0 => sleep(POLL_INTERVAL),
                 n => {
                     let chunk = buf.get(..n).unwrap_or(&[]);
@@ -156,7 +167,7 @@ impl RawMidi {
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
         for _ in 0..REPLY_POLLS {
-            match self.port.read(&mut buf)? {
+            match self.port.read(&mut buf).map_err(midi_err)? {
                 0 => sleep(POLL_INTERVAL),
                 n => {
                     let chunk = buf.get(..n).unwrap_or(&[]);
@@ -237,7 +248,7 @@ impl RawMidi {
 impl Transport for RawMidi {
     fn send(&mut self, addr: &[u8], data: &[u8]) -> Result<()> {
         let msg = sysex::build_dt1(self.device_id, addr, data);
-        self.port.write_all(&msg)?;
+        self.port.write_all(&msg).map_err(midi_err)?;
         // Pace consecutive DT1s so a bulk (multi-sub-block) patch write is not
         // dropped by the device. See [`WRITE_PACE`].
         sleep(WRITE_PACE);
@@ -254,7 +265,7 @@ impl Transport for RawMidi {
             *last = u8::try_from(len & 0x7f).unwrap_or(0x7f);
         }
         let msg = sysex::build_rq1(self.device_id, addr, &size);
-        self.port.write_all(&msg)?;
+        self.port.write_all(&msg).map_err(midi_err)?;
 
         let mut out = self.read_dt1_reply(addr)?;
         out.resize(len, 0);
@@ -272,12 +283,14 @@ impl Transport for RawMidi {
             remaining >>= 7;
         }
         let msg = sysex::build_rq1(self.device_id, addr, &sz);
-        self.port.write_all(&msg)?;
+        self.port.write_all(&msg).map_err(midi_err)?;
         self.collect_dt1_stream()
     }
 
     fn program_change(&mut self, program: u8) -> Result<()> {
-        self.port.write_all(&[0xC0, program & 0x7f])?;
+        self.port
+            .write_all(&[0xC0, program & 0x7f])
+            .map_err(midi_err)?;
         Ok(())
     }
 }
