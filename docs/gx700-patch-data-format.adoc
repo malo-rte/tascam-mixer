@@ -399,22 +399,24 @@ Level/Chain control assigns (the assign Target nibble pair).
 | 10-19 (Wah) | ON/OFF, MODE, PEAK, PEDAL-FREQ, AUTO-POL, AUTO-SENS, AUTO-MANU, AUTO-RATE, AUTO-DEPTH, LEVEL
 | 20-25 (Dist) | ON/OFF, TYPE, DRIVE, BASS, TREBLE, LEVEL
 | 26-35 (Preamp) | ON/OFF, TYPE, VOLUME, BASS, MIDDLE, TREBLE, PRESENCE, MASTER, BRIGHT, GAIN
-| 36-39 (Loop) | ON/OFF, LEVEL, RETURN, MODE
+| 36-39 (Loop) | ON/OFF, RETURN, SEND, MODE
 | 40-46 (EQ) | ON/OFF, LOW-GAIN, MID-FREQ, MID-GAIN, MID-Q, HI-GAIN, LEVEL
 | 47-51 (Speaker) | ON/OFF, TYPE, MIC-SETTING, MIC-LEVEL, DIRECT-LEV
 | 52-55 (Noise S.) | ON/OFF, THRESHOLD, RELEASE, LEVEL
-| 56-90 (Modulation) | MOD:ON/OFF(56), RATE, DEPTH, MANUAL, RESONANCE, FL-SEPARATI, FL-GATE, PH-TYPE, PH-STEP, PS-TYPE(66), PS-PITCH1..3(67-69), HR-KEY(70), HR-INT1..3(71-73), PS&HR-PAN1..3(74-76), PS&HR-LEV1..3(77-79), PS&HR-BAL(80), PS&HR-TOTAL(81), VB-TRIGGER(82), VB-RiseTIME(83), RM-FREQ(84), RM-E.LEVEL(85), RM-D.LEVEL(86), HU-TYPE(87), HU-VOWEL1(88), HU-VOWEL2(89), HU-TRIGGER(90)
-| 91-107 (Delay) | ON/OFF(91), MODE, NR-TIME C/L/R(93-95), TM-TEMPO(96), TM-INT C/L/R(97-99), FEEDBACK(100), LEVEL C/L/R(101-103), HIGH-DAMP(104), HI-CUT(105), SMOOTH(106), DIRECT-LEV(107)
-| 108-116 (Chorus) | ON/OFF(108), MODE, RATE, DEPTH, PREDELAY, LOW-CUT, HI-CUT, WAVE, EFFECT-LEV(116)
-| 117-121 (Tremolo) | ON/OFF, MODE, RATE, DEPTH, BALANCE
-| 122-131 (Reverb) | ON/OFF(122), TYPE, RevTIME, PREDELAY, LOW-CUT, HI-CUT, DIFFUSION, EFFECT-LEV, DIRECT-LEV(130)
+| 56-90 (Modulation) | ON/OFF(56), MODE(57), RATE, DEPTH, MANUAL, RESONANCE, FL-SEPARATI, FL-GATE, PH-TYPE, PH-STEP, PS-TYPE(66), PS-PITCH1..3(67-69), RH-KEY(70), HR-INT1..3(71-73), PS&HR-PAN1..3(74-76), PS&HR-LEV1..3(77-79), PS&HR-BAL(80), PS&HR-TOTAL(81), VB-TRIGGER(82), VB-RiseTIME(83), RM-FREQ(84), RM-E.LEVEL(85), RM-D.LEVEL(86), HU-TYPE(87), HU-VOWEL1(88), HU-VOWEL2(89), HU-TRIGGER(90)
+| 91-108 (Delay) | ON/OFF(91), MODE(92), TIME C/L/R(93-95), TM-TEMPO(96), TM-INT C/L/R(97-99), FEEDBACK(100), LEVEL C/L/R(101-103), HIGH-DAMP(104), HI-CUT(105), SMOOTH(106), EFFECT-LEV(107), DIRECT-LEV(108)
+| 109-117 (Chorus) | ON/OFF(109), MODE, RATE, DEPTH, PREDELAY, LOW-CUT, HI-CUT, WAVE, EFFECT-LEV(117)
+| 118-122 (Tremolo) | ON/OFF(118), MODE, RATE, DEPTH, BALANCE(122)
+| 123-131 (Reverb) | ON/OFF(123), TYPE, RevTIME, PREDELAY, LOW-CUT, HI-CUT, DIFFUSION, EFFECT-LEV, DIRECT-LEV(131)
 | 132-133 | BYPASS, TUNER
 |===
 
-NOTE: Ids `91`..`133` were read from a dense scan; the block *groupings and names*
-are reliable, but a single missed level row (Delay has both Effect and Direct level)
-could shift individual ids by ±1 in that range. Verify an exact id against the device
-before relying on it. Ids `0`..`90` are direct reads.
+NOTE: The `108`..`133` ids were reconciled against the hex codes and the firm
+`BYPASS`=`132`/`TUNER`=`133` endpoints: Delay carries *both* Effect (`107`) and
+Direct (`108`) level, which shifts Chorus/Tremolo/Reverb up by one versus an earlier
+read of this table. The mapping is mirrored in `param::ASSIGN_TARGETS` (each id ->
+catalog key), but the id->parameter pairing is still **provisional** pending a
+hardware check — verify an exact id against the device before relying on it.
 
 .Table-1.3 — Assign source (`0`..`67`)
 [cols="1,4",options="header"]
