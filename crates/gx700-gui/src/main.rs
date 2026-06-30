@@ -5,6 +5,7 @@ mod app;
 mod config;
 mod device;
 mod loader;
+mod prober;
 mod writer;
 
 use anyhow::Result;

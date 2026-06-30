@@ -22,6 +22,7 @@ use rackctl_ui::{ActionKind, action_button};
 use crate::config::{self, CachedRow, GuiConfig};
 use crate::device::{self, Device, SharedDevice};
 use crate::loader::{Loaded, Loader, PRESET_END, PRESET_SLOTS, PRESET_START, USER_SLOTS};
+use crate::prober::{Probe, Prober};
 use crate::writer::{Writer, Written};
 
 /// Reopen the device on demand (the Retry button), e.g. after the port appears.
@@ -1876,6 +1877,15 @@ pub(crate) struct App {
     bulk_ok: Option<bool>,
     /// `egui` input-time of the last BULK LOAD probe, to throttle re-probes.
     last_probe: f64,
+    /// A BULK LOAD probe running off the UI thread, while in flight (see
+    /// `drive_startup` / `drain_prober`).
+    prober: Option<Prober>,
+    /// An on-demand single-slot read started to audition or copy a factory preset
+    /// (read shallow, so its full patch isn't loaded yet) — kept off the UI thread.
+    lazy_loader: Option<Loader>,
+    /// The action to re-run once `lazy_loader` lands the patch it was reading
+    /// (`Audition`/`CopyRow` of the preset that needed loading).
+    pending_after_load: Option<Action>,
     /// Launched with `--offline`: started without connecting, for scene/library
     /// editing. The top bar offers Connect instead of Retry.
     offline: bool,
@@ -1968,6 +1978,9 @@ impl App {
             write_failed: Vec::new(),
             bulk_ok: None,
             last_probe: 0.0,
+            prober: None,
+            lazy_loader: None,
+            pending_after_load: None,
             offline,
             port,
             status: if connected {
@@ -2029,22 +2042,65 @@ impl App {
     /// Probe the unit's BULK LOAD mode and react: start the bank read once it's in
     /// BULK LOAD (or if the probe can't run, e.g. on the mock), otherwise mark it
     /// not-yet-ready so the blocking dialog stays up. Restores the probed slot.
-    fn probe_now(&mut self) {
-        if !self.connected {
+    /// Start a BULK LOAD probe off the UI thread (if none is already running and
+    /// we're connected). The result is handled in `drain_prober`.
+    fn request_probe(&mut self) {
+        if self.connected && self.prober.is_some() {
             return;
         }
-        let result = device::lock(&self.device).probe_bulk_load(PROBE_SLOT);
-        // `Ok(false)` is the only "still waiting" case. `Ok(true)` is in BULK LOAD;
-        // `Err` means the probe can't run (unit silent, or no patch to read — e.g.
-        // the mock), so don't block on it — let the bank read surface real trouble.
-        if matches!(result, Ok(false)) {
-            self.bulk_ok = Some(false);
-            "waiting for BULK LOAD mode on the unit…".clone_into(&mut self.status);
-        } else {
-            let first = self.bulk_ok != Some(true);
-            self.bulk_ok = Some(true);
-            if first {
-                self.start_load();
+        if self.connected {
+            self.prober = Some(Prober::spawn(Arc::clone(&self.device), PROBE_SLOT));
+        }
+    }
+
+    /// Pump every background task each frame: drive the BULK LOAD probe, drain the
+    /// loaders/writer, and keep the window repainting while any device work (probe,
+    /// bank/preset/on-demand read, batch write) is in flight — so the UI thread
+    /// never blocks on device I/O.
+    fn pump_background(&mut self, ctx: &egui::Context) {
+        self.drive_startup(ctx);
+        self.drain_prober();
+        self.drain_loader();
+        self.maybe_load_presets();
+        self.drain_preset_loader();
+        self.drain_lazy();
+        self.drain_write();
+        if self.loader.is_some()
+            || self.preset_loader.is_some()
+            || self.writer.is_some()
+            || self.prober.is_some()
+            || self.lazy_loader.is_some()
+        {
+            ctx.request_repaint_after(Duration::from_millis(150));
+        }
+        // Keep re-probing while waiting for the unit to enter BULK LOAD mode.
+        if self.bulk_ok == Some(false) {
+            ctx.request_repaint_after(Duration::from_millis(500));
+        }
+    }
+
+    /// React to a finished background BULK LOAD probe (see `request_probe`).
+    fn drain_prober(&mut self) {
+        let Some(prober) = &self.prober else {
+            return;
+        };
+        let Some(outcome) = prober.poll() else {
+            return; // still probing
+        };
+        self.prober = None;
+        match outcome {
+            Probe::Waiting => {
+                self.bulk_ok = Some(false);
+                "waiting for BULK LOAD mode on the unit…".clone_into(&mut self.status);
+            }
+            // In BULK LOAD, or the probe can't run (mock / silent unit) — proceed and
+            // let the bank read surface any real trouble.
+            Probe::InBulkLoad | Probe::CantRun => {
+                let first = self.bulk_ok != Some(true);
+                self.bulk_ok = Some(true);
+                if first {
+                    self.start_load();
+                }
             }
         }
     }
@@ -2053,7 +2109,7 @@ impl App {
     /// re-probe on an interval while still waiting (so entering the mode on the
     /// unit is picked up automatically). Quiet once the unit is confirmed.
     fn drive_startup(&mut self, ctx: &egui::Context) {
-        if !self.connected || self.bulk_ok == Some(true) {
+        if !self.connected || self.bulk_ok == Some(true) || self.prober.is_some() {
             return;
         }
         let now = ctx.input(|i| i.time);
@@ -2061,11 +2117,16 @@ impl App {
             return;
         }
         self.last_probe = now;
-        self.probe_now();
+        self.request_probe();
     }
 
     /// Load a row's full patch if it isn't loaded yet (needed before storing,
     /// e.g. a name-only edit on a patch that was never auditioned).
+    ///
+    /// User-bank rows are deep-read by the bank loader and edits are gated until it
+    /// finishes, so in practice this is a no-op there. The factory presets are read
+    /// shallow, but their on-demand load goes through `ensure_loaded_or_defer` (off
+    /// the UI thread) — so this synchronous read should never actually fire.
     fn ensure_loaded(&mut self, slot: u16) {
         if self.row(slot).is_some_and(|r| r.full.is_none()) {
             let read = device::lock(&self.device).read_patch(slot);
@@ -2073,6 +2134,68 @@ impl App {
                 && let Some(row) = self.row_mut(slot)
             {
                 row.full = Some(TypedPatch::from_raw(&raw));
+            }
+        }
+    }
+
+    /// Ensure `slot`'s full patch is loaded *without blocking the UI*. Returns
+    /// `true` if it's already loaded (the caller may proceed); otherwise starts a
+    /// background single-slot read and stashes `then` to be re-run once it lands
+    /// (see `drain_lazy`), returning `false`. Used by the preset audition/copy
+    /// paths, whose rows are read shallow.
+    fn ensure_loaded_or_defer(&mut self, slot: u16, then: Action) -> bool {
+        if self.row(slot).is_none_or(|r| r.full.is_some()) {
+            return true;
+        }
+        self.pending_after_load = Some(then);
+        if self.lazy_loader.is_none() {
+            self.lazy_loader = Some(Loader::spawn_range(
+                Arc::clone(&self.device),
+                slot,
+                slot,
+                true,
+            ));
+            self.status = format!("loading {}\u{2026}", slot_label(slot));
+        }
+        false
+    }
+
+    /// Drain the on-demand single-slot read started by `ensure_loaded_or_defer`;
+    /// once the patch lands, re-run the action (audition/copy) that needed it.
+    fn drain_lazy(&mut self) {
+        let Some(events) = self.lazy_loader.as_ref().map(Loader::drain) else {
+            return;
+        };
+        let mut done = false;
+        let mut failed: Option<String> = None;
+        for ev in events {
+            match ev {
+                Loaded::Patch(slot, raw) => {
+                    if let Some(row) = self.row_mut(slot) {
+                        row.full = Some(TypedPatch::from_raw(&raw));
+                        row.failed = false;
+                    }
+                }
+                Loaded::Failed(_, msg) | Loaded::Aborted(msg) => failed = Some(msg),
+                Loaded::Done => done = true,
+                Loaded::Header(..) => {}
+            }
+        }
+        if !(done || failed.is_some()) {
+            return;
+        }
+        self.lazy_loader = None;
+        let pending = self.pending_after_load.take();
+        if let Some(msg) = failed {
+            self.status = format!("load failed: {msg}");
+        } else if let Some(action) = pending {
+            // The patch is loaded now, so these take their non-deferred path. (A
+            // failed read leaves `full` unset, but that path is unreachable here —
+            // `failed` is handled above — so this can't re-defer into a loop.)
+            match action {
+                Action::Audition(slot) => self.audition(slot),
+                Action::CopyRow(slot) => self.copy_row(slot),
+                _ => {}
             }
         }
     }
@@ -2154,7 +2277,11 @@ impl App {
         if !self.connected {
             return;
         }
-        self.ensure_loaded(slot);
+        // A factory preset is read shallow; if its patch isn't loaded yet, read it
+        // in the background and audition once it lands (don't block the UI thread).
+        if !self.ensure_loaded_or_defer(slot, Action::Audition(slot)) {
+            return;
+        }
         let Some(patch) = self.effective_patch(slot) else {
             return;
         };
@@ -2940,7 +3067,11 @@ impl App {
 
     /// Copy `slot`'s patch (including any staged edits) into the clipboard.
     fn copy_row(&mut self, slot: u16) {
-        self.ensure_loaded(slot);
+        // Copying a factory preset may need its shallow row's full patch read first;
+        // do that in the background and re-run the copy once it lands.
+        if !self.ensure_loaded_or_defer(slot, Action::CopyRow(slot)) {
+            return;
+        }
         match self.effective_patch(slot) {
             Some(patch) => {
                 self.status = format!("copied {} {:?}", slot_label(slot), patch.name);
@@ -4858,7 +4989,7 @@ impl App {
                 self.bulk_prompt = false;
                 self.start_write();
             }
-            Action::ProbeBulk => self.probe_now(),
+            Action::ProbeBulk => self.request_probe(),
         }
     }
 
@@ -4996,18 +5127,7 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.drive_startup(ctx);
-        self.drain_loader();
-        self.maybe_load_presets();
-        self.drain_preset_loader();
-        self.drain_write();
-        if self.loader.is_some() || self.preset_loader.is_some() || self.writer.is_some() {
-            ctx.request_repaint_after(Duration::from_millis(150));
-        }
-        // Keep re-probing while waiting for the unit to enter BULK LOAD mode.
-        if self.bulk_ok == Some(false) {
-            ctx.request_repaint_after(Duration::from_millis(500));
-        }
+        self.pump_background(ctx);
         // Capture view state for persistence on exit. Use `screen_rect` (always
         // available) rather than the viewport's `inner_rect`, which is `None` on
         // some platforms (e.g. Wayland) and left the window size unsaved. screen_rect
