@@ -8,8 +8,43 @@
 
 pub mod comp;
 pub mod eq;
+pub mod icon;
 
 use egui::{Button, Color32, Response, Ui, WidgetText};
+
+/// Install the project's shared UI font into `ctx`: `JetBrains Mono Nerd Font`.
+///
+/// Both Rackctl GUIs call this at startup so they share one typeface and one set
+/// of action-button glyphs (see [`icon`]). The proportional ("Propo") variant is
+/// the primary UI face — it carries the full-width icon glyphs without clipping —
+/// and the plain monospace variant backs the `Monospace` family for cell-aligned
+/// numbers (value boxes, tables). egui's default faces stay as fallback for any
+/// code points these lack.
+pub fn install_fonts(ctx: &egui::Context) {
+    use egui::{FontData, FontDefinitions, FontFamily};
+    const MONO: &str = "jetbrains-mono-nerd";
+    const PROPO: &str = "jetbrains-mono-nerd-propo";
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert(
+        MONO.to_owned(),
+        FontData::from_static(include_bytes!(
+            "../assets/fonts/JetBrainsMonoNerdFont-Regular.ttf"
+        )),
+    );
+    fonts.font_data.insert(
+        PROPO.to_owned(),
+        FontData::from_static(include_bytes!(
+            "../assets/fonts/JetBrainsMonoNerdFontPropo-Regular.ttf"
+        )),
+    );
+    if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
+        mono.insert(0, MONO.to_owned());
+    }
+    if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
+        prop.insert(0, PROPO.to_owned());
+    }
+    ctx.set_fonts(fonts);
+}
 
 /// Semantic category of a button, mapped to a fill colour so a GUI signals an
 /// action's *consequence* (commit vs. read vs. discard vs. destroy) consistently.

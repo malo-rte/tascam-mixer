@@ -27,42 +27,6 @@ struct Cli {
     offline: bool,
 }
 
-/// Install the `JetBrains Mono Nerd Font` (vendored under `assets/fonts/`, SIL OFL
-/// 1.1). Two variants are used: the monospace face for monospace text (the slot
-/// labels and the Loop diagram, which need cell alignment), and the *proportional*
-/// (Propo) face as a fallback on the UI face — its icon glyphs carry their natural
-/// advance width, so the list-button icons aren't clipped (the mono variant crams
-/// wide icons into one cell and cuts them off on the right).
-fn install_fonts(ctx: &eframe::egui::Context) {
-    use eframe::egui::{FontData, FontDefinitions, FontFamily};
-    const MONO: &str = "jetbrains-mono-nerd";
-    const PROPO: &str = "jetbrains-mono-nerd-propo";
-    let mut fonts = FontDefinitions::default();
-    fonts.font_data.insert(
-        MONO.to_owned(),
-        FontData::from_static(include_bytes!(
-            "../assets/fonts/JetBrainsMonoNerdFont-Regular.ttf"
-        )),
-    );
-    fonts.font_data.insert(
-        PROPO.to_owned(),
-        FontData::from_static(include_bytes!(
-            "../assets/fonts/JetBrainsMonoNerdFontPropo-Regular.ttf"
-        )),
-    );
-    // Monospace: JetBrains Mono first (the visible monospace face).
-    if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
-        mono.insert(0, MONO.to_owned());
-    }
-    // Proportional: JetBrains Mono (Propo) as the primary UI face — it also carries
-    // the full-width icon glyphs. The default faces stay after it as fallback for
-    // any code points it lacks.
-    if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
-        prop.insert(0, PROPO.to_owned());
-    }
-    ctx.set_fonts(fonts);
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let (mock, offline) = (cli.mock, cli.offline);
@@ -100,7 +64,7 @@ fn main() -> Result<()> {
         "BOSS GX-700 Patch Editor",
         options,
         Box::new(move |cc| {
-            install_fonts(&cc.egui_ctx);
+            rackctl_ui::install_fonts(&cc.egui_ctx);
             let app = app::App::new(dev, connected, reopen, offline, port);
             cc.egui_ctx.set_zoom_factor(app.zoom());
             cc.egui_ctx.style_mut(|style| {

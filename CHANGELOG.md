@@ -20,6 +20,13 @@ version.
   for the US-16x08, a guitar pick for the GX-700), installed into the hicolor
   icon theme by the Nix package and bundled in the release archive, so desktop
   launchers no longer fall back to a generic icon.
+- **US-16x08 GUI** — brought in line with the GX-700 editor's look: the shared
+  JetBrains Mono Nerd Font is now used (one typeface across both GUIs), the
+  preset lists use compact action icons in the canonical order on the left of
+  each row, Mute/Solo are colour-lit toggle buttons rather than checkboxes, and
+  the scrollbar no longer floats over the rightmost channel. The font and icon
+  glyphs were hoisted into the shared `rackctl-ui` crate so both GUIs share one
+  source.
 
 ## [0.7.3] - 2026-06-25
 

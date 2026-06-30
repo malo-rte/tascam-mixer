@@ -32,6 +32,28 @@ pub(crate) const VALUE_BOX_WIDTH: f32 = 60.0;
 /// right of the input-0 line for the gain-reduction bar.
 const GR_LANE_MAX: f64 = 6.0;
 
+/// Fill colours for the lit Mute / Solo toggle buttons. Dark, saturated tones
+/// (like the shared `ActionKind` fills) so the default light button text stays
+/// readable: red for muted, amber-gold for soloed.
+const MUTE_ON: egui::Color32 = egui::Color32::from_rgb(170, 55, 55);
+const SOLO_ON: egui::Color32 = egui::Color32::from_rgb(165, 140, 40);
+
+/// A mixer-style toggle button: filled with `on_fill` when `on`, a plain button
+/// otherwise. Returns the [`egui::Response`] so callers chain `.on_hover_text` and
+/// test `.clicked()`.
+fn toggle_button(
+    ui: &mut egui::Ui,
+    on: bool,
+    label: &str,
+    on_fill: egui::Color32,
+) -> egui::Response {
+    let mut button = egui::Button::new(label);
+    if on {
+        button = button.fill(on_fill);
+    }
+    ui.add(button)
+}
+
 /// EQ band controls the EQ `Reset` button returns to defaults (a flat curve),
 /// excluding the enable switch.
 const EQ_RESET: [Control; 10] = [
@@ -146,15 +168,19 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 if ui.checkbox(&mut phase, "Phase").changed() {
                     app.set(Control::PhaseSwitch, ch, Value::Bool(phase));
                 }
-                let mut mute = app.cached_bool(Control::MuteSwitch, ch);
-                if ui.checkbox(&mut mute, "Mute").changed() {
-                    app.set(Control::MuteSwitch, ch, Value::Bool(mute));
+                // Mute and Solo as mixer-style toggle buttons: lit red when muted,
+                // amber-gold when soloed, plain when off.
+                let mute = app.cached_bool(Control::MuteSwitch, ch);
+                if toggle_button(ui, mute, "Mute", MUTE_ON)
+                    .on_hover_text("Silence this channel")
+                    .clicked()
+                {
+                    app.set(Control::MuteSwitch, ch, Value::Bool(!mute));
                 }
-                let mut solo = app.soloed(ch);
-                if ui
-                    .checkbox(&mut solo, "Solo")
+                let solo = app.soloed(ch);
+                if toggle_button(ui, solo, "Solo", SOLO_ON)
                     .on_hover_text("Mute the other channels")
-                    .changed()
+                    .clicked()
                 {
                     app.toggle_solo(ch);
                 }

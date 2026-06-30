@@ -72,13 +72,21 @@ fn main() -> Result<()> {
         "Tascam US-16x08 Mixer",
         options,
         Box::new(move |cc| {
+            // The shared Rackctl UI font (JetBrains Mono Nerd Font), so both GUIs
+            // share one typeface and the action-button icon glyphs.
+            rackctl_ui::install_fonts(&cc.egui_ctx);
             let app = app::App::new(device, mock, connected, reopen);
             // Apply the saved zoom; Ctrl +/- adjusts from here and Save default
             // remembers it.
             cc.egui_ctx.set_zoom_factor(app.zoom());
-            // Uniform slider length so the editor's value boxes line up.
-            cc.egui_ctx
-                .style_mut(|style| style.spacing.slider_width = 120.0);
+            cc.egui_ctx.style_mut(|style| {
+                // Uniform slider length so the editor's value boxes line up.
+                style.spacing.slider_width = 120.0;
+                // Reserve a gutter for scrollbars instead of floating them over the
+                // content, so the bank surface's scrollbar never overlaps the
+                // rightmost channel.
+                style.spacing.scroll.floating = false;
+            });
             Ok(Box::new(app))
         }),
     )

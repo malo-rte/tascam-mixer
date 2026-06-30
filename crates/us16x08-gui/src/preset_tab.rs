@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use eframe::egui;
-use rackctl_ui::{ActionKind, action_button};
+use rackctl_ui::{ActionKind, action_button, icon};
 
 use crate::app::{App, PresetKind, preset_label, preset_paths};
 
@@ -89,26 +89,35 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui, kind: PresetKind) {
         .spacing([12.0, 6.0])
         .show(ui, |ui| {
             for path in &presets {
-                ui.label(preset_label(path));
-                if action_button(ui, "Save", ActionKind::Commit)
+                // Action icons first (left), in the canonical order
+                // (Load · Save · Copy · Delete); the name follows. Each icon keeps
+                // a tooltip, matching the GX-700 GUI's list rows.
+                if action_button(ui, icon::LOAD, ActionKind::Read)
+                    .on_hover_text("Load this preset")
+                    .clicked()
+                {
+                    to_load = Some(path.clone());
+                }
+                if action_button(ui, icon::SAVE, ActionKind::Commit)
                     .on_hover_text(overwrite_hint)
                     .clicked()
                 {
                     to_save = Some(path.clone());
                 }
-                if action_button(ui, "Load", ActionKind::Read).clicked() {
-                    to_load = Some(path.clone());
-                }
                 if copyable
-                    && action_button(ui, "Copy", ActionKind::Read)
+                    && action_button(ui, icon::COPY, ActionKind::Read)
                         .on_hover_text("Copy to the clipboard, then Paste onto a channel")
                         .clicked()
                 {
                     to_copy = Some(path.clone());
                 }
-                if action_button(ui, "Delete", ActionKind::Destructive).clicked() {
+                if action_button(ui, icon::DELETE, ActionKind::Destructive)
+                    .on_hover_text("Delete this preset")
+                    .clicked()
+                {
                     to_delete = Some(path.clone());
                 }
+                ui.label(preset_label(path));
                 ui.end_row();
             }
         });

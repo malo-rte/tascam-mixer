@@ -86,20 +86,10 @@ impl PatchRow {
 /// patch", not a real bank slot. Real slots are `1..=200`, so `0` is free.
 const SCRATCH: u16 = 0;
 
-/// Nerd Font (Font Awesome) glyphs for the per-row list buttons, one consistent
-/// outline family. Rendered by the vendored `JetBrains Mono Nerd Font`; each button
-/// keeps a text tooltip, so the icon never stands alone. (Verified present in the
-/// embedded font's cmap.)
-mod icon {
-    pub const EDIT: &str = "\u{f044}"; // pencil-in-box
-    pub const SAVE: &str = "\u{f0c7}"; // floppy
-    pub const COPY: &str = "\u{f0c5}"; // overlapping pages
-    pub const PASTE: &str = "\u{f0ea}"; // clipboard
-    pub const REVERT: &str = "\u{f0e2}"; // undo arrow
-    pub const CLEAR: &str = "\u{f12d}"; // eraser
-    pub const DELETE: &str = "\u{f014}"; // trash can
-    pub const LOAD: &str = "\u{f019}"; // download
-}
+// Nerd Font glyphs for the per-row list buttons, shared with the other Rackctl
+// GUIs (rendered by the vendored `JetBrains Mono Nerd Font`; each button keeps a
+// text tooltip, so the icon never stands alone).
+use rackctl_ui::icon;
 
 /// Where an offline edit (the Edit tab's scratch patch) is saved back to.
 #[derive(Clone)]
