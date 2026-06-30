@@ -139,12 +139,20 @@ The read request's *address width* selects the granularity:
 | Request | Reply payload
 | `01 05` | the rig *name* as ASCII (e.g. `"A is A 800"`)
 | `01 08` | the FX-chain config (`… 7F 00 00 64 …`, the `.tfx` `FXc` slots)
-| `01 21` | a parameter table: `<count>` then `count` 3-byte `index/value` records
-| `01 01` | a large (~1.3 KB) bulk patch blob
+| `01 21` | the amp model's parameter table (see below)
+| `01 01` | a large (~1.3 KB) packed full-patch blob (unit-internal format)
 |===
 
+A parameter-table block (e.g. `0x21`) is `<count>` then `count` 3-byte records
+`[value][index][target]`: `value` is the current 0..127 setting, `index` is the knob
+id (the byte2 of a live `11 <model> <index>` read), and *`target` is the indirection
+pointer* — it identifies the actual parameter slot in the patch the index resolves to.
+This is the "index into a table that points at the real parameter" the device uses.
+
 Requesting every populated block id (a *small paced batch* — not a flood) reads the
-whole patch without per-parameter polling.
+whole patch without per-parameter polling. Other blocks seen on one patch: `0x05` name,
+`0x08` FX-chain routing, `0x07` a small config word, `0x01` the packed blob, and several
+single-value blocks (per-slot model ids / settings).
 
 Batching many `0x01` requests then collecting the `0x12` replies enumerates an
 address range in one pass -- the basis for a `scan`/`dump` command.
