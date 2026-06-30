@@ -375,6 +375,170 @@ pub const LOW_CUT_VALUES: &[&str] = &[
 /// Control-assign latch mode (Level/Chain assign `mode` byte).
 pub const ASSIGN_MODE_VALUES: &[&str] = &["Normal", "Toggle"];
 
+/// Control-assign Target id (MI Table 1.2, `0..=133`) -> the catalog key of the
+/// parameter it controls, or `""` for targets with no scalar parameter (Not Assign,
+/// Bypass, Tuner, and the two delay tempo-intervals L/R the catalog doesn't model).
+/// The target's value range follows that parameter (see [`assign_target_range`]).
+///
+/// Transcribed from the GX-700 MIDI Implementation, Table 1.2. **Provisional** — the
+/// id->parameter pairing was read from a scanned table and is not yet hardware-checked.
+pub const ASSIGN_TARGETS: [&str; 134] = [
+    "",                        // 0  Not Assign
+    "output-level",            // 1
+    "comp-enable",             // 2  CS:ON/OFF
+    "comp-type",               // 3  CS:MODE
+    "comp-sustain",            // 4
+    "comp-attack",             // 5
+    "comp-threshold",          // 6  LM:THRESHLD
+    "comp-release",            // 7  LM:RELEASE
+    "comp-tone",               // 8
+    "comp-level",              // 9
+    "wah-enable",              // 10
+    "wah-mode",                // 11
+    "wah-peak",                // 12
+    "wah-pedal-freq",          // 13
+    "wah-auto-polarity",       // 14
+    "wah-auto-sens",           // 15
+    "wah-auto-manual",         // 16
+    "wah-auto-rate",           // 17
+    "wah-auto-depth",          // 18
+    "wah-level",               // 19
+    "dist-enable",             // 20
+    "dist-type",               // 21
+    "dist-drive",              // 22
+    "dist-bass",               // 23
+    "dist-treble",             // 24
+    "dist-level",              // 25
+    "preamp-enable",           // 26
+    "preamp-type",             // 27
+    "preamp-volume",           // 28
+    "preamp-bass",             // 29
+    "preamp-middle",           // 30
+    "preamp-treble",           // 31
+    "preamp-presence",         // 32
+    "preamp-master",           // 33
+    "preamp-bright",           // 34
+    "preamp-gain",             // 35
+    "loop-enable",             // 36
+    "loop-return-level",       // 37
+    "loop-send-level",         // 38
+    "loop-mode",               // 39
+    "eq-enable",               // 40
+    "eq-low-gain",             // 41
+    "eq-mid-freq",             // 42
+    "eq-mid-gain",             // 43
+    "eq-mid-q",                // 44
+    "eq-high-gain",            // 45
+    "eq-level",                // 46
+    "speaker-enable",          // 47
+    "speaker-type",            // 48
+    "speaker-mic-setting",     // 49
+    "speaker-mic-level",       // 50
+    "speaker-direct-level",    // 51
+    "ns-enable",               // 52
+    "ns-threshold",            // 53
+    "ns-release",              // 54
+    "ns-level",                // 55
+    "mod-enable",              // 56
+    "mod-type",                // 57  MOD:MODE
+    "mod-rate",                // 58
+    "mod-depth",               // 59
+    "mod-manual",              // 60
+    "mod-resonance",           // 61
+    "mod-flanger-separation",  // 62
+    "mod-flanger-gate",        // 63
+    "mod-phaser-stage",        // 64  PH:TYPE
+    "mod-phaser-step-rate",    // 65  PH:STEP
+    "mod-ps-type",             // 66
+    "mod-ps-pitch1",           // 67
+    "mod-ps-pitch2",           // 68
+    "mod-ps-pitch3",           // 69
+    "mod-harmonist-key",       // 70  RH:KEY
+    "mod-harmonist-interval1", // 71  HR:INT1
+    "mod-harmonist-interval2", // 72
+    "mod-harmonist-interval3", // 73
+    "mod-pshr-pan1",           // 74
+    "mod-pshr-pan2",           // 75
+    "mod-pshr-pan3",           // 76
+    "mod-pshr-level1",         // 77
+    "mod-pshr-level2",         // 78
+    "mod-pshr-level3",         // 79
+    "mod-pshr-balance",        // 80
+    "mod-pshr-total-level",    // 81
+    "mod-vibrato-trigger",     // 82
+    "mod-vibrato-rise-time",   // 83
+    "mod-ring-frequency",      // 84  RM:FREQ
+    "mod-ring-effect-level",   // 85
+    "mod-ring-direct-level",   // 86
+    "mod-humanizer-type",      // 87  HU:TYPE
+    "mod-humanizer-vowel1",    // 88
+    "mod-humanizer-vowel2",    // 89
+    "mod-humanizer-trigger",   // 90
+    "delay-enable",            // 91
+    "delay-mode",              // 92
+    "delay-time-c",            // 93
+    "delay-time-l",            // 94
+    "delay-time-r",            // 95
+    "delay-tempo",             // 96
+    "delay-interval-c",        // 97  TM:INT.C
+    "",                        // 98  TM:INT.L (not modelled)
+    "",                        // 99  TM:INT.R (not modelled)
+    "delay-feedback",          // 100
+    "delay-level-c",           // 101
+    "delay-level-l",           // 102
+    "delay-level-r",           // 103
+    "delay-high-damp",         // 104
+    "delay-hi-cut",            // 105
+    "delay-smooth",            // 106
+    "delay-effect-level",      // 107
+    "delay-direct-level",      // 108
+    "chorus-enable",           // 109
+    "chorus-mode",             // 110
+    "chorus-rate",             // 111
+    "chorus-depth",            // 112
+    "chorus-pre-delay",        // 113
+    "chorus-low-cut",          // 114
+    "chorus-hi-cut",           // 115
+    "chorus-mod-wave",         // 116  CH:WAVE
+    "chorus-effect-level",     // 117
+    "tremolo-enable",          // 118
+    "tremolo-mode",            // 119
+    "tremolo-rate",            // 120
+    "tremolo-depth",           // 121
+    "tremolo-balance",         // 122
+    "reverb-enable",           // 123
+    "reverb-mode",             // 124  RV:TYPE
+    "reverb-time",             // 125
+    "reverb-pre-delay",        // 126
+    "reverb-low-cut",          // 127
+    "reverb-hi-cut",           // 128
+    "reverb-diffusion",        // 129
+    "reverb-effect-level",     // 130
+    "reverb-direct-level",     // 131
+    "",                        // 132  Bypass
+    "",                        // 133  Tuner
+];
+
+/// The value range (`min..=max`, raw device units) of the parameter a control-assign
+/// Target selects, or `None` if the target has no scalar parameter. Used to scale the
+/// assign Min/Max onto a schematic. Ranges come from the catalog ([`ALL`]).
+#[must_use]
+pub fn assign_target_range(target: i32) -> Option<(i32, i32)> {
+    let key = *ASSIGN_TARGETS.get(usize::try_from(target).ok()?)?;
+    if key.is_empty() {
+        return None;
+    }
+    let p = Param::from_key(key)?;
+    Some(match p.kind() {
+        Kind::Bool => (0, 1),
+        Kind::Int { min, max, .. } => (min, max),
+        Kind::Enum { values, .. } => (
+            0,
+            i32::try_from(values.len().saturating_sub(1)).unwrap_or(0),
+        ),
+    })
+}
+
 /// One editable GX-700 parameter.
 #[derive(Debug, Clone, Copy)]
 pub struct Param {
@@ -828,6 +992,27 @@ mod tests {
     )]
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn assign_targets_map_to_real_catalog_keys() {
+        assert_eq!(ASSIGN_TARGETS.len(), 134);
+        // Every non-empty key must resolve to a catalog parameter (catches typos in
+        // the Table 1.2 transcription; it does not verify the id->param semantics).
+        for (id, key) in ASSIGN_TARGETS.iter().enumerate() {
+            if !key.is_empty() {
+                assert!(
+                    Param::from_key(key).is_some(),
+                    "id {id}: unknown key {key:?}"
+                );
+            }
+        }
+        // Ranges come from the catalog and match the field kind.
+        assert_eq!(assign_target_range(1), Some((0, 100))); // output-level
+        assert_eq!(assign_target_range(2), Some((0, 1))); // CS:ON/OFF (Bool)
+        assert_eq!(assign_target_range(0), None); // Not Assign
+        assert_eq!(assign_target_range(132), None); // Bypass
+        assert!(assign_target_range(21).is_some_and(|(lo, hi)| lo == 0 && hi > 0)); // DS:TYPE (Enum)
+    }
 
     #[test]
     fn keys_are_unique() {

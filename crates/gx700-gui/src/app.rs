@@ -1459,14 +1459,23 @@ const ASSIGN_ROWS: [(&str, [&str; 4]); 7] = [
 ];
 
 /// A schematic of one control assign, reflecting its live values and mode. `lo`/`hi`
-/// are the Action lo/hi (Source `0..127`); `min`/`max` are the Target values
-/// (`0..16383`), positioned on the Y axis so they move the graph. **Normal** ramps
-/// the Target Min->Max across the Action lo..hi window; **Toggle** flips the Target
-/// between the Min/Max states on each operation.
+/// are the Action lo/hi (Source `0..127`); `min`/`max` are the Target values, placed
+/// on the Y axis within the target's `range` so each sits at its true height and
+/// editing it moves the line. **Normal** ramps the Target Min->Max across the Action
+/// lo..hi window; **Toggle** flips the Target between the Min/Max states on each
+/// operation.
 // A cohesive drawing routine (axes, reference lines, the two mode layouts, labels);
 // splitting it would only scatter the shared painter/geometry locals.
 #[allow(clippy::too_many_lines)]
-fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, min: i32, max: i32, toggle: bool) {
+fn show_assign_schematic(
+    ui: &mut egui::Ui,
+    lo: i32,
+    hi: i32,
+    min: i32,
+    max: i32,
+    range: (i32, i32),
+    toggle: bool,
+) {
     let w = ui.available_width().min(440.0);
     let (resp, painter) = ui.allocate_painter(egui::vec2(w, 170.0), egui::Sense::hover());
     let rect = resp.rect;
@@ -1484,13 +1493,15 @@ fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, min: i32, max: i32
     let px = |fx: f32| plot.left() + fx * plot.width();
     let py = |fy: f32| plot.bottom() - fy * plot.height();
     let frac = |val: i32| f32::from(u8::try_from(val.clamp(0, 127)).unwrap_or(0)) / 127.0;
-    // Map a Min/Max value onto the Y axis. The target's absolute range is unknown, so
-    // self-normalise to the larger of Min/Max — the sweep fills the height and editing
-    // either value moves its level. Equal Min/Max read as a flat line (no sweep).
-    let denom = min.max(max).max(1);
+    // Map a Min/Max value onto the Y axis within the target parameter's range, so each
+    // sits at its true height and editing it moves the line. (When the target range is
+    // unknown the caller passes the Min/Max span, which just fills the height.)
+    let (r_lo, r_hi) = range;
+    let span = (r_hi - r_lo).max(1);
     let lvl = |val: i32| {
-        let to_f = |x: i32| f32::from(u16::try_from(x.clamp(0, denom)).unwrap_or(0));
-        0.1 + 0.8 * to_f(val) / to_f(denom)
+        let frac = f32::from(u16::try_from((val.clamp(r_lo, r_hi) - r_lo).max(0)).unwrap_or(0))
+            / f32::from(u16::try_from(span).unwrap_or(1));
+        0.1 + 0.8 * frac
     };
     let lo_x = frac(lo);
     let hi_x = frac(hi).max(lo_x);
@@ -3304,6 +3315,10 @@ impl App {
         let (lo, hi) = (raw("act-lo"), raw("act-hi"));
         let (min, max) = (raw("min"), raw("max"));
         let toggle = raw("mode") == 1;
+        // Scale Min/Max within the selected target's value range; with no target set,
+        // fall back to the Min/Max span so the schematic still fills the height.
+        let range = rackctl_gx700::param::assign_target_range(raw("target"))
+            .unwrap_or((min.min(max), min.max(max)));
         ui.add_space(6.0);
         ui.label(
             egui::RichText::new(format!(
@@ -3312,7 +3327,7 @@ impl App {
             ))
             .strong(),
         );
-        show_assign_schematic(ui, lo, hi, min, max, toggle);
+        show_assign_schematic(ui, lo, hi, min, max, range, toggle);
     }
 
     fn show_block_params(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
