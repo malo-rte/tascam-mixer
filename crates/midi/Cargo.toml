@@ -1,0 +1,17 @@
+[package]
+name = "rackctl-midi"
+version.workspace = true
+description = "Byte-level MIDI link for the Rackctl suite: an ALSA rawmidi port (open / list / send / non-blocking receive) with a cross-process advisory lock. Device protocols layer on top; a daemon-client link slots in later."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false             # internal support crate (path dependency), not for crates.io
+
+[dependencies]
+alsa.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

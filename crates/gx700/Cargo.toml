@@ -7,16 +7,21 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+# Not for crates.io: it now depends on the internal `rackctl-midi` path crate, which
+# `allow-wildcard-paths` only exempts for unpublished crates. The suite ships as a
+# whole (release archives + Nix), not as individual crates.io packages.
+publish = false
 
 [features]
-# `alsa` pulls in the real rawmidi transport (via the `alsa` crate); without it
-# only the in-memory mock transport is available, so the library still builds and
-# tests with no sound card or libasound (CI, dev without hardware).
+# `alsa` pulls in the real rawmidi transport (via `rackctl-midi`, the byte-level
+# ALSA link); without it only the in-memory mock transport is available, so the
+# library still builds and tests with no sound card or libasound (CI, dev without
+# hardware).
 default = ["alsa"]
-alsa = ["dep:alsa"]
+alsa = ["dep:rackctl-midi"]
 
 [dependencies]
-alsa = { workspace = true, optional = true }
+rackctl-midi = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json.workspace = true
 thiserror.workspace = true

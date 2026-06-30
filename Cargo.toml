@@ -12,6 +12,7 @@ authors = ["Mats Loman <mats.loman@rte.se>"]
 
 [workspace.dependencies]
 rackctl-core = { path = "crates/core" }
+rackctl-midi = { path = "crates/midi" }
 rackctl-gx700 = { path = "crates/gx700", default-features = false }
 thiserror = "2"
 alsa = "0.9"

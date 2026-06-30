@@ -70,3 +70,16 @@ pub enum Error {
     #[error("patch error: {0}")]
     Patch(String),
 }
+
+/// Map a byte-level MIDI link error onto this crate's [`enum@Error`], so the Roland
+/// transport can use `?` over `rackctl-midi` calls.
+#[cfg(feature = "alsa")]
+impl From<rackctl_midi::MidiError> for Error {
+    fn from(e: rackctl_midi::MidiError) -> Self {
+        match e {
+            rackctl_midi::MidiError::PortBusy(p) => Error::PortBusy(p),
+            rackctl_midi::MidiError::PortNotFound(p) => Error::PortNotFound(p),
+            rackctl_midi::MidiError::Io(s) => Error::Transport(s),
+        }
+    }
+}

@@ -1,22 +1,19 @@
-//! The real MIDI [`Transport`], backed by ALSA's rawmidi interface.
+//! The real GX-700 [`Transport`], layering Roland DT1/RQ1 `SysEx` over the
+//! byte-level [`MidiPort`] link from `rackctl-midi`.
 //!
-//! Opens a `hw:CARD,DEV` rawmidi endpoint for both input and output, writes
-//! Roland DT1/RQ1 `SysEx`, and frames replies with [`crate::sysex::Framer`]. This
-//! file and its port enumeration are manufacturer-independent and are a prime
-//! candidate to lift into a shared `rackctl-core` later.
+//! This file owns only the *Roland-specific* protocol: building DT1/RQ1 messages,
+//! framing replies with [`crate::sysex::Framer`], the one-way-transfer pacing, and
+//! the whole-patch streaming. Opening the port, listing ports, the advisory lock
+//! and the raw byte I/O all live in `rackctl-midi`.
 //!
 //! This path is exercised only on hardware; CI and tests use the mock.
 
-use std::ffi::CString;
-use std::io::{Read, Write};
+use std::thread::sleep;
 use std::time::Duration;
 
-use ::alsa::Direction;
-use ::alsa::ctl::Ctl;
-use ::alsa::rawmidi::{Iter as RawmidiIter, Rawmidi};
+use rackctl_midi::MidiPort;
 
 use super::Transport;
-use super::lock::PortLock;
 use crate::error::{Error, Result};
 use crate::sysex::{self, DT1, Framer};
 
@@ -54,38 +51,11 @@ const STREAM_QUIET_POLLS: u32 = 300;
 /// patch stream is complete.
 const LAST_SUB_BLOCK: u8 = 0x0D;
 
-/// A live connection to a GX-700 over ALSA rawmidi.
+/// A live connection to a GX-700: the Roland protocol over a [`MidiPort`].
+#[derive(Debug)]
 pub struct RawMidi {
-    output: Rawmidi,
-    input: Rawmidi,
+    port: MidiPort,
     device_id: u8,
-    /// Advisory lock excluding other rackctl processes from this port; held for
-    /// the lifetime of the connection and released when it (or the process) ends.
-    _lock: PortLock,
-}
-
-impl std::fmt::Debug for RawMidi {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RawMidi")
-            .field("device_id", &self.device_id)
-            .finish_non_exhaustive()
-    }
-}
-
-fn transport_err(e: ::alsa::Error) -> Error {
-    Error::Transport(e.to_string())
-}
-
-fn io_err(e: &std::io::Error) -> Error {
-    Error::Transport(e.to_string())
-}
-
-/// Whether a read error just means "no data available yet" on a non-blocking
-/// endpoint. ALSA reports `EAGAIN` with its negative-errno convention (`-11`),
-/// which `io::Error::kind()` does not map to [`WouldBlock`][std::io::ErrorKind],
-/// so check the raw code for both signs as well.
-fn is_would_block(e: &std::io::Error) -> bool {
-    e.kind() == std::io::ErrorKind::WouldBlock || matches!(e.raw_os_error(), Some(11 | -11))
 }
 
 impl RawMidi {
@@ -96,23 +66,7 @@ impl RawMidi {
     /// [`Error::Transport`] if ALSA reports an error while iterating cards or
     /// devices.
     pub fn ports() -> Result<Vec<String>> {
-        let mut ports = Vec::new();
-        for card in ::alsa::card::Iter::new() {
-            let card = card.map_err(transport_err)?;
-            let index = card.get_index();
-            let ctl = Ctl::new(&format!("hw:{index}"), false).map_err(transport_err)?;
-            for info in RawmidiIter::new(&ctl) {
-                let info = info.map_err(transport_err)?;
-                // Each output device gives one addressable endpoint; list those.
-                if info.get_stream() == Direction::Playback {
-                    let port = format!("hw:{index},{}", info.get_device());
-                    if !ports.contains(&port) {
-                        ports.push(port);
-                    }
-                }
-            }
-        }
-        Ok(ports)
+        Ok(MidiPort::list_ports()?)
     }
 
     /// Open the rawmidi port at `port` (a `hw:CARD,DEV` address) for both input
@@ -123,19 +77,9 @@ impl RawMidi {
     /// [`Error::PortNotFound`] if the address contains an interior NUL;
     /// [`Error::Transport`] if ALSA cannot open the input or output stream.
     pub fn open(port: &str) -> Result<Self> {
-        // Take the advisory lock first: if another rackctl process owns the port,
-        // fail fast with a clear error rather than opening it and corrupting both
-        // sides' reply streams.
-        let lock = PortLock::acquire(port)?;
-        let cname = CString::new(port).map_err(|_| Error::PortNotFound(port.to_owned()))?;
-        let output = Rawmidi::open(&cname, Direction::Playback, false).map_err(transport_err)?;
-        // Open the input non-blocking so reads can poll for a timeout.
-        let input = Rawmidi::open(&cname, Direction::Capture, true).map_err(transport_err)?;
         Ok(Self {
-            output,
-            input,
+            port: MidiPort::open(port)?,
             device_id: DEFAULT_DEVICE_ID,
-            _lock: lock,
         })
     }
 
@@ -150,19 +94,15 @@ impl RawMidi {
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
         loop {
-            match self.input.io().read(&mut buf) {
-                Ok(0) => std::thread::sleep(POLL_INTERVAL),
-                Ok(n) => {
+            match self.port.read(&mut buf)? {
+                0 => sleep(POLL_INTERVAL),
+                n => {
                     let chunk = buf.get(..n).unwrap_or(&[]);
                     for msg in framer.push(chunk) {
                         let hex: Vec<String> = msg.iter().map(|b| format!("{b:02X}")).collect();
                         println!("{}", hex.join(" "));
                     }
                 }
-                Err(e) if is_would_block(&e) => {
-                    std::thread::sleep(POLL_INTERVAL);
-                }
-                Err(e) => return Err(io_err(&e)),
             }
         }
     }
@@ -177,23 +117,16 @@ impl RawMidi {
         let mut decoder = crate::monitor::MidiDecoder::new();
         let mut buf = [0u8; 256];
         loop {
-            match self.input.io().read(&mut buf) {
-                Ok(0) => std::thread::sleep(POLL_INTERVAL),
-                Ok(n) => {
+            match self.port.read(&mut buf)? {
+                0 => sleep(POLL_INTERVAL),
+                n => {
                     let chunk = buf.get(..n).unwrap_or(&[]);
                     for line in decoder.push(chunk) {
                         println!("{line}");
                     }
                 }
-                Err(e) if is_would_block(&e) => std::thread::sleep(POLL_INTERVAL),
-                Err(e) => return Err(io_err(&e)),
             }
         }
-    }
-
-    /// Write a complete byte buffer to the output port.
-    fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
-        self.output.io().write_all(bytes).map_err(|e| io_err(&e))
     }
 
     /// Discard any pending input, so a stale reply left over from a previous
@@ -205,11 +138,11 @@ impl RawMidi {
         // gap is not the end; only sustained silence is.
         let mut quiet = 0u32;
         while quiet < DRAIN_QUIET_POLLS {
-            match self.input.io().read(&mut buf) {
+            match self.port.read(&mut buf) {
                 Ok(n) if n > 0 => quiet = 0,
                 _ => {
                     quiet = quiet.saturating_add(1);
-                    std::thread::sleep(POLL_INTERVAL);
+                    sleep(POLL_INTERVAL);
                 }
             }
         }
@@ -223,9 +156,9 @@ impl RawMidi {
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
         for _ in 0..REPLY_POLLS {
-            match self.input.io().read(&mut buf) {
-                Ok(0) => std::thread::sleep(POLL_INTERVAL),
-                Ok(n) => {
+            match self.port.read(&mut buf)? {
+                0 => sleep(POLL_INTERVAL),
+                n => {
                     let chunk = buf.get(..n).unwrap_or(&[]);
                     for msg in framer.push(chunk) {
                         let Ok(parsed) = sysex::parse_roland(&msg) else {
@@ -239,10 +172,6 @@ impl RawMidi {
                         }
                     }
                 }
-                Err(e) if is_would_block(&e) => {
-                    std::thread::sleep(POLL_INTERVAL);
-                }
-                Err(e) => return Err(io_err(&e)),
             }
         }
         Err(Error::Timeout)
@@ -259,7 +188,7 @@ impl RawMidi {
         let mut idle = 0u32;
         let mut waited = 0u32;
         loop {
-            match self.input.io().read(&mut buf) {
+            match self.port.read(&mut buf) {
                 Ok(n) if n > 0 => {
                     idle = 0;
                     let chunk = buf.get(..n).unwrap_or(&[]);
@@ -294,7 +223,7 @@ impl RawMidi {
                     if out.is_empty() && waited >= REPLY_POLLS {
                         break;
                     }
-                    std::thread::sleep(POLL_INTERVAL);
+                    sleep(POLL_INTERVAL);
                 }
             }
         }
@@ -308,10 +237,10 @@ impl RawMidi {
 impl Transport for RawMidi {
     fn send(&mut self, addr: &[u8], data: &[u8]) -> Result<()> {
         let msg = sysex::build_dt1(self.device_id, addr, data);
-        self.write_all(&msg)?;
+        self.port.write_all(&msg)?;
         // Pace consecutive DT1s so a bulk (multi-sub-block) patch write is not
         // dropped by the device. See [`WRITE_PACE`].
-        std::thread::sleep(WRITE_PACE);
+        sleep(WRITE_PACE);
         Ok(())
     }
 
@@ -325,7 +254,7 @@ impl Transport for RawMidi {
             *last = u8::try_from(len & 0x7f).unwrap_or(0x7f);
         }
         let msg = sysex::build_rq1(self.device_id, addr, &size);
-        self.write_all(&msg)?;
+        self.port.write_all(&msg)?;
 
         let mut out = self.read_dt1_reply(addr)?;
         out.resize(len, 0);
@@ -343,11 +272,12 @@ impl Transport for RawMidi {
             remaining >>= 7;
         }
         let msg = sysex::build_rq1(self.device_id, addr, &sz);
-        self.write_all(&msg)?;
+        self.port.write_all(&msg)?;
         self.collect_dt1_stream()
     }
 
     fn program_change(&mut self, program: u8) -> Result<()> {
-        self.write_all(&[0xC0, program & 0x7f])
+        self.port.write_all(&[0xC0, program & 0x7f])?;
+        Ok(())
     }
 }

@@ -13,20 +13,19 @@
 //! *advisory*: it only excludes other rackctl processes that take the same lock,
 //! not unrelated tools such as `amidi`.
 //!
-//! This is manufacturer-independent and is a prime candidate to lift into a
-//! shared `rackctl-core` (or the future arbitration daemon) alongside the
-//! rawmidi transport.
+//! This is the same exclusion the future arbitration daemon would enforce
+//! centrally; until then every direct accessor takes the lock.
 
 use std::env;
 use std::fs::{File, OpenOptions, TryLockError, create_dir_all};
 use std::path::{Path, PathBuf};
 
-use crate::error::{Error, Result};
+use crate::MidiError;
 
 /// An exclusive advisory lock on one MIDI interface, held for as long as the
 /// value lives. Dropping it (or the process exiting) releases the lock.
 #[derive(Debug)]
-pub(crate) struct PortLock {
+pub struct PortLock {
     /// The locked file. Held only so the lock outlives this struct's creation;
     /// closing the descriptor on drop releases the `flock`.
     _file: File,
@@ -37,19 +36,19 @@ impl PortLock {
     /// blocking.
     ///
     /// # Errors
-    /// - [`Error::PortBusy`] if another rackctl process already holds it.
-    /// - [`Error::Transport`] if the lockfile cannot be created or locked.
-    pub(crate) fn acquire(port: &str) -> Result<Self> {
+    /// - [`MidiError::PortBusy`] if another rackctl process already holds it.
+    /// - [`MidiError::Io`] if the lockfile cannot be created or locked.
+    pub fn acquire(port: &str) -> Result<Self, MidiError> {
         Self::acquire_at(&lock_path(port), port)
     }
 
     /// Acquire the lock using an explicit lockfile path. Split out from
     /// [`Self::acquire`] so tests can point it at an isolated temp file without
     /// touching the process environment.
-    fn acquire_at(path: &Path, port: &str) -> Result<Self> {
+    fn acquire_at(path: &Path, port: &str) -> Result<Self, MidiError> {
         if let Some(parent) = path.parent() {
             create_dir_all(parent).map_err(|e| {
-                Error::Transport(format!("creating lock dir {}: {e}", parent.display()))
+                MidiError::Io(format!("creating lock dir {}: {e}", parent.display()))
             })?;
         }
         let file = OpenOptions::new()
@@ -57,12 +56,12 @@ impl PortLock {
             .truncate(false)
             .write(true)
             .open(path)
-            .map_err(|e| Error::Transport(format!("opening lockfile {}: {e}", path.display())))?;
+            .map_err(|e| MidiError::Io(format!("opening lockfile {}: {e}", path.display())))?;
         match file.try_lock() {
             Ok(()) => Ok(Self { _file: file }),
-            Err(TryLockError::WouldBlock) => Err(Error::PortBusy(port.to_owned())),
+            Err(TryLockError::WouldBlock) => Err(MidiError::PortBusy(port.to_owned())),
             Err(TryLockError::Error(e)) => {
-                Err(Error::Transport(format!("locking {}: {e}", path.display())))
+                Err(MidiError::Io(format!("locking {}: {e}", path.display())))
             }
         }
     }
@@ -109,7 +108,7 @@ mod tests {
         let path = env::temp_dir().join(format!("rackctl-locktest-{}.lock", std::process::id()));
         let held = PortLock::acquire_at(&path, "hw:test,0").expect("first acquire succeeds");
         match PortLock::acquire_at(&path, "hw:test,0") {
-            Err(Error::PortBusy(p)) => assert_eq!(p, "hw:test,0"),
+            Err(MidiError::PortBusy(p)) => assert_eq!(p, "hw:test,0"),
             other => panic!("expected PortBusy, got {other:?}"),
         }
         drop(held);

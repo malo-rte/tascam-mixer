@@ -2756,7 +2756,7 @@ dependencies = [
 name = "rackctl-gx700"
 version = "0.7.3"
 dependencies = [
- "alsa",
+ "rackctl-midi",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2798,6 +2798,14 @@ dependencies = [
  "rackctl-gx700",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "rackctl-midi"
+version = "0.7.3"
+dependencies = [
+ "alsa",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

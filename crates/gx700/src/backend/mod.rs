@@ -6,15 +6,12 @@
 //! it a trait lets the whole library run against an in-memory [`MockTransport`]
 //! with no MIDI hardware or `libasound` present (rust-coding-rules RS-80).
 //!
-//! The real [`RawMidi`] transport (and its ALSA port enumeration) is
-//! manufacturer-independent and is a prime candidate to lift into a shared
-//! `rackctl-core` once a second MIDI device joins the suite.
+//! [`RawMidi`] keeps the Roland-specific protocol; its byte-level link — the ALSA
+//! port and the cross-process lock — now lives in the shared `rackctl-midi` crate.
 
 mod mock;
 pub use mock::MockTransport;
 
-#[cfg(feature = "alsa")]
-mod lock;
 #[cfg(feature = "alsa")]
 mod rawmidi;
 #[cfg(feature = "alsa")]
