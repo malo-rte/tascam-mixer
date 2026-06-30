@@ -144,6 +144,37 @@ impl RawPatch {
         let _ = writeln!(out, "  output level: {level}");
         let _ = writeln!(out, "  chain: {}", chain_labels.join(" > "));
 
+        // Control assigns (also in the Level/Chain block): each routes a Source
+        // controller to a Target parameter, swept between Min and Max while the
+        // Source is within Action lo..hi. Targets are named via MI Table 1.2.
+        if let Some(hex) = self.blocks.get(&param::Block::LevelChain.base())
+            && let Ok(bytes) = from_hex(hex)
+        {
+            let _ = writeln!(out, "  [control assigns]");
+            for n in 1..=4 {
+                let raw = |suffix: &str| -> i32 {
+                    param::Param::from_key(&format!("assign{n}-{suffix}"))
+                        .map_or(0, |p| p.decode(&bytes))
+                };
+                let target = raw("target");
+                if target == 0 {
+                    let _ = writeln!(out, "    assign {n}: (off)");
+                    continue;
+                }
+                let mode = if raw("mode") == 1 { "toggle" } else { "normal" };
+                let _ = writeln!(
+                    out,
+                    "    assign {n}: {} [{mode}]  min {} max {}  source {} ({}..{})",
+                    param::assign_target_name(target),
+                    raw("min"),
+                    raw("max"),
+                    raw("source"),
+                    raw("act-lo"),
+                    raw("act-hi"),
+                );
+            }
+        }
+
         let mut current: Option<&str> = None;
         for &p in param::ALL {
             if p.block() == param::Block::LevelChain {
@@ -595,6 +626,19 @@ mod tests {
         let desc = read.describe();
         assert!(desc.contains("JAZZ TONE"), "{desc}");
         assert!(desc.contains("BG Lead"), "{desc}"); // preamp type byte 03
+    }
+
+    #[test]
+    fn describe_shows_named_control_assigns() {
+        let mut t = crate::typed::Patch::init();
+        t.set("assign1-target", Value::Int(22)).unwrap(); // MI 1.2: Distortion: Drive
+        t.set("assign1-min", Value::Int(10)).unwrap();
+        t.set("assign1-max", Value::Int(90)).unwrap();
+        let desc = t.to_raw().describe();
+        assert!(desc.contains("[control assigns]"), "{desc}");
+        assert!(desc.contains("assign 1: Distortion: Drive"), "{desc}");
+        assert!(desc.contains("min 10 max 90"), "{desc}");
+        assert!(desc.contains("assign 2: (off)"), "{desc}"); // unset reads as off
     }
 
     #[test]
