@@ -68,10 +68,14 @@
             # Desktop entries for the GUIs.
             install -Dm644 -t $out/share/applications packaging/*.desktop
 
-            # winit/glow load Wayland, GL and xkbcommon with dlopen at run time,
-            # which does not consult the binary's RUNPATH — so put them on each
-            # GUI's library path. The CLIs only need libasound, found via RUNPATH.
             for gui in rackctl-us16x08-gui rackctl-gx700-gui; do
+              # App icon (referenced by the .desktop Icon= key) into the hicolor theme.
+              install -Dm644 "packaging/$gui.svg" \
+                "$out/share/icons/hicolor/scalable/apps/$gui.svg"
+
+              # winit/glow load Wayland, GL and xkbcommon with dlopen at run time,
+              # which does not consult the binary's RUNPATH — so put them on each
+              # GUI's library path. The CLIs only need libasound, found via RUNPATH.
               wrapProgram $out/bin/"$gui" \
                 --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath guiLibs}
             done

@@ -66,11 +66,13 @@ jobs:
           # One suite archive: every device's binaries (CLI + GUI), both desktop
           # entries, the rendered docs, and the licence.
           name="rackctl-${version}-x86_64-linux"
-          mkdir -p "dist/${name}/docs" "dist/${name}/share/applications"
+          icons="dist/${name}/share/icons/hicolor/scalable/apps"
+          mkdir -p "dist/${name}/docs" "dist/${name}/share/applications" "$icons"
           cp target/release/rackctl-us16x08 target/release/rackctl-us16x08-gui \
              target/release/rackctl-gx700   target/release/rackctl-gx700-gui \
              "dist/${name}/"
           cp packaging/*.desktop "dist/${name}/share/applications/"
+          cp packaging/*.svg "$icons/"
           cp README.adoc CHANGELOG.md LICENSE "dist/${name}/"
           cp build/docs/*.pdf "dist/${name}/docs/"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"

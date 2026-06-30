@@ -16,6 +16,10 @@ version.
   `rackctl` package that installs every binary, both `.desktop` files, and both
   CLIs' shell completions, wrapping each GUI for its run-time libraries. A
   `rackctl-gx700-gui.desktop` entry ships for the GX-700 patch editor.
+- **Packaging** — both GUIs now ship a scalable (SVG) app icon (mixer faders
+  for the US-16x08, a guitar pick for the GX-700), installed into the hicolor
+  icon theme by the Nix package and bundled in the release archive, so desktop
+  launchers no longer fall back to a generic icon.
 
 ## [0.7.3] - 2026-06-25
 

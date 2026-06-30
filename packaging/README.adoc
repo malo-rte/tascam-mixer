@@ -38,9 +38,17 @@ sudo install -Dm644 -t /usr/share/applications packaging/*.desktop
 ----
 
 Each entry references an icon named after its binary (`rackctl-us16x08-gui`,
-`rackctl-gx700-gui`). Until icons ship, launchers fall back to a generic one;
-installing a matching `.png`/`.svg` into the hicolor icon theme (for example
-`/usr/share/icons/hicolor/scalable/apps/rackctl-gx700-gui.svg`) makes it appear.
+`rackctl-gx700-gui`). The matching scalable (SVG) icons ship alongside the
+desktop entries; install them into the hicolor icon theme so launchers show
+them:
+
+[source,bash]
+----
+for gui in rackctl-us16x08-gui rackctl-gx700-gui; do
+  sudo install -Dm644 "packaging/$gui.svg" \
+    "/usr/share/icons/hicolor/scalable/apps/$gui.svg"
+done
+----
 
 == Shell completions
 
