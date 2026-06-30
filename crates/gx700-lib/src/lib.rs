@@ -19,6 +19,7 @@ use rackctl_gx700::Block;
 
 pub mod format;
 pub mod library;
+pub mod manage;
 
 pub use format::{Scene, parse_block, parse_patch, parse_scene};
 

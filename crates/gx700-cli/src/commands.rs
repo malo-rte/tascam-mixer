@@ -2,21 +2,23 @@
 //! the mock and the real ALSA rawmidi device.
 
 use std::fs;
-use std::path::PathBuf;
 use std::thread::sleep;
-use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use rackctl_gx700::{Block, Gx700, Kind, Param, RawPatch, Scene, Transport, param};
+use rackctl_gx700::typed::Patch as TypedPatch;
+use rackctl_gx700::{Block, Gx700, Kind, Param, RawPatch, Transport, param};
+use rackctl_gx700_lib::manage::{BANK_READ_PACE, slot_label};
+use rackctl_gx700_lib::{library, manage};
 
-use crate::config;
 use crate::value::{format_value, parse_value};
 
-/// Pause between patch reads when listing a whole bank. Each read makes the
-/// GX-700 stream a full patch (~14 messages); back-to-back, that sustained burst
-/// can overrun the US-16x08's MIDI input until it stalls. A short gap between
-/// reads keeps it from flooding.
-const BANK_READ_PACE: Duration = Duration::from_millis(40);
+/// Load a saved patch by name from the library (any on-disk format) as a
+/// [`RawPatch`]. Backend-free.
+fn load_raw(name: &str) -> Result<RawPatch> {
+    Ok(library::load_patch(name)
+        .map_err(anyhow::Error::msg)?
+        .to_raw())
+}
 
 /// Print the full parameter catalog. Backend-independent.
 pub(crate) fn list() {
@@ -93,21 +95,21 @@ pub(crate) fn dump_device<T: Transport>(
 
 /// Print a saved patch file in readable form. Backend-free.
 pub(crate) fn dump_file(name: &str, json: bool) -> Result<()> {
-    print_patch(&read_saved(name)?, json)
+    print_patch(&load_raw(name)?, json)
 }
 
 /// Edit a saved patch file in place: set one parameter by its catalog key, via
-/// the typed model (decode → set(key) → re-encode byte-exact). Backend-free.
+/// the typed model (load → set(key) → save byte-exact). Backend-free.
 pub(crate) fn edit_file(name: &str, key: &str, raw_value: &str) -> Result<()> {
     let p = resolve(key)?;
     let value = parse_value(p, raw_value)?;
-    let mut typed = rackctl_gx700::typed::Patch::from_raw(&read_saved(name)?);
+    let mut typed = library::load_patch(name).map_err(anyhow::Error::msg)?;
     typed.set(key, value)?;
-    let dest = write_patch_file(name, &typed.to_raw())?;
+    let path = library::save_patch(name, &typed).map_err(anyhow::Error::msg)?;
     eprintln!(
         "set {key} = {} in {}",
         format_value(p, value),
-        dest.display()
+        path.display()
     );
     Ok(())
 }
@@ -127,11 +129,12 @@ fn print_patch(raw: &RawPatch, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Save a whole patch (the current sound, or device slot `patch`) to disk as a
-/// lossless JSON file under the gx700 patches directory.
+/// Save a whole patch (the current sound, or device slot `patch`) to the patch
+/// library as the typed, enveloped JSON form.
 pub(crate) fn save<T: Transport>(dev: &mut Gx700<T>, name: &str, slot: Option<u16>) -> Result<()> {
     let raw = read_from_device(dev, slot)?;
-    let path = write_patch_file(name, &raw)?;
+    let path =
+        library::save_patch(name, &TypedPatch::from_raw(&raw)).map_err(anyhow::Error::msg)?;
     eprintln!("saved {:?} to {}", raw.name, path.display());
     Ok(())
 }
@@ -140,18 +143,7 @@ pub(crate) fn save<T: Transport>(dev: &mut Gx700<T>, name: &str, slot: Option<u1
 /// may be any patch (user 1..=100 or preset 101..=200); the destination `to` must
 /// be a user slot (1..=100), which it overwrites.
 pub(crate) fn copy<T: Transport>(dev: &mut Gx700<T>, from: u16, to: u16) -> Result<()> {
-    if !(1..=200).contains(&from) {
-        bail!("source patch {from} out of range (1..=200)");
-    }
-    if !(1..=100).contains(&to) {
-        bail!("destination patch {to} must be a user slot (1..=100); presets are read-only");
-    }
-    let raw = dev
-        .read_patch(from)
-        .with_context(|| format!("reading patch {from}"))?;
-    dev.write_patch(to, &raw)
-        .with_context(|| format!("writing patch {to}"))?;
-    verify_stored(dev, to, &raw)?;
+    let raw = manage::copy_slot(dev, from, to).map_err(anyhow::Error::msg)?;
     eprintln!(
         "copied {} {:?} to {}",
         slot_label(from),
@@ -161,77 +153,16 @@ pub(crate) fn copy<T: Transport>(dev: &mut Gx700<T>, from: u16, to: u16) -> Resu
     Ok(())
 }
 
-/// After writing a patch to a device slot, read it back and confirm the device
-/// actually stored it.
-///
-/// The GX-700 accepts patch-memory writes *only while it is in BULK LOAD mode*
-/// (entered from the front panel); outside that mode the write is silently
-/// ignored. Without this check a failed store looks like success; the read-back
-/// turns it into a clear, actionable error.
-fn verify_stored<T: Transport>(dev: &mut Gx700<T>, slot: u16, expected: &RawPatch) -> Result<()> {
-    let got = dev
-        .read_patch(slot)
-        .with_context(|| format!("reading back patch {slot} to verify the store"))?;
-    if got.blocks != expected.blocks {
-        bail!(
-            "the GX-700 did not store the patch to {} -- the slot is unchanged after the write. \
-             The unit accepts patch-memory writes only in BULK LOAD mode: on the GX-700, press \
-             TUNER/UTILITY and select \"MIDI BULK LOAD\" (the display shows \"Waiting...\"), then \
-             re-run this command. See the user manual.",
-            slot_label(slot)
-        );
-    }
-    Ok(())
-}
-
-/// A patch slot as its user/preset label: `1..=100` -> `U001`.., `101..=200` -> `P001`..
-fn slot_label(slot: u16) -> String {
-    if slot > 100 {
-        format!("P{:03}", slot - 100)
-    } else {
-        format!("U{slot:03}")
-    }
-}
-
-/// Save every patch in a bank to disk: the 100 user patches, or (with `preset`)
-/// the 100 preset patches. Each is written as `U001.json` / `P001.json` in the
-/// patches directory — the same library `load`, `dump --file`, and
-/// `patches --disk` read, so a backed-up patch can be inspected or restored by
-/// name straight away. Reads are paced like [`patches`]; the port lock makes
-/// this run the device's sole accessor from start to finish.
+/// Save every patch in a bank to the patch library: the 100 user patches, or (with
+/// `preset`) the 100 preset patches, each as `U001`/`P001`.. in the typed enveloped
+/// form — the same library `load`, `dump --file`, and `patches --disk` read.
 pub(crate) fn backup<T: Transport>(dev: &mut Gx700<T>, preset: bool) -> Result<()> {
-    let (slots, tag) = if preset {
-        (101u16..=200, 'P')
-    } else {
-        (1u16..=100, 'U')
-    };
-    let dir = config::patches_dir().context("could not determine the patches directory")?;
-    let mut count = 0u32;
-    for slot in slots {
-        let raw = dev
-            .read_patch(slot)
-            .with_context(|| format!("reading patch {slot}"))?;
-        let n = if preset { slot - 100 } else { slot };
-        let name = format!("{tag}{n:03}");
-        write_patch_file(&name, &raw)?;
-        println!("{name}  {:<12}", raw.name);
-        count += 1;
-        sleep(BANK_READ_PACE); // ease off the US-16x08's MIDI input between reads
-    }
-    eprintln!("backed up {count} patches to {}", dir.display());
+    let count = manage::backup_bank(dev, preset, |slot, name| {
+        println!("{}  {name:<12}", slot_label(slot));
+    })
+    .map_err(anyhow::Error::msg)?;
+    eprintln!("backed up {count} patches");
     Ok(())
-}
-
-/// Write `raw` to the patch library as `<name>.json`, creating the directory if
-/// needed, and return the path written.
-fn write_patch_file(name: &str, raw: &RawPatch) -> Result<PathBuf> {
-    let path = config::patch_path(name).context("could not determine the patches directory")?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-    }
-    let json = serde_json::to_string_pretty(raw).context("serializing patch")?;
-    fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
-    Ok(path)
 }
 
 /// Load a saved whole-patch file onto the device: the current sound, or (with
@@ -243,18 +174,19 @@ pub(crate) fn load<T: Transport>(
     json: bool,
 ) -> Result<()> {
     let raw = if json {
-        // `name` is a path to a typed-JSON patch (as emitted by `dump --json`).
+        // `name` is a path to a (typed/enveloped/legacy) patch file, not a library
+        // name; read it directly and parse any supported on-disk form.
         let text = fs::read_to_string(name).with_context(|| format!("reading {name}"))?;
-        let typed: rackctl_gx700::typed::Patch = serde_json::from_str(&text)
-            .with_context(|| format!("parsing {name} as a typed patch"))?;
-        typed.to_raw()
+        rackctl_gx700_lib::parse_patch(&text)
+            .map_err(anyhow::Error::msg)?
+            .to_raw()
     } else {
-        read_saved(name)?
+        load_raw(name)?
     };
     let blocks = match to_patch {
         Some(slot) => {
             let n = dev.write_patch(slot, &raw)?;
-            verify_stored(dev, slot, &raw)?;
+            manage::verify_stored(dev, slot, &raw).map_err(anyhow::Error::msg)?;
             n
         }
         None => dev.write_current_patch(&raw)?,
@@ -288,7 +220,7 @@ pub(crate) fn preview<T: Transport>(dev: &mut Gx700<T>, slot: u16) -> Result<()>
 /// `set`, reorders the blocks and saves the patch; then load it with
 /// `load --to-patch` (in BULK LOAD mode) to apply it on the unit.
 pub(crate) fn chain(name: &str, set: Option<&[String]>) -> Result<()> {
-    let mut raw = read_saved(name)?;
+    let mut raw = load_raw(name)?;
     if let Some(tokens) = set {
         let mut order = Vec::with_capacity(tokens.len());
         for t in tokens {
@@ -300,7 +232,8 @@ pub(crate) fn chain(name: &str, set: Option<&[String]>) -> Result<()> {
             })?);
         }
         raw.set_chain(&order).context("setting the signal chain")?;
-        let path = write_patch_file(name, &raw)?;
+        let path =
+            library::save_patch(name, &TypedPatch::from_raw(&raw)).map_err(anyhow::Error::msg)?;
         eprintln!("updated the chain of {name:?}; saved to {}", path.display());
     }
     print_chain(&raw);
@@ -369,32 +302,15 @@ fn read_from_device<T: Transport>(dev: &mut Gx700<T>, patch: Option<u16>) -> Res
     }
 }
 
-/// Read and parse a saved patch file by name. Backend-free.
-fn read_saved(name: &str) -> Result<RawPatch> {
-    let path = config::patch_path(name).context("could not determine the patches directory")?;
-    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
-}
-
-/// Save all 100 user patches to disk as a single named scene (a whole-device
-/// snapshot). Reads are paced like [`patches`]; the port lock makes this the
-/// device's sole accessor for the run.
+/// Save all 100 user patches as a single named scene (a whole-device snapshot) in
+/// the typed enveloped form. The port lock makes this the device's sole accessor
+/// for the run.
 pub(crate) fn scene_save<T: Transport>(dev: &mut Gx700<T>, name: &str) -> Result<()> {
-    let mut scene = Scene::new(name.to_owned());
-    for slot in 1u16..=100 {
-        let raw = dev
-            .read_patch(slot)
-            .with_context(|| format!("reading patch {slot}"))?;
-        println!("U{slot:03}  {:<12}", raw.name);
-        scene.patches.insert(slot, raw);
-        sleep(BANK_READ_PACE); // ease off the US-16x08's MIDI input between reads
-    }
-    let path = config::scene_path(name).context("could not determine the scenes directory")?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-    }
-    let json = serde_json::to_string_pretty(&scene).context("serializing scene")?;
-    fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
+    let scene = manage::capture_scene(dev, name, |slot, patch_name| {
+        println!("{}  {patch_name:<12}", slot_label(slot));
+    })
+    .map_err(anyhow::Error::msg)?;
+    let path = library::save_scene(&scene).map_err(anyhow::Error::msg)?;
     eprintln!(
         "saved scene {name:?} ({} patches) to {}",
         scene.patches.len(),
@@ -410,10 +326,7 @@ pub(crate) fn scene_restore<T: Transport>(
     name: &str,
     confirm: bool,
 ) -> Result<()> {
-    let path = config::scene_path(name).context("could not determine the scenes directory")?;
-    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let scene: Scene =
-        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    let scene = library::load_scene(name).map_err(anyhow::Error::msg)?;
     if !confirm {
         bail!(
             "restoring scene {name:?} overwrites {} user patches on the device; \
@@ -421,26 +334,17 @@ pub(crate) fn scene_restore<T: Transport>(
             scene.patches.len()
         );
     }
-    let mut count = 0u32;
-    for (&slot, raw) in &scene.patches {
-        dev.write_patch(slot, raw)
-            .with_context(|| format!("writing patch {slot}"))?;
-        if count == 0 {
-            // Fail fast: confirm the very first patch actually stored before
-            // writing the rest, rather than silently "restoring" nothing.
-            verify_stored(dev, slot, raw).context("scene restore aborted after the first patch")?;
-        }
-        println!("U{slot:03}  {:<12}", raw.name);
-        count += 1;
-        sleep(BANK_READ_PACE); // pace writes too, for the same reason
-    }
+    let count = manage::restore_scene(dev, &scene, |slot, patch_name| {
+        println!("{}  {patch_name:<12}", slot_label(slot));
+    })
+    .map_err(anyhow::Error::msg)?;
     eprintln!("restored scene {name:?} ({count} patches) to the device");
     Ok(())
 }
 
-/// List scenes saved on disk (file stems). Backend-free.
+/// List scenes saved on disk. Backend-free.
 pub(crate) fn scenes_list() {
-    let names = config::saved_scenes();
+    let names = library::list_scenes();
     if names.is_empty() {
         eprintln!("no saved scenes");
     }
@@ -449,9 +353,9 @@ pub(crate) fn scenes_list() {
     }
 }
 
-/// List patches saved on disk (file stems). Backend-free.
+/// List patches saved on disk. Backend-free.
 pub(crate) fn patches_disk() {
-    let names = config::saved_patches();
+    let names = library::list_patches();
     if names.is_empty() {
         eprintln!("no saved patches");
     }

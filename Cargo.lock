@@ -2768,8 +2768,8 @@ dependencies = [
  "anyhow",
  "clap",
  "clap_complete",
- "directories",
  "rackctl-gx700",
+ "rackctl-gx700-lib",
  "serde_json",
 ]
 

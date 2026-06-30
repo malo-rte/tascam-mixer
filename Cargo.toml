@@ -15,6 +15,7 @@ rackctl-core = { path = "crates/core" }
 rackctl-midi = { path = "crates/midi" }
 rackctl-gx700-model = { path = "crates/gx700-model" }
 rackctl-gx700 = { path = "crates/gx700", default-features = false }
+rackctl-gx700-lib = { path = "crates/gx700-lib" }
 thiserror = "2"
 alsa = "0.9"
 serde = { version = "1", features = ["derive"] }

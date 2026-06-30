@@ -1,7 +1,6 @@
 //! `rackctl-gx700` — command-line control for the BOSS GX-700 FX processor.
 
 mod commands;
-mod config;
 mod value;
 
 use std::process::ExitCode;
