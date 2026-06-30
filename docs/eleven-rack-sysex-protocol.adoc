@@ -314,16 +314,17 @@ rig as `"ABCDE"` to slot A1):
 
 ----
 00 05 41 42 43 44 45 00            ; set edit-buffer name (block 0x05), NUL-terminated
-00 03 00 00                        ; store: begin
-00 04 <bank> <slot> 41 42 43 44 45 00   ; store: slot directory entry (00 00 = User A1) + name
-00 02 00 00                        ; store: commit
+00 03 <hi> <lo>                    ; store: begin, slot = <hi><lo> (2x 7-bit)
+00 04 <hi> <lo> 41 42 43 44 45 00  ; store: directory entry for the slot + name
+00 02 <hi> <lo>                    ; store: commit
 ----
 
-The unit echoes each as a `0x02` report, then the editor reads back (`01 21`, `01 05`)
-to verify. So *restore* = select the slot, write the patch's blocks/params to the edit
-buffer, then run this store sequence. (Captured against firmware `0157`; all three
-sample saves targeted `00 00`, so the exact bank/slot byte order is to be confirmed on a
-second slot.)
+The slot is a *two-byte* number (`<hi> <lo>`, 7 bits each) — the same addressing as the
+directory read `01 04 <hi> <lo>`. A1 = `00 00`; User slot 7 = `00 07`. *Hardware-confirmed*
+from Linux: this sequence stores to exactly the target slot (neighbours untouched) and the
+patch persists across a reselect. So *restore* = select the slot, write the patch's
+blocks/params to the edit buffer, then run this store sequence with that slot. (The unit
+echoes each write as a `0x02` report; the editor then reads back to verify.)
 
 == Startup sequence and directories
 
