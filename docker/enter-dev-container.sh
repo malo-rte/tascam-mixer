@@ -24,6 +24,17 @@ mkdir -p "${CLAUDE_STATE_HOST}"
 CLAUDE_FLAGS=(-v "${CLAUDE_STATE_HOST}:${CLAUDE_CONFIG_CONTAINER}${MOUNT_SUFFIX}")
 RUST_FLAGS=(-v "claude-dev-cargo:/home/$(id -un)/.cargo/registry${MOUNT_SUFFIX}")
 
+# Persist the GitHub CLI login across the --rm container. The host copy lives
+# under the claude-dev state tree (alongside CLAUDE_STATE_HOST), so `gh auth
+# login` done once inside the container survives restarts. It holds a token,
+# so it stays on the host only -- never the repo (a public repo would get the
+# token auto-revoked by secret scanning) and never the image.
+GH_CONFIG_HOST="${CLAUDE_STATE_HOST}/gh-cli"
+GH_FLAGS=()
+if [[ -d "${GH_CONFIG_HOST}" ]]; then
+	GH_FLAGS+=(-v "${GH_CONFIG_HOST}:/home/$(id -un)/.config/gh${MOUNT_SUFFIX}")
+fi
+
 SSH_FLAGS=()
 if [[ -n "${SSH_AUTH_SOCK:-}" && -S "${SSH_AUTH_SOCK}" ]]; then
 	SSH_FLAGS+=(-v "${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}" -e SSH_AUTH_SOCK)
@@ -121,6 +132,7 @@ run_container() {
 		--user "$(id -u):$(id -g)" \
 		"${CLAUDE_FLAGS[@]}" \
 		"${RUST_FLAGS[@]}" \
+		"${GH_FLAGS[@]}" \
 		"${SSH_FLAGS[@]}" \
 		"${USB_FLAGS[@]}" \
 		"${SND_FLAGS[@]}" \

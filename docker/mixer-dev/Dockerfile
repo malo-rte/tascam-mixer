@@ -30,6 +30,7 @@ ARG DEV_PACKAGES="\
     pcsc-tools \
     yubikey-manager \
     pinentry-tty \
+    gh \
 "
 
 RUN apt-get update && \
