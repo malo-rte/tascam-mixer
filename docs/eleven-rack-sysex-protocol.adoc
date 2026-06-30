@@ -304,6 +304,27 @@ Eleven Rack with MIDI"): a *Bank Select* on *CC 32* (value `1` = Factory rigs,
 This is the foot-controller scheme (FCB1010 / Ground Control Pro). Whether a
 whole-rig *bulk* read/write exists over the editor SysEx is still open.
 
+== Storing a patch (save the edit buffer to a slot)
+
+A write (`0x00`) changes the *edit buffer* — the current sound — but does not persist;
+reselecting the patch reloads the slot. To *save* to a slot, the Windows editor issues
+three further `0x00` writes to the *directory/commit* blocks `0x03`, `0x04`, `0x02`
+(these never appear in a normal read dump). Captured sequence (editor saving the current
+rig as `"ABCDE"` to slot A1):
+
+----
+00 05 41 42 43 44 45 00            ; set edit-buffer name (block 0x05), NUL-terminated
+00 03 00 00                        ; store: begin
+00 04 <bank> <slot> 41 42 43 44 45 00   ; store: slot directory entry (00 00 = User A1) + name
+00 02 00 00                        ; store: commit
+----
+
+The unit echoes each as a `0x02` report, then the editor reads back (`01 21`, `01 05`)
+to verify. So *restore* = select the slot, write the patch's blocks/params to the edit
+buffer, then run this store sequence. (Captured against firmware `0157`; all three
+sample saves targeted `00 00`, so the exact bank/slot byte order is to be confirmed on a
+second slot.)
+
 == MIDI CC reference (foot-controller control)
 
 Separately from the editor's address-mapped SysEx, the unit exposes many parameters
@@ -320,13 +341,11 @@ addresses, but the chart's *parameter names, per-model structure and value seman
 
 == Open questions (tracked work)
 
-* *Patch store / save — the one missing piece.* A write (`0x00`) changes the *edit
-  buffer* (the current sound) but does *not* persist to the patch slot; reselecting the
-  patch reloads the slot and discards the edit. Writing the `0x01` aggregate blob does
-  nothing (it is a read-only view); only individual blocks/params are writable, and only
-  to the edit buffer. The command that *stores* the edit buffer to a slot is *unknown*
-  (the obvious opcode guesses did not persist). This blocks library *restore*; reads,
-  per-parameter edits, and library *backup* all work without it.
+* *Patch store / save — SOLVED* (from a USB capture of the Windows editor; see
+  *Storing a patch* below). It is not a new opcode: store is three `0x00` writes to the
+  *directory/commit* blocks `0x03`, `0x04`, `0x02` (which never appear in a normal read).
+  Writing the `0x01` aggregate blob still does nothing; a plain edit-buffer write still
+  does not persist without this sequence.
 * Full block/address map beyond the amp block.
 * Per-parameter value type / range / units (int vs. float vs. packed) — the
   MIDI CC reference (above) gives names and value semantics to cross-check against.
