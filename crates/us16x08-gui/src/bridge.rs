@@ -120,8 +120,8 @@ fn master_meters(app: &mut App, ui: &mut egui::Ui, now: f64) {
             meter_bar(ui, fraction(r), app.peak(MASTER_R), now);
         });
         // Mute button centred under the two meter bars (a single left-aligned
-        // "M" would sit under the left bar only). Colour-lit red when muted, to
-        // match the channel strip and bridge mutes.
+        // "M" would sit under the left bar only). Colour-lit amber-orange when
+        // muted, to match the channel strip and bridge mutes.
         let muted = app.cached_bool(Control::MasterMute, 0);
         let width = 2.0 * METER_SIZE.x + ui.spacing().item_spacing.x;
         let height = ui.spacing().interact_size.y;
@@ -168,7 +168,7 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32, now: f64) {
         meter_bar(ui, fraction(level), app.peak(ch), now);
 
         // Mute and solo, side by side under the meter — colour-lit toggles
-        // matching the channel strip (red when muted, amber-gold when soloed).
+        // matching the channel strip (amber-orange when muted, teal when soloed).
         ui.horizontal(|ui| {
             let muted = app.cached_bool(Control::MuteSwitch, ch);
             if channel::toggle_button(ui, muted, "M", channel::MUTE_ON)

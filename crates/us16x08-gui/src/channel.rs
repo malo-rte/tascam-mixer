@@ -33,10 +33,12 @@ pub(crate) const VALUE_BOX_WIDTH: f32 = 60.0;
 const GR_LANE_MAX: f64 = 6.0;
 
 /// Fill colours for the lit Mute / Solo toggle buttons (shared with the meter
-/// bridge). Dark, saturated tones (like the shared `ActionKind` fills) so the
-/// default light button text stays readable: red for muted, amber-gold for soloed.
-pub(crate) const MUTE_ON: egui::Color32 = egui::Color32::from_rgb(170, 55, 55);
-pub(crate) const SOLO_ON: egui::Color32 = egui::Color32::from_rgb(165, 140, 40);
+/// bridge). Mute and Solo are reversible *status* toggles, not destructive
+/// actions, so they deliberately avoid the `ActionKind` red — red stays reserved
+/// for genuine destruction (Delete / Clear). Warm amber-orange marks a muted
+/// channel, cool teal a soloed one: distinct hues, readable under light text.
+pub(crate) const MUTE_ON: egui::Color32 = egui::Color32::from_rgb(200, 110, 35);
+pub(crate) const SOLO_ON: egui::Color32 = egui::Color32::from_rgb(40, 145, 140);
 
 /// A mixer-style toggle button: filled with `on_fill` when `on`, a plain button
 /// otherwise. Returns the [`egui::Response`] so callers chain `.on_hover_text` and
@@ -168,8 +170,8 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 if ui.checkbox(&mut phase, "Phase").changed() {
                     app.set(Control::PhaseSwitch, ch, Value::Bool(phase));
                 }
-                // Mute and Solo as mixer-style toggle buttons: lit red when muted,
-                // amber-gold when soloed, plain when off.
+                // Mute and Solo as mixer-style toggle buttons: lit amber-orange
+                // when muted, teal when soloed, plain when off.
                 let mute = app.cached_bool(Control::MuteSwitch, ch);
                 if toggle_button(ui, mute, "Mute", MUTE_ON)
                     .on_hover_text("Silence this channel")

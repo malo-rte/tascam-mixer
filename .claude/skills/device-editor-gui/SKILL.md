@@ -98,7 +98,12 @@ Rules are SHOULD unless marked MUST. Stable IDs `GUI-NN`.
 - **GUI-40** MUST colour buttons **by consequence** (Commit / Read / Caution /
   Destructive / Neutral) via the shared `ActionKind` — never per-app colours. Clear and
   Delete are Destructive even when staged/undoable; the *intent* is to throw content
-  away.
+  away. But a **reversible status toggle** (Mute, Solo, Bypass, Enable) is *not* an
+  action with a consequence — clicking it again just undoes it, losing nothing — so it
+  MUST NOT borrow the Destructive red (a red Mute reads as danger when it's harmless).
+  Such toggles sit **outside** the consequence palette: give the lit state its own
+  domain colour (e.g. amber-orange Mute, teal Solo) and reserve red strictly for genuine
+  destruction.
 - **GUI-41** Keep row controls **consistent across every list**: action buttons on the
   same side (left, in this project) with identity (slot/name/level) following, and in
   **one canonical order** so a given action sits in the same relative position in every
