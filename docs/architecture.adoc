@@ -303,11 +303,16 @@ device's *protocol*, its *on-disk libraries*, and its *frontends* are separable:
   rawmidi port (open / list / send / non-blocking receive) and the cross-process
   advisory lock. Manufacturer-independent — a device adapter layers its own protocol on
   top. This is where a daemon-client link will join (see below).
-| `rackctl-<device>` (`crates/<device>`) | The *device adapter* — pure protocol: the
-  parameter catalog, the patch model (a byte-exact _raw_ form and a _typed_ form
-  grouped by block), the transport/codec, and the device facade (read/write patch,
-  read/write live, factory, commit). The `Transport` trait is the seam (see below).
-  This is what a new device implements.
+| `rackctl-<device>-model` (`crates/<device>-model`) | The *data model* — pure data,
+  no MIDI and no I/O (only `serde`): the parameter catalog, the patch as a byte-exact
+  _raw_ form and a _typed_ form grouped by block, the byte-exact conversion between
+  them, value validation, units, and the shared error vocabulary. A tool that only
+  reads, edits, validates or converts patch *files* depends on this crate alone.
+| `rackctl-<device>` (`crates/<device>`) | The *device adapter* — the protocol on top
+  of the model: the transport/codec (the `Transport` trait is the seam, see below) and
+  the device facade (read/write patch, read/write live, factory, commit). Re-exports
+  the model, so its public surface is the whole adapter. This is what a new device
+  implements.
 | `rackctl-<device>-lib` (`crates/<device>-lib`) | The device's *library and
   management* layer, atop `rackctl-core` + the adapter: the saved-file formats with
   multi-format parsing (envelope, bare typed, legacy), the named patch/scene/block

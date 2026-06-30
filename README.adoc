@@ -88,7 +88,8 @@ crates/
   us16x08/                 # the control-surface library (rackctl-us16x08)
   us16x08-cli/             # the `rackctl-us16x08` command-line tool
   us16x08-gui/             # the `rackctl-us16x08-gui` graphical mixer
-  gx700/                   # the GX-700 device adapter: SysEx codec + patch model (rackctl-gx700)
+  gx700-model/             # rackctl-gx700-model: pure GX-700 data model (structs, catalog, codec)
+  gx700/                   # the GX-700 device adapter: SysEx codec + transport + facade (rackctl-gx700)
   gx700-lib/               # rackctl-gx700-lib: GX-700 libraries + patch management
   gx700-cli/               # the `rackctl-gx700` command-line tool
   gx700-gui/               # the `rackctl-gx700-gui` patch editor
