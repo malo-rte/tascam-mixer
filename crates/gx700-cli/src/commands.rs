@@ -294,6 +294,54 @@ fn chain_token(id: u8) -> &'static str {
     }
 }
 
+/// Resolve a block token (the chain tokens: `comp`, `reverb`, …) to its [`Block`].
+fn parse_block_token(token: &str) -> Result<Block> {
+    chain_block_id(token)
+        .and_then(Block::from_base)
+        .ok_or_else(|| {
+            anyhow!(
+                "unknown block {token:?}; use one of: \
+                 comp wah dist preamp loop eq speaker ns mod delay chorus tremolo reverb"
+            )
+        })
+}
+
+/// Save one effect block from a saved patch to that block type's preset library.
+/// Backend-free.
+pub(crate) fn block_save(patch: &str, block: &str, name: &str) -> Result<()> {
+    let blk = parse_block_token(block)?;
+    let typed = library::load_patch(patch).map_err(anyhow::Error::msg)?;
+    let data = rackctl_gx700::typed::BlockData::from_patch(&typed, blk)
+        .ok_or_else(|| anyhow!("patch {patch:?} has no {block} block"))?;
+    let file = library::save_block(blk, name, &data).map_err(anyhow::Error::msg)?;
+    eprintln!("saved {block} preset {name:?} to {}", file.display());
+    Ok(())
+}
+
+/// Load a block preset into a saved patch, overwriting that block. Backend-free.
+pub(crate) fn block_load(patch: &str, block: &str, name: &str) -> Result<()> {
+    let blk = parse_block_token(block)?;
+    let mut typed = library::load_patch(patch).map_err(anyhow::Error::msg)?;
+    let data = library::load_block(blk, name).map_err(anyhow::Error::msg)?;
+    data.apply_to(&mut typed);
+    let file = library::save_patch(patch, &typed).map_err(anyhow::Error::msg)?;
+    eprintln!("applied {block} preset {name:?} to {}", file.display());
+    Ok(())
+}
+
+/// List saved presets for a block type. Backend-free.
+pub(crate) fn block_list(block: &str) -> Result<()> {
+    let blk = parse_block_token(block)?;
+    let names = library::list_blocks(blk);
+    if names.is_empty() {
+        eprintln!("no saved {block} presets");
+    }
+    for name in names {
+        println!("{name}");
+    }
+    Ok(())
+}
+
 /// Read the current sound, or device patch memory slot `patch`, as a [`RawPatch`].
 fn read_from_device<T: Transport>(dev: &mut Gx700<T>, patch: Option<u16>) -> Result<RawPatch> {
     match patch {

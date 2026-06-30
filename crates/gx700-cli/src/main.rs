@@ -139,6 +139,15 @@ enum Command {
         #[command(subcommand)]
         command: SceneCommand,
     },
+    /// Save, load or list per-effect-block presets (a single block's settings).
+    ///
+    /// Operates on saved patch files and the per-block library on disk — no device
+    /// needed. Presets are interchangeable only within the same block type, and the
+    /// files are shared with the GUI's per-block libraries.
+    Block {
+        #[command(subcommand)]
+        command: BlockCommand,
+    },
     /// Load a saved whole-patch file onto the device.
     Load {
         /// Saved patch name to load (or, with --json, a path to a typed-JSON file
@@ -238,6 +247,36 @@ enum SceneCommand {
     },
     /// List scenes saved on disk.
     List,
+}
+
+/// Subcommands of `block`: per-effect-block presets. The block is named by its
+/// chain token: comp wah dist preamp loop eq speaker ns mod delay chorus tremolo
+/// reverb.
+#[derive(Subcommand)]
+enum BlockCommand {
+    /// Save one block from a saved patch to that block type's preset library.
+    Save {
+        /// Saved patch name to take the block from.
+        patch: String,
+        /// Block token (e.g. `reverb`, `comp`, `eq`).
+        block: String,
+        /// Name to save the block preset under.
+        name: String,
+    },
+    /// Load a block preset into a saved patch, overwriting that block.
+    Load {
+        /// Saved patch name to apply the block to (edited in place).
+        patch: String,
+        /// Block token (e.g. `reverb`, `comp`, `eq`).
+        block: String,
+        /// Block preset name to load.
+        name: String,
+    },
+    /// List saved presets for a block type.
+    List {
+        /// Block token (e.g. `reverb`, `comp`, `eq`).
+        block: String,
+    },
 }
 
 /// Write the completion script for `shell` to standard output. Backend-free.
@@ -349,6 +388,7 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
         | Command::Monitor
         | Command::Chain { .. }
         | Command::Edit { .. }
+        | Command::Block { .. }
         | Command::Completions { .. } => Ok(()),
     }
 }
@@ -388,6 +428,18 @@ fn run() -> Result<()> {
         } => return commands::dump_file(name, *json),
         Command::Chain { name, set } => return commands::chain(name, set.as_deref()),
         Command::Edit { name, key, value } => return commands::edit_file(name, key, value),
+        // Per-block presets are file-only (no device).
+        Command::Block { command } => {
+            return match command {
+                BlockCommand::Save { patch, block, name } => {
+                    commands::block_save(patch, block, name)
+                }
+                BlockCommand::Load { patch, block, name } => {
+                    commands::block_load(patch, block, name)
+                }
+                BlockCommand::List { block } => commands::block_list(block),
+            };
+        }
         _ => {}
     }
 
