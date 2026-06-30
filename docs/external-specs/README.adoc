@@ -45,4 +45,20 @@ the SHA-256.
   (UTILITY mode) that resets the System parameters and user patches P#1-P#100 to the
   factory presets. No new MIDI/SysEx protocol detail beyond `GX-700_MI.pdf`. +
   SHA-256: `cde5f8b8dccd828aa57dba3361c7302dfbcf03f1a8e1b758a86f70a5ee93ad0f`
+
+| `Eleven_Rack_User_Guide.pdf`
+| https://www.soundland.de/media/pdf/e1/b0/f4/Eleven_Rack_User_Guide_v804_66715.pdf
+  (also on Avid's KB, article en358799)
+| Avid/Digidesign *Eleven Rack User Guide* (148 pp, v8.0.4). Operation manual for
+  the third device. *Chapter 11, "Controlling Eleven Rack with MIDI"* is the useful
+  part: a *MIDI CC reference* listing, per amp model and per effect, which Continuous
+  Controller drives each parameter (and the block *bypass* CCs: DIST 25, MOD 50, DELAY
+  28, REVERB 36, FX LOOP 107, WAH 43, AMP 111, ...), plus the *Program Change* /
+  User-Factory *Bank Change* rig-select scheme. This gives the parameter *names,
+  per-amp structure and value semantics* that help label our reverse-engineered
+  addresses, and the rig-select mapping. It does *not* document the editor's
+  address-mapped System Exclusive protocol (that is reverse-engineered in
+  `../eleven-rack-sysex-protocol.adoc`; the rig file format in
+  `../eleven-rack-rig-format.adoc`). +
+  SHA-256: `e6bb6e8554d09aabe46f6542c42b0717b3b1cb00da952c47abbefca3cabffb5b`
 |===

@@ -182,16 +182,35 @@ correlate the same rig's stored values from its `.tfx` file
 
 == Rig selection
 
-Front-panel rig changes do *not* emit a full parameter dump. Whether a rig is
-selected by MIDI Program Change (as foot controllers like the FCB1010 / Ground
-Control Pro use) and whether a whole-rig bulk dump opcode exists are *open
-questions* -- to be probed while a unit is connected.
+Front-panel rig changes do *not* emit a full parameter dump (reads must be polled).
+
+Rig *selection* is standard MIDI, per the User Guide (Chapter 11, "Controlling
+Eleven Rack with MIDI"): a *Bank Select* on *CC 32* (value `1` = Factory rigs,
+`0` = User rigs) *precedes* a *Program Change* that selects the rig within the bank.
+This is the foot-controller scheme (FCB1010 / Ground Control Pro). Whether a
+whole-rig *bulk* read/write exists over the editor SysEx is still open.
+
+== MIDI CC reference (foot-controller control)
+
+Separately from the editor's address-mapped SysEx, the unit exposes many parameters
+as MIDI Continuous Controllers for real-time/foot-controller use. The User Guide's
+Chapter 11 is the full chart: block *bypass* CCs (DIST 25, MOD 50, DELAY 28, REVERB
+36, FX LOOP 107, WAH 43, AMP 111, FX1 63, FX2 86), global controls (Volume Pedal 7,
+Wah Position 4, Multi-FX 11, Tap Tempo 64), and per-amp-model and per-effect parameter
+CCs. Notably an effect's parameter CCs *differ by slot* (its "as MOD / as FX1 / as
+FX2" columns). These CC numbers are a *different* addressing scheme from the SysEx
+addresses, but the chart's *parameter names, per-model structure and value semantics*
+(e.g. bypass `0-63 = Off, 64-127 = On`) are the reference for naming the catalog
+(see `eleven-rack-rig-format.adoc` for the rig-file keys, and
+`docs/external-specs/README.adoc` for the manual).
 
 == Open questions (tracked work)
 
 * Write opcode (`0x03`?) -- confirm by set + read-back + restore.
 * Full block/address map beyond the amp block.
-* Per-parameter value type / range / units (int vs. float vs. packed).
-* Rig select (Program Change?) and any whole-rig bulk read/write.
+* Per-parameter value type / range / units (int vs. float vs. packed) — the
+  MIDI CC reference (above) gives names and value semantics to cross-check against.
+* Any whole-rig *bulk* read/write over the editor SysEx (rig *select* is solved:
+  CC 32 bank + Program Change).
 * Meaning of the spontaneous reports emitted on port open
   (`F0 13 0B 0F 02 3F 00 F7`, `... 39 01`, `... 37 00 01`, `... 37 01 00`).
