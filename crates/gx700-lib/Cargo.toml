@@ -1,0 +1,19 @@
+[package]
+name = "rackctl-gx700-lib"
+version.workspace = true
+description = "GX-700 library and patch-management layer: on-disk libraries (patches, scenes, per-block presets), multi-format parsing, and (later) device-touching management, atop rackctl-gx700 + rackctl-core."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false             # internal support crate (path dependency), not for crates.io
+
+[dependencies]
+rackctl-core.workspace = true
+rackctl-gx700 = { workspace = true }
+serde = { workspace = true }
+serde_json.workspace = true
+
+[lints]
+workspace = true

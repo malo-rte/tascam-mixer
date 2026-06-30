@@ -50,17 +50,20 @@ pub fn encode_item<T: Serialize>(
     .map_err(|e| e.to_string())
 }
 
-/// Read a library item from envelope `text`.
+/// Extract the raw `payload` of envelope `text` as a JSON value, after the device
+/// and version checks.
 ///
-/// Returns `None` if `text` is **not one of our envelopes** (the caller may then try
-/// a bare/legacy parse); `Some(Err(reason))` if it *is* an envelope but from another
-/// device or a newer-than-`max_version` format; `Some(Ok(payload))` for a valid,
-/// compatible item.
-pub fn decode_item<T: DeserializeOwned>(
+/// Returns `None` if `text` is **not one of our envelopes**; `Some(Err(reason))` if
+/// it is an envelope but from another device or a newer-than-`max_version` format;
+/// `Some(Ok(payload))` otherwise. Use this (rather than [`decode_item`]) when one
+/// envelope may carry more than one possible payload *shape* and the caller wants to
+/// try each in turn.
+#[must_use]
+pub fn decode_payload(
     device: &str,
     max_version: u32,
     text: &str,
-) -> Option<Result<T, String>> {
+) -> Option<Result<serde_json::Value, String>> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
     let obj = value.as_object()?;
     if !(obj.contains_key("version") && obj.contains_key("device") && obj.contains_key("payload")) {
@@ -81,11 +84,28 @@ pub fn decode_item<T: DeserializeOwned>(
     if version > max_version {
         return Some(Err(format!("saved by a newer version (v{version})")));
     }
-    let payload = obj
+    Some(Ok(obj
         .get("payload")
         .cloned()
-        .unwrap_or(serde_json::Value::Null);
-    Some(serde_json::from_value(payload).map_err(|e| e.to_string()))
+        .unwrap_or(serde_json::Value::Null)))
+}
+
+/// Read a library item from envelope `text`.
+///
+/// Returns `None` if `text` is **not one of our envelopes** (the caller may then try
+/// a bare/legacy parse); `Some(Err(reason))` if it *is* an envelope but from another
+/// device, a newer-than-`max_version` format, or a payload that doesn't match `T`;
+/// `Some(Ok(payload))` for a valid, compatible item.
+#[must_use]
+pub fn decode_item<T: DeserializeOwned>(
+    device: &str,
+    max_version: u32,
+    text: &str,
+) -> Option<Result<T, String>> {
+    match decode_payload(device, max_version, text)? {
+        Ok(payload) => Some(serde_json::from_value(payload).map_err(|e| e.to_string())),
+        Err(e) => Some(Err(e)),
+    }
 }
 
 // ---- Paths ----
