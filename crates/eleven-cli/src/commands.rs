@@ -154,6 +154,9 @@ pub fn list(filter: Option<&str>) {
         for p in param::AMP_GLOBAL {
             print_param(p);
         }
+        println!("\nCabinets:    {}", param::CABS.join(", "));
+        println!("Microphones: {}", param::MICS.join(", "));
+        println!("Mic position: {}", param::MIC_POSITION.join(" / "));
     }
 
     for amp in param::AMPS {

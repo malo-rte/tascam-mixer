@@ -261,9 +261,10 @@ The Eleven Rack has *two* parameter namespaces, and the catalog spans both:
 . *MIDI CC numbers* (remote control) — the authoritative *names, per-model
   structure and value semantics* of every control, transcribed from the User
   Guide's Chapter 11 into `crates/eleven-model/src/param.rs` (the `param` module:
-  16 amp models, ~20 effects, the shared stepped-value tables, and the
-  `General`/`Misc` controls). This is the canonical parameter list and drives the
-  CLI `list` / `info` commands. See *MIDI CC reference* below.
+  16 amp models, ~20 effects, the shared stepped-value tables, the `General`/`Misc`
+  controls, plus the amp section's 7 cabinet and 7 microphone models and the mic
+  on/off-axis position from chapter 3). This is the canonical parameter list and
+  drives the CLI `list` / `info` commands. See *MIDI CC reference* below.
 . *SysEx addresses* (`11 <block> <index>`) — what the editor actually reads/writes.
   The block byte is *model/slot-specific* and the index is a small *sequential*
   offset; these are mapped by live capture (below), **not** derivable from the CC

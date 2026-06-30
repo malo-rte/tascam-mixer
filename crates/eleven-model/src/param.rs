@@ -479,6 +479,39 @@ pub const AMPS: &[Amp] = &[
     },
 ];
 
+/// The speaker-cabinet models (User Guide ch.3, "The Speaker Cabinets"). The amp
+/// section is *Amp + Cab + Mic*; the cabinet is chosen on the Cab page. These are
+/// model selections, not MIDI-CC-addressable parameters (only `CAB/MIC BYPASS`,
+/// CC 71, is — see [`AMP_GLOBAL`]).
+pub const CABS: &[&str] = &[
+    "1x12 Black Lux",
+    "1x12 Tweed Lux",
+    "2x12 AC Blue",
+    "2x12 Black Duo",
+    "4x10 Tweed Bass",
+    "4x12 Classic 30",
+    "4x12 Green 25Watt",
+];
+
+/// The microphone models (User Guide ch.3, "The Microphones"), chosen alongside the
+/// cabinet on the Cab page. Two dynamic-American (`Dyn 7`/`Dyn 57`), two
+/// dynamic-German (`Dyn 409`/`Dyn 421`), two condenser (`Cond 67`/`Cond 87`) and one
+/// ribbon (`Ribbon 121`).
+pub const MICS: &[&str] = &[
+    "Dyn 7",
+    "Dyn 57",
+    "Dyn 409",
+    "Dyn 421",
+    "Cond 67",
+    "Cond 87",
+    "Ribbon 121",
+];
+
+/// The microphone position, toggled by the front-panel **SW2** on the Cab page:
+/// the virtual mic is either centred on the speaker cone (on-axis, brighter) or
+/// angled toward its edge (off-axis, warmer).
+pub const MIC_POSITION: &[&str] = &["On-axis", "Off-axis"];
+
 // ----------------------------------------------------------------------------
 // Effects.
 // ----------------------------------------------------------------------------
@@ -851,6 +884,15 @@ mod tests {
         assert_eq!(ty.kind.describe(70), "Concert Hall");
         assert_eq!(ty.kind.describe(0), "Echo Room");
         assert_eq!(ty.kind.describe(127), "Early Reflect 2");
+    }
+
+    #[test]
+    fn amp_section_models_are_populated() {
+        assert_eq!(CABS.len(), 7);
+        assert_eq!(MICS.len(), 7);
+        assert_eq!(MIC_POSITION, ["On-axis", "Off-axis"]);
+        assert!(CABS.contains(&"4x12 Green 25Watt"));
+        assert!(MICS.contains(&"Ribbon 121"));
     }
 
     #[test]
