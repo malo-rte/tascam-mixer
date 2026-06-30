@@ -7,26 +7,63 @@ version.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-30
+
+### Added
+
+- **GX-700 GUI — control assigns.** A Level/Chain editor for the patch's four
+  control assigns, with a live schematic that is mode-, value- and range-aware
+  (scaled to the selected target's real value range), a named Target dropdown
+  (e.g. "Distortion: Drive"), and the edited assign auto-selected so the graph
+  follows the values you change.
+- **GX-700 CLI — per-block presets.** `block save|load|list` save one effect
+  block from a patch, apply a block preset to a patch, or list a block type's
+  presets — the CLI counterpart to the GUI's per-block libraries.
+- **GX-700 CLI — assigns in `dump`.** The human-readable dump now lists each
+  control assign (named target, mode, min/max, source and action window).
+- **GX-700 GUI — `--offline` mode.** Edit scenes and the library with no device
+  connected; a Connect action goes online later.
+- **Both GUIs — typography & icons.** The shared JetBrains Mono Nerd Font,
+  compact action-icon buttons, and a scalable app icon for each editor.
+- **Packaging — the whole suite.** One `rackctl-<version>-x86_64-linux.tar.gz`
+  with all four binaries, both desktop entries and both app icons; a single Nix
+  `rackctl` package; and both CLIs' shell completions.
+
 ### Changed
 
-- **Packaging** — packaging now covers the whole suite, not just the US-16x08.
-  The release archive is one `rackctl-<version>-x86_64-linux.tar.gz` carrying all
-  four binaries (`rackctl-us16x08`, `rackctl-us16x08-gui`, `rackctl-gx700`,
-  `rackctl-gx700-gui`) plus both desktop entries; the Nix flake builds a single
-  `rackctl` package that installs every binary, both `.desktop` files, and both
-  CLIs' shell completions, wrapping each GUI for its run-time libraries. A
-  `rackctl-gx700-gui.desktop` entry ships for the GX-700 patch editor.
-- **Packaging** — both GUIs now ship a scalable (SVG) app icon (mixer faders
-  for the US-16x08, a guitar pick for the GX-700), installed into the hicolor
-  icon theme by the Nix package and bundled in the release archive, so desktop
-  launchers no longer fall back to a generic icon.
-- **US-16x08 GUI** — brought in line with the GX-700 editor's look: the shared
-  JetBrains Mono Nerd Font is now used (one typeface across both GUIs), the
-  preset lists use compact action icons in the canonical order on the left of
-  each row, Mute/Solo are colour-lit toggle buttons rather than checkboxes, and
-  the scrollbar no longer floats over the rightmost channel. The font and icon
-  glyphs were hoisted into the shared `rackctl-ui` crate so both GUIs share one
-  source.
+- **Reusable library crates.** Shared logic is extracted into libraries so a
+  future tool can reuse it: `rackctl-core` (device-neutral on-disk library),
+  `rackctl-midi` (byte-level MIDI link, the seam for a future daemon),
+  `rackctl-gx700-model` (the pure GX-700 data model — typed structs, catalog and
+  byte-exact codec, no MIDI/I-O), and `rackctl-gx700-lib` (GX-700 libraries +
+  management). The CLI and GUI frontends are now thin consumers, and the US-16x08
+  tools adopt `rackctl-core` too.
+- **One self-describing on-disk format.** Every saved patch, scene, block preset
+  and mixer preset is now the same envelope (format version + device id + typed
+  payload), so a file round-trips between each device's CLI and GUI — closing the
+  previous CLI/GUI format divergence.
+- **BREAKING — pre-0.8.0 files are no longer read.** The legacy/bare on-disk
+  forms were removed; re-save any patches, scenes or presets created before
+  0.8.0. (`dump --json`'s bare typed-patch export is unchanged.)
+- **US-16x08 GUI look** aligned with the GX-700 editor: the shared font and
+  action icons, Mute/Solo as colour-lit toggle buttons, and a reserved scrollbar
+  gutter so it never clips the rightmost channel.
+- **GX-700 GUI responsiveness.** The remaining single-shot device reads (the
+  BULK LOAD probe and lazy preset loads) run off the UI thread, so the window no
+  longer hitches on them.
+- **Button colours by consequence.** Mute/Solo are reversible status toggles, not
+  destructive actions, so they no longer use the red reserved for genuine
+  destruction; "Discard & refresh" is Caution (it discards your own edits).
+
+### Fixed
+
+- **GX-700 INIT patches** get a valid effect chain, so a freshly-cleared patch
+  edits correctly instead of showing every block as "Level/Chain".
+- **The assign schematic** scales to the target parameter's real value range, so
+  the Min/Max reference lines track the configured values.
+- **Supply chain** — the unmaintained-only `ttf-parser` and `paste` advisories
+  (transitive, no fix available) are ignored with documented reasons, and
+  `anyhow` was bumped to clear a RUSTSEC advisory.
 
 ## [0.7.3] - 2026-06-25
 

@@ -3,7 +3,7 @@
 :doc-status:    Draft
 :doc-date:      2026-06-18
 :doc-authors:   Mats Loman
-:applies-to-version: 0.7.3
+:applies-to-version: 0.8.0
 :revnumber:     {doc-version}
 :revdate:       {doc-date}
 :title-page:
