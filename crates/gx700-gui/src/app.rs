@@ -1391,7 +1391,9 @@ fn eq_row(
     param_drag(ui, slot, gain_key, typed, enabled, actions);
     for key in [freq_key, q_key] {
         match key {
-            Some(key) => param_combo(ui, slot, key, typed, enabled, actions),
+            Some(key) => {
+                param_combo(ui, slot, key, typed, enabled, actions);
+            }
             None => {
                 ui.weak("—");
             }
@@ -1610,6 +1612,7 @@ fn show_assign_schematic(
 }
 
 /// An int parameter as a compact drag-value in display units (US-16x08 style).
+/// Returns whether the value changed this frame.
 fn param_drag(
     ui: &mut egui::Ui,
     slot: u16,
@@ -1617,12 +1620,12 @@ fn param_drag(
     typed: &TypedPatch,
     enabled: bool,
     actions: &mut Vec<Action>,
-) {
+) -> bool {
     let Some(p) = Param::from_key(key) else {
-        return;
+        return false;
     };
     let Kind::Int { min, max, .. } = p.kind() else {
-        return;
+        return false;
     };
     let mut val = match typed.get(key) {
         Some(Value::Int(v)) => v,
@@ -1632,13 +1635,16 @@ fn param_drag(
         let widget = egui::DragValue::new(&mut val)
             .range(min..=max)
             .custom_formatter(move |n, _| display_raw(p, n));
-        if ui.add(widget).changed() {
+        let changed = ui.add(widget).changed();
+        if changed {
             actions.push(Action::SetParam(slot, key, Value::Int(val)));
         }
-    });
+        changed
+    })
+    .inner
 }
 
-/// An enum parameter as a dropdown of its labels.
+/// An enum parameter as a dropdown of its labels. Returns whether it changed.
 fn param_combo(
     ui: &mut egui::Ui,
     slot: u16,
@@ -1646,12 +1652,12 @@ fn param_combo(
     typed: &TypedPatch,
     enabled: bool,
     actions: &mut Vec<Action>,
-) {
+) -> bool {
     let Some(p) = Param::from_key(key) else {
-        return;
+        return false;
     };
     let Kind::Enum { values, .. } = p.kind() else {
-        return;
+        return false;
     };
     let idx = match typed.get(key) {
         Some(Value::Enum(v)) => v,
@@ -1662,6 +1668,7 @@ fn param_combo(
         .and_then(|i| values.get(i))
         .copied()
         .unwrap_or("?");
+    let mut changed = false;
     ui.add_enabled_ui(enabled, |ui| {
         egui::ComboBox::from_id_salt((slot, key))
             .selected_text(cur)
@@ -1670,10 +1677,12 @@ fn param_combo(
                     let this = i32::try_from(i).unwrap_or(-1);
                     if ui.selectable_label(this == idx, *lbl).clicked() {
                         actions.push(Action::SetParam(slot, key, Value::Enum(this)));
+                        changed = true;
                     }
                 }
             });
     });
+    changed
 }
 
 /// Format a raw drag-value in `p`'s display units (the dB string).
@@ -3272,39 +3281,9 @@ impl App {
             )
             .weak(),
         );
-        egui::Grid::new("gx700-assigns")
-            .num_columns(5)
-            .spacing([12.0, 6.0])
-            .striped(true)
-            .show(ui, |ui| {
-                ui.label("");
-                for i in 0..4 {
-                    if ui
-                        .selectable_label(
-                            self.selected_assign == i,
-                            egui::RichText::new(format!("Assign {}", i + 1)).strong(),
-                        )
-                        .on_hover_text("show this assign in the schematic below")
-                        .clicked()
-                    {
-                        actions.push(Action::SelectAssign(i));
-                    }
-                }
-                ui.end_row();
-                for (label, keys) in ASSIGN_ROWS {
-                    ui.label(label);
-                    for key in keys {
-                        if key.ends_with("-mode") {
-                            param_combo(ui, slot, key, typed, enabled, actions);
-                        } else {
-                            param_drag(ui, slot, key, typed, enabled, actions);
-                        }
-                    }
-                    ui.end_row();
-                }
-            });
 
-        // Schematic for the selected assign — value- and mode-aware.
+        // Schematic for the selected assign, above the grid — value-, mode- and
+        // range-aware. (Editing a grid cell auto-selects its assign, so this updates.)
         let n = self.selected_assign + 1;
         let raw = |suffix: &str| -> i32 {
             match typed.get(&format!("assign{n}-{suffix}")) {
@@ -3319,7 +3298,6 @@ impl App {
         // fall back to the Min/Max span so the schematic still fills the height.
         let range = rackctl_gx700::param::assign_target_range(raw("target"))
             .unwrap_or((min.min(max), min.max(max)));
-        ui.add_space(6.0);
         ui.label(
             egui::RichText::new(format!(
                 "Assign {n} — {}",
@@ -3328,6 +3306,44 @@ impl App {
             .strong(),
         );
         show_assign_schematic(ui, lo, hi, min, max, range, toggle);
+        ui.add_space(4.0);
+
+        egui::Grid::new("gx700-assigns")
+            .num_columns(5)
+            .spacing([12.0, 6.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("");
+                for i in 0..4 {
+                    if ui
+                        .selectable_label(
+                            self.selected_assign == i,
+                            egui::RichText::new(format!("Assign {}", i + 1)).strong(),
+                        )
+                        .on_hover_text("show this assign in the schematic above")
+                        .clicked()
+                    {
+                        actions.push(Action::SelectAssign(i));
+                    }
+                }
+                ui.end_row();
+                for (label, keys) in ASSIGN_ROWS {
+                    ui.label(label);
+                    for (col, key) in keys.into_iter().enumerate() {
+                        let changed = if key.ends_with("-mode") {
+                            param_combo(ui, slot, key, typed, enabled, actions)
+                        } else {
+                            param_drag(ui, slot, key, typed, enabled, actions)
+                        };
+                        // Editing a cell selects its assign, so the schematic above
+                        // reflects what you're tweaking.
+                        if changed {
+                            actions.push(Action::SelectAssign(col));
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
     }
 
     fn show_block_params(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
