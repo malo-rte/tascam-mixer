@@ -232,10 +232,21 @@ patch/model mismatch; it is session state.
 
 The likely key is the model-definition area the editor reads at startup: `01 20 <n>`
 returns model/def records (`01 20 00` → `12 20 00 "DigiElvn…Eleven"`), and `01 22` is the
-device-info register (`0x41`). Replicating that full init handshake (the ~530 startup
-reads and the `00 02 <slot>` recalls) before a parameter set is the open path to
-host-set. Until then: live parameter changes go through MIDI CC (`Bn <cc> <v>`) and a
-full patch change through the aggregate `0x01` write — both hardware-verified.
+device-info register (`0x41`).
+
+*Init-replay attempt.* Extracted the editor's exact startup stream (the 535 messages
+before its first parameter set — 531 reads + four `00 02 <slot>` recalls) and replayed it
+over MIDI, then read the amp / fired the set. It did *not* activate the namespace: after
+draining the replies, `01 11 3D 07` still returned nothing and the set was ignored. The
+most likely reason is **per-connection session state** — each `amidi` invocation opens
+and closes the rawmidi port, so the init and the set ran on *different* connections,
+whereas the editor holds *one* connection for the whole session (and a rawmidi write like
+`00 05 <name>`, which does persist across connections, is stateless by contrast). USB
+control transfers were ruled out (the capture has none). So the definitive next step is a
+*single-connection* replayer: open the port once, replay the init as request/response,
+then read + set on the same connection. Until then: live parameter changes go through MIDI
+CC (`Bn <cc> <v>`) and a full patch change through the aggregate `0x01` write — both
+hardware-verified.
 
 Requesting every populated block id (a *small paced batch* — not a flood) reads the
 whole patch without per-parameter polling. Other blocks seen on one patch: `0x05` name,
