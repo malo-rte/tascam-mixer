@@ -273,6 +273,86 @@ pub fn select(port: Option<&str>, slot: u8) -> Result<()> {
     Ok(())
 }
 
+/// Parse a chain-slot name (`mod`/`fx1`/`fx2`) into a `param::Slot`.
+#[cfg(feature = "alsa")]
+fn parse_slot(s: &str) -> Result<rackctl_eleven::param::Slot> {
+    use rackctl_eleven::param::Slot;
+    match s.to_ascii_lowercase().as_str() {
+        "mod" => Ok(Slot::Mod),
+        "fx1" => Ok(Slot::Fx1),
+        "fx2" => Ok(Slot::Fx2),
+        other => anyhow::bail!("unknown slot {other:?} (expected mod, fx1, or fx2)"),
+    }
+}
+
+/// Parse a CC value: a number `0..=127`, or `on`/`off` for a switch (127 / 0).
+#[cfg(feature = "alsa")]
+fn parse_cc_value(s: &str) -> Result<u8> {
+    match s.to_ascii_lowercase().as_str() {
+        "on" => Ok(127),
+        "off" => Ok(0),
+        _ => {
+            let v: u16 = s.parse().with_context(|| format!("bad value {s:?}"))?;
+            if v > 127 {
+                anyhow::bail!("value {v} out of range (0-127, or on/off)");
+            }
+            Ok(u8::try_from(v).unwrap_or(0))
+        }
+    }
+}
+
+/// Move a named parameter over MIDI CC (the native remote-control path). Resolves
+/// the CC from the catalog, using `--amp`/`--fx`/`--slot` to disambiguate.
+#[cfg(feature = "alsa")]
+pub fn cc(
+    port: Option<&str>,
+    name: &str,
+    value: &str,
+    amp: Option<&str>,
+    fx: Option<&str>,
+    slot: Option<&str>,
+    channel: u8,
+) -> Result<()> {
+    use rackctl_eleven::param;
+    // Resolve the effect slot (default to the effect's first slot if unspecified).
+    let fx_ctx = match fx {
+        Some(fx_name) => {
+            let e = param::effect(fx_name)
+                .with_context(|| format!("no effect named {fx_name:?}; try `list`"))?;
+            let s = match slot {
+                Some(s) => parse_slot(s)?,
+                None => *e.slots.first().context("effect has no slots")?,
+            };
+            Some((fx_name, s))
+        }
+        None => None,
+    };
+    let (cc_num, kind) = param::resolve_cc(name, amp, fx_ctx).with_context(|| {
+        format!("could not resolve {name:?}; give --amp <model> or --fx <effect> [--slot], or see `list`")
+    })?;
+    let v = parse_cc_value(value)?;
+
+    let mut dev = open_rawmidi(port)?;
+    dev.send_cc(channel, cc_num, v)?;
+    println!(
+        "sent CC {cc_num} = {v} (ch {channel}) for {name:?}  [{}]",
+        kind_summary(kind)
+    );
+    Ok(())
+}
+
+/// A one-word summary of a value kind, for the `cc` confirmation line.
+#[cfg(feature = "alsa")]
+fn kind_summary(kind: rackctl_eleven::param::Kind) -> &'static str {
+    use rackctl_eleven::param::Kind;
+    match kind {
+        Kind::Knob => "knob",
+        Kind::Switch { .. } => "switch",
+        Kind::Stepped(_) => "stepped",
+        _ => "?",
+    }
+}
+
 /// List the unit's patch names from the on-device directory (block `0x04`).
 #[cfg(feature = "alsa")]
 pub fn patches(port: Option<&str>, count: u8) -> Result<()> {
@@ -504,6 +584,7 @@ macro_rules! no_alsa {
 #[cfg(not(feature = "alsa"))]
 no_alsa! {
     select(port: Option<&str>, slot: u8);
+    cc(port: Option<&str>, name: &str, value: &str, amp: Option<&str>, fx: Option<&str>, slot: Option<&str>, channel: u8);
     patches(port: Option<&str>, count: u8);
     dump(port: Option<&str>, slot: Option<u8>);
     save(port: Option<&str>, name: &str, slot: Option<u8>);

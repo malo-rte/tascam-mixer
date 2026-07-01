@@ -64,6 +64,25 @@ enum Command {
         /// User slot number (0-based).
         slot: u8,
     },
+    /// Move a named parameter over MIDI CC (the native remote-control path).
+    Cc {
+        /// Control name, e.g. `"dist bypass"`, `presence`, `rate`.
+        name: String,
+        /// Value 0-127, or `on`/`off` for a switch.
+        value: String,
+        /// Amp model, to disambiguate an amp parameter (e.g. `--amp "Tweed Bass"`).
+        #[arg(long)]
+        amp: Option<String>,
+        /// Effect name, to disambiguate an effect parameter (e.g. `--fx "Parametric EQ"`).
+        #[arg(long)]
+        fx: Option<String>,
+        /// Chain slot for an effect parameter: `mod`, `fx1`, or `fx2` (default: its first).
+        #[arg(long)]
+        slot: Option<String>,
+        /// MIDI channel (1-16).
+        #[arg(long, default_value_t = 1)]
+        channel: u8,
+    },
     /// List the unit's patch names from the on-device directory.
     Patches {
         /// How many slots to read.
@@ -167,6 +186,22 @@ fn main() -> Result<()> {
         Command::Set { addr, value } => commands::set(mock, port, &addr, &value),
         Command::Scan { prefix, from, to } => commands::scan(mock, port, &prefix, &from, &to),
         Command::Select { slot } => commands::select(port, slot),
+        Command::Cc {
+            name,
+            value,
+            amp,
+            fx,
+            slot,
+            channel,
+        } => commands::cc(
+            port,
+            &name,
+            &value,
+            amp.as_deref(),
+            fx.as_deref(),
+            slot.as_deref(),
+            channel,
+        ),
         Command::Patches { count } => commands::patches(port, count),
         Command::Dump { slot } => commands::dump(port, slot),
         Command::Save { name, slot } => commands::save(port, &name, slot),

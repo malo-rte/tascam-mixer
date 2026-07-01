@@ -1047,6 +1047,46 @@ pub fn effect(name: &str) -> Option<&'static Effect> {
     EFFECTS.iter().find(|e| e.name.eq_ignore_ascii_case(name))
 }
 
+/// Look up a *global* control (one with a single fixed CC regardless of model or
+/// slot) by case-insensitive name: the [`GENERAL`] bypass shortcuts / pedals, the
+/// [`AMP_GLOBAL`] amp-section controls, and the [`MISC`] pedal/bank controls.
+#[must_use]
+pub fn global(name: &str) -> Option<&'static Param> {
+    GENERAL
+        .iter()
+        .chain(AMP_GLOBAL)
+        .chain(MISC)
+        .find(|p| p.name.eq_ignore_ascii_case(name))
+}
+
+/// Resolve a control `name` to its MIDI CC and value [`Kind`] for remote control.
+///
+/// Context disambiguates names that appear on many models/slots:
+/// * `amp_ctx` — resolve an amp model's parameter (e.g. `PRESENCE` is CC 13 on
+///   Tweed Bass but CC 3 on M-2 Lead).
+/// * `fx_ctx` — resolve an effect parameter in a given [`Slot`] (an effect's CC
+///   differs per slot).
+/// * neither — a [`global`] control.
+///
+/// Returns `None` if the name (or the amp/effect/slot) is not found.
+#[must_use]
+pub fn resolve_cc(
+    name: &str,
+    amp_ctx: Option<&str>,
+    fx_ctx: Option<(&str, Slot)>,
+) -> Option<(u8, Kind)> {
+    if let Some(a) = amp_ctx {
+        let p = amp(a)?.param(name)?;
+        return Some((p.cc, p.kind));
+    }
+    if let Some((fx, slot)) = fx_ctx {
+        let e = effect(fx)?;
+        let p = e.param(name)?;
+        return Some((e.cc_in(p, slot)?, p.kind));
+    }
+    global(name).map(|p| (p.cc, p.kind))
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -1134,6 +1174,35 @@ mod tests {
         assert_eq!(MIC_POSITION, ["On-axis", "Off-axis"]);
         assert!(CABS.contains(&"4x12 Green 25Watt"));
         assert!(MICS.contains(&"Ribbon 121"));
+    }
+
+    #[test]
+    fn resolve_cc_uses_context() {
+        // Amp context: PRESENCE differs per model.
+        assert_eq!(
+            resolve_cc("PRESENCE", Some("Tweed Bass"), None).unwrap().0,
+            13
+        );
+        assert_eq!(resolve_cc("PRESENCE", Some("M-2 Lead"), None).unwrap().0, 3);
+        // Effect context: an effect's CC differs per slot.
+        assert_eq!(
+            resolve_cc("Rate", None, Some(("Multi Chorus", Slot::Fx1)))
+                .unwrap()
+                .0,
+            20
+        );
+        assert_eq!(
+            resolve_cc("Rate", None, Some(("Multi Chorus", Slot::Fx2)))
+                .unwrap()
+                .0,
+            113
+        );
+        // Global control needs no context.
+        assert_eq!(resolve_cc("DIST BYPASS", None, None).unwrap().0, 25);
+        assert_eq!(resolve_cc("AMP OUTPUT", None, None).unwrap().0, 92);
+        // Unknown / missing context.
+        assert!(resolve_cc("PRESENCE", None, None).is_none()); // ambiguous amp param, no ctx
+        assert!(resolve_cc("nope", Some("Tweed Bass"), None).is_none());
     }
 
     #[test]

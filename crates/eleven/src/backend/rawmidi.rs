@@ -180,6 +180,20 @@ impl RawMidi {
         Err(Error::Timeout)
     }
 
+    /// Send a MIDI Control Change: `Bn <cc> <value>` on `channel` (1..=16). This is
+    /// the native remote-control path — the unit moves the mapped parameter, the
+    /// same as a foot controller. Values are masked to 7 bits.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] on a link failure.
+    pub fn send_cc(&mut self, channel: u8, cc: u8, value: u8) -> Result<()> {
+        let status = 0xB0 | (channel.saturating_sub(1) & 0x0f);
+        self.port
+            .write_all(&[status, cc & 0x7f, value & 0x7f])
+            .map_err(midi_err)?;
+        Ok(())
+    }
+
     /// Select a rig: Bank Select (`CC 32`, `1` = Factory, `0` = User) then a
     /// Program Change. Give the unit a moment to load before reading it.
     ///
