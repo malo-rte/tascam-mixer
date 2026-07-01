@@ -62,16 +62,21 @@ captured fixtures.
   address, batch-scan a range, stream change reports. A read-only `scan` command that
   enumerates answered addresses -- immediately useful and grounded in confirmed
   protocol.
-. *Decode value encoding + build the parameter catalog.* Resolve per-parameter
-  type/range/units by correlating live reads against the `.tfx` corpus; firm up the
-  block/address map beyond the amp block. Produce `param`-style catalog data.
-. *`.tfx` reader + on-disk rigs.* Parse the binary rig format into the typed model;
-  store rigs through the `rackctl-core` envelope; round-trip tests against corpus
-  fixtures.
-. *Write path.* Confirm the write opcode (set + read-back + restore), then per-address
-  write with read-back verify; rig load/store to the unit.
-. *Frontends.* `eleven-cli` (get/set, rig list/load/save, dump), then `eleven-gui`
-  (rig librarian, following the `device-editor-gui` patterns).
+. *Decode value encoding + build the parameter catalog.* *Done.* The value codec is
+  decoded; the catalog (`param`) is transcribed from the on-device MIDI CC Reference —
+  26 amps, 7 cabs, 7 mics, ~22 effects with per-slot CCs. Names are kebab-case, matching
+  gx700. (The MIDI CC is a *separate namespace* from the internal `SysEx` index.)
+. *`.tfx` reader + on-disk patches.* *Done.* The binary format is parsed into the typed
+  `Patch` model and stored through the `rackctl-core` envelope; round-trip tests against
+  corpus fixtures. (The `.tfx` is Avid's "rig file"; our tooling calls the parsed result
+  a *patch*, unified with gx700.)
+. *Write path.* *Done.* Write opcode confirmed `0x00` (set + read-back). Patch
+  save/load to the unit works via the store sequence; restore is device-faithful
+  (whole-block writes + per-parameter replay for the amp table), read-back verified.
+. *Frontends.* `eleven-cli` — *feature-complete and terminology-aligned with gx700*
+  (`save`/`load`/`copy`/`backup`/`scene`/`patches`/`cc`); the device-touching logic lives
+  in `rackctl-eleven-lib`'s `manage` module so the `eleven-gui` (patch librarian, following
+  `device-editor-gui`) reuses it. GUI still to build.
 
 == Verification strategy
 
@@ -86,15 +91,19 @@ captured fixtures.
 
 == Open reverse-engineering questions
 
-Carried from the two findings docs -- these gate phases 3 and 5:
+Most of the original questions are now *answered* (see `eleven-rack-sysex-protocol.adoc`):
+write opcode is `0x00`; patch select is Bank Select `CC 32` + Program Change; the store
+sequence and the device-faithful restore path are confirmed; the `.tfx` body layout is
+cracked (`eleven-rack-rig-format.adoc`); the CC catalog is complete. What remains, all
+needing paced time on a connected unit:
 
-* Write opcode (`0x03`?) -- set + read-back + restore.
-* Full block/address map (cab, stomps, mod, delay, reverb, FX loop, master).
-* Per-parameter value type / range / units; whether `.tfx` stored words equal the
-  SysEx 32-bit words (shared decoder if so).
-* `.tfx` body layout: exact per-key offset/packing, `FXc1..4` and `Wor*`/`Wst*`
-  routing decode.
-* Rig select (Program Change?) and any whole-rig bulk read/write.
+* *Named wire get/set by `target`.* Bind each catalogued CC / name to its model-specific
+  internal `SysEx` index (they are separate namespaces), via passive knob-sweep capture.
+* *Three amp param-table entries* (`target 0x06/0x07/0x08`) that a write doesn't take — a
+  derived/computed class needing a different write form.
+* *Model selection over MIDI* (amp / cab / mic model change) — not a CC; likely a `SysEx`
+  model-index write, still to be characterised.
+* Confirm the four inferred Expansion amp names against the device amp-select list.
 
 == Out of scope (for now)
 

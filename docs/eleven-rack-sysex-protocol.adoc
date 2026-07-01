@@ -379,13 +379,14 @@ echoes each write as a `0x02` report; the editor then reads back to verify.)
 == Restoring a patch (write the edit buffer, then store)
 
 Implemented as a *device-faithful* round-trip that avoids decoding per-parameter value
-scaling. A `PatchBackup` (the `rackctl-eleven capture` command) snapshots a patch as the
+scaling. A `PatchBackup` (the `rackctl-eleven save` command) snapshots a patch as the
 raw payloads the unit returned for each content block — name `0x05`, config `0x07`,
 FX-chain `0x08`, and the parameter blocks (`0x1E..=0x3F`; the densest, `0x21`, is the amp).
 The read-only aggregate `0x01` is captured for reference but never written back, and the
-directory/commit blocks `0x02..0x04` are not captured.
+directory/commit blocks `0x02..0x04` are not captured. This management logic lives in
+`rackctl-eleven-lib`'s `manage` module, shared by the CLI and the GUI.
 
-Restore (`rackctl-eleven restore <name> --slot N`) selects slot N, writes each block by its
+Load (`rackctl-eleven load <name> --slot N`) selects slot N, writes each block by its
 [`RestoreAction`] into the edit buffer, runs the store sequence, then re-captures and compares
 to verify. The action depends on the block kind — *hardware-confirmed* on a same-model restore
 (firmware `0157`):
