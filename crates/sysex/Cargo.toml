@@ -1,0 +1,13 @@
+[package]
+name = "rackctl-sysex"
+version.workspace = true
+description = "Manufacturer-independent MIDI System Exclusive framing for the Rackctl suite: reassemble complete F0..F7 messages from an arbitrary byte stream. The device-specific codecs (Roland, Digidesign, …) layer on top."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false             # internal support crate (path dependency), not for crates.io
+
+[lints]
+workspace = true

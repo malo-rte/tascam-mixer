@@ -1,21 +1,14 @@
-//! Pure System Exclusive codec, with no I/O.
+//! Pure Roland/BOSS System Exclusive codec, with no I/O.
 //!
-//! The codec is split into a manufacturer-independent half and a Roland/BOSS
-//! half so the generic part lifts cleanly into a shared crate once a second MIDI
-//! device (with a different manufacturer codec) joins the suite:
-//!
-//! - [`Framer`] extracts complete `F0..F7` messages from an arbitrary byte
-//!   stream. Every MIDI device needs this.
-//! - [`build_dt1`] / [`build_rq1`] / [`parse_roland`] and the `ROLAND_*` / model
-//!   constants are Roland-specific: the `F0 41 <dev> 79 <cmd> <addr..> <data..>
-//!   <checksum> F7` frame with the Roland one-byte checksum.
+//! The manufacturer-independent framing ([`Framer`], `SYSEX_START`/`SYSEX_END`)
+//! lives in the shared [`rackctl_sysex`] crate and is re-exported here so the rest
+//! of this crate can keep using `crate::sysex::Framer`. What remains is Roland-
+//! specific: [`build_dt1`] / [`build_rq1`] / [`parse_roland`] and the `ROLAND_*` /
+//! model constants — the `F0 41 <dev> 79 <cmd> <addr..> <data..> <checksum> F7`
+//! frame with the Roland one-byte checksum.
 
 use crate::error::{Error, Result};
-
-/// MIDI System Exclusive start-of-message status byte.
-pub const SYSEX_START: u8 = 0xF0;
-/// MIDI System Exclusive end-of-message status byte.
-pub const SYSEX_END: u8 = 0xF7;
+pub use rackctl_sysex::{Framer, SYSEX_END, SYSEX_START};
 
 /// Roland's MIDI manufacturer id.
 pub const ROLAND_ID: u8 = 0x41;
@@ -25,53 +18,6 @@ pub const GX700_MODEL_ID: u8 = 0x79;
 pub const DT1: u8 = 0x12;
 /// Roland "Data Request 1" command: request data from an address.
 pub const RQ1: u8 = 0x11;
-
-/// Accumulates a byte stream and yields complete `F0..F7` System Exclusive
-/// messages, manufacturer-independent.
-///
-/// Bytes seen while not inside a message are ignored. A fresh [`SYSEX_START`]
-/// clears any partial buffer, so a truncated message cannot corrupt the next
-/// one.
-#[derive(Debug, Default, Clone)]
-pub struct Framer {
-    buf: Vec<u8>,
-    in_message: bool,
-}
-
-impl Framer {
-    /// Create an empty framer.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            buf: Vec::new(),
-            in_message: false,
-        }
-    }
-
-    /// Feed `bytes` to the framer, returning every complete `F0..F7` message
-    /// that became available. Partial messages are retained for the next call.
-    pub fn push(&mut self, bytes: &[u8]) -> Vec<Vec<u8>> {
-        let mut out = Vec::new();
-        for &b in bytes {
-            match b {
-                SYSEX_START => {
-                    // A new start clears any partial message.
-                    self.buf.clear();
-                    self.buf.push(b);
-                    self.in_message = true;
-                }
-                SYSEX_END if self.in_message => {
-                    self.buf.push(b);
-                    out.push(std::mem::take(&mut self.buf));
-                    self.in_message = false;
-                }
-                _ if self.in_message => self.buf.push(b),
-                _ => {}
-            }
-        }
-        out
-    }
-}
 
 /// Compute the Roland one-byte checksum over `body` (address plus data).
 ///
@@ -248,44 +194,5 @@ mod tests {
             *byte = 0x42; // not Roland
         }
         assert!(matches!(parse_roland(&msg), Err(Error::Sysex(_))));
-    }
-
-    #[test]
-    fn framer_splits_stream_with_junk_and_two_messages() {
-        let a = build_dt1(0, &[0x10], &[0xAA]);
-        let b = build_dt1(0, &[0x20], &[0xBB]);
-
-        let mut stream = Vec::new();
-        stream.extend_from_slice(&[0x90, 0x40, 0x7f]); // junk: a Note On, no sysex
-        stream.extend_from_slice(&a);
-        stream.push(0xFE); // junk: active sensing between messages
-        stream.extend_from_slice(&b);
-
-        let mut framer = Framer::new();
-        let msgs = framer.push(&stream);
-        assert_eq!(msgs.len(), 2);
-        assert_eq!(msgs.first().map(Vec::as_slice), Some(a.as_slice()));
-        assert_eq!(msgs.get(1).map(Vec::as_slice), Some(b.as_slice()));
-    }
-
-    #[test]
-    fn framer_handles_split_across_pushes() {
-        let a = build_dt1(0, &[0x10], &[0xAA]);
-        let (head, tail) = a.split_at(3);
-        let mut framer = Framer::new();
-        assert!(framer.push(head).is_empty());
-        let msgs = framer.push(tail);
-        assert_eq!(msgs.first().map(Vec::as_slice), Some(a.as_slice()));
-    }
-
-    #[test]
-    fn framer_new_start_clears_partial() {
-        let a = build_dt1(0, &[0x10], &[0xAA]);
-        let mut framer = Framer::new();
-        // A partial message, then a fresh F0 that should discard it.
-        assert!(framer.push(&[SYSEX_START, 0x41, 0x00]).is_empty());
-        let msgs = framer.push(&a);
-        assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs.first().map(Vec::as_slice), Some(a.as_slice()));
     }
 }

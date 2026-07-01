@@ -2758,6 +2758,7 @@ version = "0.8.0"
 dependencies = [
  "rackctl-eleven-model",
  "rackctl-midi",
+ "rackctl-sysex",
 ]
 
 [[package]]
@@ -2794,6 +2795,7 @@ version = "0.8.0"
 dependencies = [
  "rackctl-gx700-model",
  "rackctl-midi",
+ "rackctl-sysex",
  "serde_json",
 ]
 
@@ -2853,6 +2855,10 @@ dependencies = [
  "alsa",
  "thiserror 2.0.18",
 ]
+
+[[package]]
+name = "rackctl-sysex"
+version = "0.8.0"
 
 [[package]]
 name = "rackctl-ui"

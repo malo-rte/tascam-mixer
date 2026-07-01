@@ -21,6 +21,7 @@ alsa = ["dep:rackctl-midi"]
 
 [dependencies]
 rackctl-eleven-model = { workspace = true }
+rackctl-sysex = { workspace = true }
 rackctl-midi = { workspace = true, optional = true }
 
 [lints]

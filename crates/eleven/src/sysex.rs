@@ -2,19 +2,15 @@
 //!
 //! The Eleven Rack speaks Digidesign address-mapped `SysEx`:
 //! `F0 13 0B <dev> <opcode> <addr..> <value..> F7`. This module builds those
-//! frames, parses them back, decodes the Universal Identity reply, and carries
-//! the generic [`Framer`] that splits a byte stream into complete `F0..F7`
-//! messages.
+//! frames, parses them back, and decodes the Universal Identity reply. The
+//! manufacturer-independent framing ([`Framer`], `SYSEX_START`/`SYSEX_END`) lives
+//! in the shared [`rackctl_sysex`] crate and is re-exported here.
 //!
 //! See `docs/eleven-rack-sysex-protocol.adoc` for the reverse-engineered details.
 
 use rackctl_eleven_model::error::{Error, Result};
 use rackctl_eleven_model::value::{RawValue, VALUE_LEN};
-
-/// MIDI System Exclusive start-of-message status byte.
-pub const SYSEX_START: u8 = 0xF0;
-/// MIDI System Exclusive end-of-message status byte.
-pub const SYSEX_END: u8 = 0xF7;
+pub use rackctl_sysex::{Framer, SYSEX_END, SYSEX_START};
 
 /// Digidesign's MIDI manufacturer id (as emitted by this unit).
 pub const DIGIDESIGN_ID: u8 = 0x13;
@@ -38,55 +34,6 @@ const UNIVERSAL_NON_REALTIME: u8 = 0x7E;
 const ID_GENERAL_INFO: u8 = 0x06;
 const ID_REQUEST: u8 = 0x01;
 const ID_REPLY: u8 = 0x02;
-
-/// Accumulates a byte stream and yields complete `F0..F7` System Exclusive
-/// messages, manufacturer-independent.
-///
-/// Bytes seen while not inside a message are ignored. A fresh [`SYSEX_START`]
-/// clears any partial buffer, so a truncated message cannot corrupt the next.
-///
-// NOTE: this is byte-for-byte the generic framer in `rackctl-gx700`'s `sysex`
-// module. It is duplicated here to keep this scaffolding step purely additive;
-// the two should be unified into a shared no-I/O crate (tracked follow-up).
-#[derive(Debug, Default, Clone)]
-pub struct Framer {
-    buf: Vec<u8>,
-    in_message: bool,
-}
-
-impl Framer {
-    /// Create an empty framer.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            buf: Vec::new(),
-            in_message: false,
-        }
-    }
-
-    /// Feed `bytes` to the framer, returning every complete `F0..F7` message
-    /// that became available. Partial messages are retained for the next call.
-    pub fn push(&mut self, bytes: &[u8]) -> Vec<Vec<u8>> {
-        let mut out = Vec::new();
-        for &b in bytes {
-            match b {
-                SYSEX_START => {
-                    self.buf.clear();
-                    self.buf.push(b);
-                    self.in_message = true;
-                }
-                SYSEX_END if self.in_message => {
-                    self.buf.push(b);
-                    out.push(std::mem::take(&mut self.buf));
-                    self.in_message = false;
-                }
-                _ if self.in_message => self.buf.push(b),
-                _ => {}
-            }
-        }
-        out
-    }
-}
 
 /// Build the Universal Identity Request (`F0 7E 7F 06 01 F7`).
 #[must_use]

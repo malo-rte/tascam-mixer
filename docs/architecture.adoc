@@ -303,6 +303,10 @@ device's *protocol*, its *on-disk libraries*, and its *frontends* are separable:
   rawmidi port (open / list / send / non-blocking receive) and the cross-process
   advisory lock. Manufacturer-independent — a device adapter layers its own protocol on
   top. This is where a daemon-client link will join (see below).
+| `rackctl-sysex` (`crates/sysex`) | *Manufacturer-independent System Exclusive
+  framing*: the `Framer` that reassembles complete `F0..F7` messages from a byte stream
+  (across split reads, interleaved junk, truncation). Each device's `sysex` module
+  re-exports it and adds only its own codec (Roland, Digidesign, …).
 | `rackctl-<device>-model` (`crates/<device>-model`) | The *data model* — pure data,
   no MIDI and no I/O (only `serde`): the parameter catalog, the patch as a byte-exact
   _raw_ form and a _typed_ form grouped by block, the byte-exact conversion between

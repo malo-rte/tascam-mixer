@@ -22,6 +22,7 @@ alsa = ["dep:rackctl-midi"]
 
 [dependencies]
 rackctl-gx700-model = { workspace = true }
+rackctl-sysex = { workspace = true }
 rackctl-midi = { workspace = true, optional = true }
 serde_json.workspace = true
 
