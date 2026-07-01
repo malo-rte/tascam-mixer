@@ -248,11 +248,21 @@ replayed it two ways:
   reshuffling from the init reads/recalls, not the set.)
 
 So per-connection state is *not* the gate either. USB control transfers are ruled out (the
-capture has none). The editor clearly does something more — precise request/response
-timing/order, or state we have not isolated — that a bare Program Change plus a replay of
-the captured MIDI does not reproduce. Host-initiated parameter set remains *unresolved*.
-Live parameter changes go through MIDI CC (`Bn <cc> <v>`) and a full patch change through
-the aggregate `0x01` write — both hardware-verified.
+capture has none). A second, shorter capture ruled out two more theories: the only
+non-Digidesign SysEx the editor sends is the *standard Identity Request* (`F0 7E 7F 06 01`
+→ reply `F0 7E 0F 06 02 13 0B 00 01 00 30 31 35 37`), i.e. nothing proprietary that could
+"unlock" editing; and edit mode is *not* a per-set keep-alive — that session has a run of
+157 consecutive parameter sets with no interleaved reads, so once editing works you can
+blast sets.
+
+The editor clearly does something more — precise request/response timing/order, or state
+we have not isolated — that a bare Program Change plus a replay of the captured MIDI does
+not reproduce (notably: on our sessions the unit never *replies* to `01 11 <block> <sub>`
+reads, which the editor's session always gets answered). Host-initiated parameter set
+remains *unresolved*; cracking it likely needs diffing the editor's *live* traffic against
+a working set in real time, or the editor DLL's logic. Live parameter changes go through
+MIDI CC (`Bn <cc> <v>`) and a full patch change through the aggregate `0x01` write — both
+hardware-verified.
 
 Requesting every populated block id (a *small paced batch* — not a flood) reads the
 whole patch without per-parameter polling. Other blocks seen on one patch: `0x05` name,
