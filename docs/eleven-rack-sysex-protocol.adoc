@@ -265,6 +265,15 @@ The Eleven Rack has *two* parameter namespaces, and the catalog spans both:
   controls, plus the amp section's 7 cabinet and 7 microphone models and the mic
   on/off-axis position from chapter 3). This is the canonical parameter list and
   drives the CLI `list` / `info` commands. See *MIDI CC reference* below.
++
+The base User Guide (v8.0.4) *predates the Expansion Pack (firmware 2.x)*, so its
+CC chart lacks the added amps and effects. The 7 Expansion effects the device
+reports in its `0x20` catalog (Multi Chorus, Parametric EQ, Dyn3 Compressor, White
+Boost, DC Distortion, Dyn Delay, EP Tape Echo) are in the catalog *by name* with
+their known BYPASS CC (`param::PARAMS_PENDING`); their remaining parameters and the
+Expansion amp models await the Expansion Pack documentation. The CC *scheme* is
+already known (positional slot CCs; amp CC slots), so those fill in mechanically
+once the chart is available.
 . *SysEx addresses* (`11 <block> <index>`) — what the editor actually reads/writes.
   The block byte is *model/slot-specific* and the index is a small *sequential*
   offset; these are mapped by live capture (below), **not** derivable from the CC

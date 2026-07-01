@@ -169,7 +169,12 @@ pub fn list(filter: Option<&str>) {
     }
     for fx in param::EFFECTS {
         if matches(fx.name) {
-            println!("\nEffect: {}   ({:?})", fx.name, fx.placement);
+            let pending = if param::params_pending(fx.name) {
+                "   [Expansion Pack — parameters pending]"
+            } else {
+                ""
+            };
+            println!("\nEffect: {}   ({:?}){pending}", fx.name, fx.placement);
             for p in fx.params {
                 print_param(p);
             }

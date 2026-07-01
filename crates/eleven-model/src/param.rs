@@ -788,7 +788,67 @@ pub const EFFECTS: &[Effect] = &[
         placement: Placement::Fx12,
         params: &[onoff("BYPASS", 63), knob("SUSTAIN", 20), knob("LEVEL", 42)],
     },
+    // --- Expansion Pack effects (firmware 2.x) ---
+    // Names are the device's own (block 0x20 model catalog). Their full parameter
+    // lists await the Expansion Pack documentation (the base User Guide v8.0.4
+    // predates them); only BYPASS is known, from the block/slot CC scheme. These
+    // names appear in [`PARAMS_PENDING`].
+    Effect {
+        name: "Multi Chorus",
+        placement: Placement::ModFx,
+        params: &[onoff("BYPASS", 50)],
+    },
+    Effect {
+        name: "Parametric EQ",
+        placement: Placement::Fx12,
+        params: &[onoff("BYPASS", 63)],
+    },
+    Effect {
+        name: "Dyn3 Compressor",
+        placement: Placement::Fx12,
+        params: &[onoff("BYPASS", 63)],
+    },
+    Effect {
+        name: "White Boost",
+        placement: Placement::Fixed,
+        params: &[onoff("BYPASS", 25)],
+    },
+    Effect {
+        name: "DC Distortion",
+        placement: Placement::Fixed,
+        params: &[onoff("BYPASS", 25)],
+    },
+    Effect {
+        name: "Dyn Delay",
+        placement: Placement::Fixed,
+        params: &[onoff("BYPASS", 28)],
+    },
+    Effect {
+        name: "EP Tape Echo",
+        placement: Placement::Fixed,
+        params: &[onoff("BYPASS", 28)],
+    },
 ];
+
+/// Effects whose full parameter set is *not yet catalogued* — the Expansion Pack
+/// additions, present in [`EFFECTS`] by name (and BYPASS) but awaiting the
+/// Expansion Pack CC chart for the rest of their parameters.
+pub const PARAMS_PENDING: &[&str] = &[
+    "Multi Chorus",
+    "Parametric EQ",
+    "Dyn3 Compressor",
+    "White Boost",
+    "DC Distortion",
+    "Dyn Delay",
+    "EP Tape Echo",
+];
+
+/// Whether `name` is an effect present by name but with parameters still pending
+/// (see [`PARAMS_PENDING`]).
+#[must_use]
+pub fn params_pending(name: &str) -> bool {
+    PARAMS_PENDING.iter().any(|p| p.eq_ignore_ascii_case(name))
+}
 
 // ----------------------------------------------------------------------------
 // General / frequently-used and miscellaneous controls.
@@ -884,6 +944,19 @@ mod tests {
         assert_eq!(ty.kind.describe(70), "Concert Hall");
         assert_eq!(ty.kind.describe(0), "Echo Room");
         assert_eq!(ty.kind.describe(127), "Early Reflect 2");
+    }
+
+    #[test]
+    fn expansion_pack_effects_present_but_flagged_pending() {
+        for name in PARAMS_PENDING {
+            let fx = effect(name).unwrap_or_else(|| panic!("{name} in EFFECTS"));
+            // Present with at least a BYPASS, and flagged as parameters-pending.
+            assert!(fx.param("BYPASS").is_some(), "{name} has BYPASS");
+            assert!(params_pending(name));
+        }
+        // A fully-catalogued effect is not flagged pending.
+        assert!(!params_pending("Graphic EQ"));
+        assert_eq!(PARAMS_PENDING.len(), 7);
     }
 
     #[test]
