@@ -306,14 +306,14 @@ pub fn send_named_cc(
     Ok((cc, kind))
 }
 
-/// Extract a printable-ASCII patch name from a directory (`0x04`) block payload:
-/// the trailing NUL-terminated name after the leading slot/flag bytes.
+/// Extract a printable-ASCII patch name from a directory (`0x04`) block payload.
+///
+/// The read reply is the NUL-terminated name from byte 0 — the device strips the
+/// `<hi> <lo>` slot address that the *store* path writes, so nothing is skipped
+/// here (hardware-verified: `04 00 00` reads back `42 69 67 20 42 6C 75 65 00` =
+/// "Big Blue"). This matches the `0x05` current-name decode.
 fn block_name(payload: &[u8]) -> String {
-    // The name is the printable ASCII run; skip the 2-byte slot header if present.
-    let start = if payload.len() > 2 { 2 } else { 0 };
     payload
-        .get(start..)
-        .unwrap_or(&[])
         .iter()
         .take_while(|&&b| b != 0)
         .filter(|&&b| (0x20..0x7f).contains(&b))
@@ -321,4 +321,21 @@ fn block_name(payload: &[u8]) -> String {
         .collect::<String>()
         .trim()
         .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::block_name;
+
+    #[test]
+    fn block_name_decodes_from_byte_zero_no_header() {
+        // Hardware-observed `04 00 00` read reply for User slot 0: the clean,
+        // NUL-terminated name from byte 0 (no `<hi> <lo>` header). Regression
+        // guard against the old 2-byte skip that chopped "Big Blue" to "g Blue".
+        let payload = [0x42, 0x69, 0x67, 0x20, 0x42, 0x6C, 0x75, 0x65, 0x00];
+        assert_eq!(block_name(&payload), "Big Blue");
+        // Trailing padding/garbage after the NUL is ignored.
+        let padded = [0x41, 0x78, 0x65, 0x00, 0xFF, 0x01];
+        assert_eq!(block_name(&padded), "Axe");
+    }
 }
