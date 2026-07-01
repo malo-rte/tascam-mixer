@@ -66,14 +66,14 @@ enum Command {
     },
     /// Move a named parameter over MIDI CC (the native remote-control path).
     Cc {
-        /// Control name, e.g. `"dist bypass"`, `presence`, `rate`.
+        /// Control name (kebab-case), e.g. `dist-bypass`, `presence`, `rate`.
         name: String,
         /// Value 0-127, or `on`/`off` for a switch.
         value: String,
-        /// Amp model, to disambiguate an amp parameter (e.g. `--amp "Tweed Bass"`).
+        /// Amp model, to disambiguate an amp parameter (e.g. `--amp tweed-bass`).
         #[arg(long)]
         amp: Option<String>,
-        /// Effect name, to disambiguate an effect parameter (e.g. `--fx "Parametric EQ"`).
+        /// Effect name, to disambiguate an effect parameter (e.g. `--fx parametric-eq`).
         #[arg(long)]
         fx: Option<String>,
         /// Chain slot for an effect parameter: `mod`, `fx1`, or `fx2` (default: its first).

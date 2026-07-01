@@ -23,9 +23,9 @@
 //! # Two parameter families
 //!
 //! * **Amps** — the manual lists each amp model's own controls and CCs (CC 13 is
-//!   `TONE` on Tweed Lux but `PRESENCE` on Tweed Bass). Each [`Amp`] lists its
+//!   `tone` on `tweed-lux` but `presence` on `tweed-bass`). Each [`Amp`] lists its
 //!   `(name, cc)` pairs; the amp-section globals (bypass, output, cab/mic) are in
-//!   [`AMP_GLOBAL`].
+//!   [`AMP_GLOBAL`]. Names are stable **kebab-case** identifiers (as on the CLI).
 //! * **Effects** — an effect's CCs depend on *where it sits in the chain*: a
 //!   [`Slot::Fixed`] dedicated-block effect (distortion, wah, delay, reverb, FX
 //!   loop) has one CC set, while a modulation-type effect occupying **Mod / FX1 /
@@ -98,7 +98,8 @@ impl Step {
 /// value [`Kind`]. (Effects use [`FxParam`], which carries a CC per slot.)
 #[derive(Debug, Clone, Copy)]
 pub struct Param {
-    /// Human-readable control name as printed in the User Guide (e.g. `"PRESENCE"`).
+    /// Stable kebab-case control name, for lookup and on the CLI (e.g. `"presence"`,
+    /// `"noise-gate-threshold"`).
     pub name: &'static str,
     /// MIDI continuous-controller number for remote control (foot controller /
     /// Pro Tools automation). A separate namespace from the internal `SysEx`
@@ -236,326 +237,326 @@ impl Amp {
 
 /// Amp-section controls common to every model ("Applies to all amps").
 pub const AMP_GLOBAL: &[Param] = &[
-    onoff("AMP BYPASS", 111),
-    knob("AMP OUTPUT", 92),
-    onoff("CAB/MIC BYPASS", 71),
+    onoff("amp-bypass", 111),
+    knob("amp-output", 92),
+    onoff("cab-mic-bypass", 71),
 ];
 
 /// All catalogued amplifier models (User Guide Ch.11).
 pub const AMPS: &[Amp] = &[
     Amp {
-        name: "Tweed Lux",
+        name: "tweed-lux",
         params: &[
-            knob("TONE", 13),
-            knob("INSTRUMENT VOLUME", 14),
-            knob("MIC VOLUME", 15),
-            knob("NOISE GATE THRESHOLD", 16),
-            knob("NOISE GATE RELEASE", 21),
+            knob("tone", 13),
+            knob("instrument-volume", 14),
+            knob("mic-volume", 15),
+            knob("noise-gate-threshold", 16),
+            knob("noise-gate-release", 21),
         ],
     },
     Amp {
-        name: "Tweed Bass",
+        name: "tweed-bass",
         params: &[
-            knob("PRESENCE", 13),
-            knob("MIDDLE", 14),
-            knob("BASS", 15),
-            knob("TREBLE", 16),
-            knob("BRIGHT VOLUME", 21),
-            knob("NORMAL VOLUME", 10),
-            knob("NOISE GATE THRESHOLD", 112),
-            knob("NOISE GATE RELEASE", 3),
+            knob("presence", 13),
+            knob("middle", 14),
+            knob("bass", 15),
+            knob("treble", 16),
+            knob("bright-volume", 21),
+            knob("normal-volume", 10),
+            knob("noise-gate-threshold", 112),
+            knob("noise-gate-release", 3),
         ],
     },
     Amp {
-        name: "Black Panel Lux Vibrato",
+        name: "black-panel-lux-vibrato",
         params: &[
-            knob("VOLUME", 13),
-            knob("TREBLE", 14),
-            knob("BASS", 15),
-            knob("VIBRATO SPEED", 16),
-            knob("VIBRATO SYNC", 21),
-            knob("VIBRATO INTENSITY", 10),
-            onoff("VIBRATO ON/OFF", 112),
-            knob("NOISE GATE THRESHOLD", 3),
-            knob("NOISE GATE RELEASE", 84),
+            knob("volume", 13),
+            knob("treble", 14),
+            knob("bass", 15),
+            knob("vibrato-speed", 16),
+            knob("vibrato-sync", 21),
+            knob("vibrato-intensity", 10),
+            onoff("vibrato-on-off", 112),
+            knob("noise-gate-threshold", 3),
+            knob("noise-gate-release", 84),
         ],
     },
     Amp {
-        name: "Black Panel Lux Normal",
+        name: "black-panel-lux-normal",
         params: &[
-            knob("VOLUME", 13),
-            knob("TREBLE", 14),
-            knob("BASS", 15),
-            knob("VIBRATO SPEED", 16),
-            knob("VIBRATO SYNC", 21),
-            knob("VIBRATO INTENSITY", 10),
-            knob("NOISE GATE THRESHOLD", 3),
-            knob("NOISE GATE RELEASE", 84),
+            knob("volume", 13),
+            knob("treble", 14),
+            knob("bass", 15),
+            knob("vibrato-speed", 16),
+            knob("vibrato-sync", 21),
+            knob("vibrato-intensity", 10),
+            knob("noise-gate-threshold", 3),
+            knob("noise-gate-release", 84),
         ],
     },
     Amp {
-        name: "AC Hi Boost",
+        name: "ac-hi-boost",
         params: &[
-            knob("NORMAL VOLUME", 13),
-            knob("BRILLIANT VOLUME", 14),
-            knob("BASS", 15),
-            knob("TREBLE", 16),
-            knob("CUT", 21),
-            knob("TREMOLO SPEED", 10),
-            knob("TREMOLO SYNC", 112),
-            knob("TREMOLO DEPTH", 3),
-            onoff("TREMOLO ON/OFF", 22),
-            knob("NOISE GATE THRESHOLD", 84),
-            knob("NOISE GATE RELEASE", 24),
+            knob("normal-volume", 13),
+            knob("brilliant-volume", 14),
+            knob("bass", 15),
+            knob("treble", 16),
+            knob("cut", 21),
+            knob("tremolo-speed", 10),
+            knob("tremolo-sync", 112),
+            knob("tremolo-depth", 3),
+            onoff("tremolo-on-off", 22),
+            knob("noise-gate-threshold", 84),
+            knob("noise-gate-release", 24),
         ],
     },
     Amp {
-        name: "Black Panel Duo",
+        name: "black-panel-duo",
         params: &[
-            knob("VOLUME", 13),
-            knob("TREBLE", 14),
-            knob("MIDDLE", 15),
-            knob("BASS", 16),
-            onoff("BRIGHT", 21),
-            knob("VIBRATO SPEED", 10),
-            knob("VIBRATO SYNC", 112),
-            knob("VIBRATO INTENSITY", 3),
-            onoff("VIBRATO ON/OFF", 22),
-            knob("NOISE GATE THRESHOLD", 84),
-            knob("NOISE GATE RELEASE", 24),
+            knob("volume", 13),
+            knob("treble", 14),
+            knob("middle", 15),
+            knob("bass", 16),
+            onoff("bright", 21),
+            knob("vibrato-speed", 10),
+            knob("vibrato-sync", 112),
+            knob("vibrato-intensity", 3),
+            onoff("vibrato-on-off", 22),
+            knob("noise-gate-threshold", 84),
+            knob("noise-gate-release", 24),
         ],
     },
     Amp {
-        name: "Plexiglas - 100W",
+        name: "plexiglas-100w",
         params: &[
-            knob("PRESENCE", 13),
-            knob("BASS", 14),
-            knob("MIDDLE", 15),
-            knob("TREBLE", 16),
-            knob("VOLUME 1", 21),
-            knob("VOLUME 2", 10),
-            knob("NOISE GATE THRESHOLD", 112),
-            knob("NOISE GATE RELEASE", 3),
+            knob("presence", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("volume-1", 21),
+            knob("volume-2", 10),
+            knob("noise-gate-threshold", 112),
+            knob("noise-gate-release", 3),
         ],
     },
     Amp {
-        name: "Lead 800 - 100W",
+        name: "lead-800-100w",
         params: &[
-            knob("PRESENCE", 13),
-            knob("BASS", 14),
-            knob("MIDDLE", 15),
-            knob("TREBLE", 16),
-            knob("PREAMP VOLUME", 10),
-            knob("MASTER VOLUME", 21),
-            knob("NOISE GATE THRESHOLD", 112),
-            knob("NOISE GATE RELEASE", 3),
+            knob("presence", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("preamp-volume", 10),
+            knob("master-volume", 21),
+            knob("noise-gate-threshold", 112),
+            knob("noise-gate-release", 3),
         ],
     },
     Amp {
-        name: "M-2 Lead",
+        name: "m-2-lead",
         params: &[
-            knob("VOLUME", 13),
-            knob("TREBLE", 14),
-            knob("BASS", 15),
-            knob("MIDDLE", 16),
-            knob("DRIVE", 21),
-            knob("MASTER", 10),
-            onoff("BRIGHT", 112),
-            knob("PRESENCE", 3),
-            knob("NOISE GATE THRESHOLD", 84),
-            knob("NOISE GATE RELEASE", 24),
+            knob("volume", 13),
+            knob("treble", 14),
+            knob("bass", 15),
+            knob("middle", 16),
+            knob("drive", 21),
+            knob("master", 10),
+            onoff("bright", 112),
+            knob("presence", 3),
+            knob("noise-gate-threshold", 84),
+            knob("noise-gate-release", 24),
         ],
     },
     Amp {
-        name: "SL-100 Drive",
+        name: "sl-100-drive",
         params: &[
-            knob("PREAMP", 13),
-            knob("BASS", 14),
-            knob("MIDDLE", 15),
-            knob("TREBLE", 16),
-            knob("PRESENCE", 21),
-            knob("MASTER", 10),
-            onoff("MOD", 112),
-            knob("NOISE GATE THRESHOLD", 3),
-            knob("NOISE GATE RELEASE", 84),
+            knob("preamp", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("presence", 21),
+            knob("master", 10),
+            onoff("mod", 112),
+            knob("noise-gate-threshold", 3),
+            knob("noise-gate-release", 84),
         ],
     },
     Amp {
-        name: "SL-100 Crunch",
+        name: "sl-100-crunch",
         params: &[
-            knob("PREAMP", 13),
-            knob("BASS", 14),
-            knob("MIDDLE", 15),
-            knob("TREBLE", 16),
-            knob("PRESENCE", 21),
-            knob("MASTER", 10),
-            onoff("BRIGHT", 112),
-            knob("NOISE GATE THRESHOLD", 3),
-            knob("NOISE GATE RELEASE", 84),
+            knob("preamp", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("presence", 21),
+            knob("master", 10),
+            onoff("bright", 112),
+            knob("noise-gate-threshold", 3),
+            knob("noise-gate-release", 84),
         ],
     },
     Amp {
-        name: "SL-100 Clean",
+        name: "sl-100-clean",
         params: &[
-            knob("PREAMP", 13),
-            knob("BASS", 14),
-            knob("MIDDLE", 15),
-            knob("TREBLE", 16),
-            knob("PRESENCE", 21),
-            knob("MASTER", 10),
-            onoff("BRIGHT", 112),
-            knob("NOISE GATE THRESHOLD", 3),
-            knob("NOISE GATE RELEASE", 84),
+            knob("preamp", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("presence", 21),
+            knob("master", 10),
+            onoff("bright", 112),
+            knob("noise-gate-threshold", 3),
+            knob("noise-gate-release", 84),
         ],
     },
     Amp {
-        name: "Treadplate Modern",
+        name: "treadplate-modern",
         params: &[
-            knob("MASTER", 13),
-            knob("PRESENCE", 14),
-            knob("BASS", 15),
-            knob("MIDDLE", 16),
-            knob("TREBLE", 21),
-            knob("GAIN", 10),
-            knob("NOISE GATE THRESHOLD", 112),
-            knob("NOISE GATE RELEASE", 3),
+            knob("master", 13),
+            knob("presence", 14),
+            knob("bass", 15),
+            knob("middle", 16),
+            knob("treble", 21),
+            knob("gain", 10),
+            knob("noise-gate-threshold", 112),
+            knob("noise-gate-release", 3),
         ],
     },
     Amp {
-        name: "Treadplate Vintage",
+        name: "treadplate-vintage",
         params: &[
-            knob("MASTER", 13),
-            knob("PRESENCE", 14),
-            knob("BASS", 15),
-            knob("MIDDLE", 16),
-            knob("TREBLE", 21),
-            knob("GAIN", 10),
-            knob("NOISE GATE THRESHOLD", 112),
-            knob("NOISE GATE RELEASE", 3),
+            knob("master", 13),
+            knob("presence", 14),
+            knob("bass", 15),
+            knob("middle", 16),
+            knob("treble", 21),
+            knob("gain", 10),
+            knob("noise-gate-threshold", 112),
+            knob("noise-gate-release", 3),
         ],
     },
     Amp {
-        name: "DC Modern Crunch",
+        name: "dc-modern-crunch",
         params: &[
-            knob("GAIN", 13),
-            knob("BASS", 14),
-            knob("MIDDLE", 15),
-            knob("TREBLE", 16),
-            knob("PRESENCE", 21),
-            knob("MASTER", 10),
-            onoff("BRIGHT", 112),
-            knob("TREMOLO SPEED", 3),
-            knob("TREMOLO SYNC", 84),
-            knob("TREMOLO DEPTH", 24),
-            onoff("TREMOLO ON/OFF", 45),
-            knob("NOISE GATE THRESHOLD", 23),
-            knob("NOISE GATE RELEASE", 22),
+            knob("gain", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("presence", 21),
+            knob("master", 10),
+            onoff("bright", 112),
+            knob("tremolo-speed", 3),
+            knob("tremolo-sync", 84),
+            knob("tremolo-depth", 24),
+            onoff("tremolo-on-off", 45),
+            knob("noise-gate-threshold", 23),
+            knob("noise-gate-release", 22),
         ],
     },
     Amp {
-        name: "DC Vintage Overdrive",
+        name: "dc-vintage-overdrive",
         params: &[
-            knob("GAIN", 13),
-            knob("BASS", 14),
-            knob("MIDDLE", 15),
-            knob("TREBLE", 16),
-            knob("PRESENCE", 21),
-            knob("MASTER", 10),
-            onoff("BRIGHT", 112),
-            knob("TREMOLO SPEED", 3),
-            knob("TREMOLO SYNC", 84),
-            knob("TREMOLO DEPTH", 24),
-            onoff("TREMOLO ON/OFF", 45),
-            knob("NOISE GATE THRESHOLD", 23),
-            knob("NOISE GATE RELEASE", 22),
+            knob("gain", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("presence", 21),
+            knob("master", 10),
+            onoff("bright", 112),
+            knob("tremolo-speed", 3),
+            knob("tremolo-sync", 84),
+            knob("tremolo-depth", 24),
+            onoff("tremolo-on-off", 45),
+            knob("noise-gate-threshold", 23),
+            knob("noise-gate-release", 22),
         ],
     },
     // --- Expansion Pack amps (firmware 2.x; from the on-device MIDI CC Reference) ---
     Amp {
-        name: "J45",
+        name: "j45",
         params: &[
-            knob("PRESENCE", 13),
-            knob("BASS", 14),
-            knob("MIDDLE", 15),
-            knob("TREBLE", 16),
-            knob("VOLUME 1", 21),
-            knob("VOLUME 2", 10),
-            knob("NOISE GATE THRESHOLD", 112),
-            knob("NOISE GATE RELEASE", 3),
+            knob("presence", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("volume-1", 21),
+            knob("volume-2", 10),
+            knob("noise-gate-threshold", 112),
+            knob("noise-gate-release", 3),
         ],
     },
     Amp {
-        name: "Black SR",
+        name: "black-sr",
         params: &[
-            knob("VOLUME", 13),
-            knob("TREBLE", 14),
-            knob("MIDDLE", 15),
-            knob("BASS", 16),
-            onoff("BRIGHT", 21),
-            knob("VIBRATO SPEED", 10),
-            knob("VIBRATO SYNC", 112),
-            knob("VIBRATO DEPTH", 3),
-            onoff("VIBRATO ON/OFF", 22),
-            knob("NOISE GATE THRESHOLD", 84),
-            knob("NOISE GATE RELEASE", 24),
+            knob("volume", 13),
+            knob("treble", 14),
+            knob("middle", 15),
+            knob("bass", 16),
+            onoff("bright", 21),
+            knob("vibrato-speed", 10),
+            knob("vibrato-sync", 112),
+            knob("vibrato-depth", 3),
+            onoff("vibrato-on-off", 22),
+            knob("noise-gate-threshold", 84),
+            knob("noise-gate-release", 24),
         ],
     },
     Amp {
-        name: "Black Vib",
+        name: "black-vib",
         params: &[
-            knob("VOLUME", 13),
-            knob("TREBLE", 14),
-            knob("MIDDLE", 15),
-            knob("BASS", 16),
-            onoff("BRIGHT", 21),
-            knob("VIBRATO SPEED", 10),
-            knob("VIBRATO SYNC", 112),
-            knob("VIBRATO DEPTH", 3),
-            onoff("VIBRATO ON/OFF", 22),
-            knob("NOISE GATE THRESHOLD", 84),
-            knob("NOISE GATE RELEASE", 24),
+            knob("volume", 13),
+            knob("treble", 14),
+            knob("middle", 15),
+            knob("bass", 16),
+            onoff("bright", 21),
+            knob("vibrato-speed", 10),
+            knob("vibrato-sync", 112),
+            knob("vibrato-depth", 3),
+            onoff("vibrato-on-off", 22),
+            knob("noise-gate-threshold", 84),
+            knob("noise-gate-release", 24),
         ],
     },
     Amp {
-        name: "Blue Line Bass",
+        name: "blue-line-bass",
         params: &[
-            knob("VOLUME", 13),
-            knob("TREBLE", 14),
-            knob("MIDDLE", 15),
-            knob("BASS", 16),
-            knob("ULTRA HI", 21),
-            knob("ULTRA LO", 10),
-            onoff("BRIGHT", 112),
-            knob("MID FREQ", 3),
-            knob("NOISE GATE THRESHOLD", 84),
-            knob("NOISE GATE RELEASE", 24),
+            knob("volume", 13),
+            knob("treble", 14),
+            knob("middle", 15),
+            knob("bass", 16),
+            knob("ultra-hi", 21),
+            knob("ultra-lo", 10),
+            onoff("bright", 112),
+            knob("mid-freq", 3),
+            knob("noise-gate-threshold", 84),
+            knob("noise-gate-release", 24),
         ],
     },
     Amp {
-        name: "MS-30",
+        name: "ms-30",
         params: &[
-            knob("VOLUME", 13),
-            knob("BASS", 14),
-            knob("TREBLE", 15),
-            knob("CUT", 16),
-            knob("MASTER", 21),
-            knob("NOISE GATE THRESHOLD", 10),
-            knob("NOISE GATE RELEASE", 112),
+            knob("volume", 13),
+            knob("bass", 14),
+            knob("treble", 15),
+            knob("cut", 16),
+            knob("master", 21),
+            knob("noise-gate-threshold", 10),
+            knob("noise-gate-release", 112),
         ],
     },
     Amp {
-        name: "RB-01b",
+        name: "rb-01b",
         params: &[
-            knob("PRESENCE", 13),
-            knob("VOLUME", 14),
-            knob("TREBLE", 15),
-            knob("MIDDLE", 16),
-            knob("BASS", 21),
-            knob("GAIN", 10),
-            onoff("BRIGHT", 112),
-            knob("BOOST", 3),
-            knob("NOISE GATE THRESHOLD", 84),
-            knob("NOISE GATE RELEASE", 24),
+            knob("presence", 13),
+            knob("volume", 14),
+            knob("treble", 15),
+            knob("middle", 16),
+            knob("bass", 21),
+            knob("gain", 10),
+            onoff("bright", 112),
+            knob("boost", 3),
+            knob("noise-gate-threshold", 84),
+            knob("noise-gate-release", 24),
         ],
     },
 ];
@@ -634,7 +635,7 @@ impl Slot {
 /// from the unit's on-device MIDI CC Reference.
 #[derive(Debug, Clone, Copy)]
 pub struct FxParam {
-    /// Control name as shown on the unit (e.g. `"Pre-Delay"`, `"Lo Cut"`).
+    /// Stable kebab-case control name (e.g. `"pre-delay"`, `"lo-cut"`).
     pub name: &'static str,
     /// Value kind (knob / switch / stepped).
     pub kind: Kind,
@@ -718,289 +719,289 @@ const FIXED: &[Slot] = &[Slot::Fixed];
 pub const EFFECTS: &[Effect] = &[
     // --- Distortion block (Bypass 25) ---
     Effect {
-        name: "Black Op Distortion",
+        name: "black-op-distortion",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[25]),
-            fk("Distortion", &[27]),
-            fk("Cut", &[78]),
-            fk("Volume", &[79]),
+            fon("bypass", &[25]),
+            fk("distortion", &[27]),
+            fk("cut", &[78]),
+            fk("volume", &[79]),
         ],
     },
     Effect {
-        name: "Green JRC Overdrive",
+        name: "green-jrc-overdrive",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[25]),
-            fk("Drive", &[27]),
-            fk("Tone", &[78]),
-            fk("Level", &[79]),
+            fon("bypass", &[25]),
+            fk("drive", &[27]),
+            fk("tone", &[78]),
+            fk("level", &[79]),
         ],
     },
     Effect {
-        name: "Tri-Knob Fuzz",
+        name: "tri-knob-fuzz",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[25]),
-            fk("Volume", &[27]),
-            fk("Sustain", &[78]),
-            fk("Tone", &[79]),
+            fon("bypass", &[25]),
+            fk("volume", &[27]),
+            fk("sustain", &[78]),
+            fk("tone", &[79]),
         ],
     },
     Effect {
-        name: "White Boost",
+        name: "white-boost",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[25]),
-            fk("Gain", &[27]),
-            fk("Treble", &[78]),
-            fk("Bass", &[79]),
-            fk("Volume", &[80]),
+            fon("bypass", &[25]),
+            fk("gain", &[27]),
+            fk("treble", &[78]),
+            fk("bass", &[79]),
+            fk("volume", &[80]),
         ],
     },
     Effect {
-        name: "DC Distortion",
+        name: "dc-distortion",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[25]),
-            fk("Gain", &[27]),
-            fk("Treble", &[78]),
-            fk("Bass", &[79]),
-            fk("Volume", &[80]),
+            fon("bypass", &[25]),
+            fk("gain", &[27]),
+            fk("treble", &[78]),
+            fk("bass", &[79]),
+            fk("volume", &[80]),
         ],
     },
     // --- Wah / Volume pedal ---
     Effect {
-        name: "Black Wah",
+        name: "black-wah",
         slots: FIXED,
-        params: &[fon("Bypass", &[43]), fk("Position", &[4])],
+        params: &[fon("bypass", &[43]), fk("position", &[4])],
     },
     Effect {
-        name: "Shine Wah",
+        name: "shine-wah",
         slots: FIXED,
-        params: &[fon("Bypass", &[43]), fk("Position", &[4])],
+        params: &[fon("bypass", &[43]), fk("position", &[4])],
     },
     Effect {
-        name: "Volume Pedal",
+        name: "volume-pedal",
         slots: FIXED,
-        params: &[fon("Bypass", &[75]), fk("Position", &[7])],
+        params: &[fon("bypass", &[75]), fk("position", &[7])],
     },
     Effect {
-        name: "Tuner",
+        name: "tuner",
         slots: FIXED,
-        params: &[fon("Bypass", &[69])],
+        params: &[fon("bypass", &[69])],
     },
     // --- Delay block (Bypass 28) ---
     Effect {
-        name: "BBD Delay",
+        name: "bbd-delay",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[28]),
-            fk("Delay", &[62]),
-            fst("Sync", FX_SYNC_STEPS, &[33]),
-            fk("Mix", &[85]),
-            fk("Feedback", &[35]),
-            fk("Input Level", &[87]),
-            fsw("Mod", "Chorus", "Vibrato", &[34]),
-            fk("Depth", &[48]),
-            fon("Noise", &[55]),
-            fon("Expanded Delay", &[49]),
+            fon("bypass", &[28]),
+            fk("delay", &[62]),
+            fst("sync", FX_SYNC_STEPS, &[33]),
+            fk("mix", &[85]),
+            fk("feedback", &[35]),
+            fk("input-level", &[87]),
+            fsw("mod", "Chorus", "Vibrato", &[34]),
+            fk("depth", &[48]),
+            fon("noise", &[55]),
+            fon("expanded-delay", &[49]),
         ],
     },
     Effect {
-        name: "Tape Echo",
+        name: "tape-echo",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[28]),
-            fk("Delay", &[62]),
-            fst("Sync", FX_SYNC_STEPS, &[33]),
-            fk("Mix", &[85]),
-            fk("Feedback", &[35]),
-            fk("Rec Level", &[87]),
-            fk("Head", &[34]),
-            fk("Wow", &[48]),
-            fon("Hiss", &[55]),
-            fon("Expanded Delay", &[49]),
+            fon("bypass", &[28]),
+            fk("delay", &[62]),
+            fst("sync", FX_SYNC_STEPS, &[33]),
+            fk("mix", &[85]),
+            fk("feedback", &[35]),
+            fk("rec-level", &[87]),
+            fk("head", &[34]),
+            fk("wow", &[48]),
+            fon("hiss", &[55]),
+            fon("expanded-delay", &[49]),
         ],
     },
     Effect {
-        name: "Dyn Delay",
+        name: "dyn-delay",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[28]),
-            fk("Delay", &[62]),
-            fst("Sync", FX_SYNC_STEPS, &[33]),
-            fk("Mix", &[85]),
-            fk("Feedback", &[35]),
-            fk("Mode", &[87]),
-            fk("Ratio", &[34]),
-            fk("Hi Cut", &[48]),
-            fk("Lo Cut", &[49]),
-            fk("Width", &[55]),
-            fk("EM Rate", &[59]),
-            fk("EM Feedback", &[72]),
-            fk("EM Mix", &[73]),
+            fon("bypass", &[28]),
+            fk("delay", &[62]),
+            fst("sync", FX_SYNC_STEPS, &[33]),
+            fk("mix", &[85]),
+            fk("feedback", &[35]),
+            fk("mode", &[87]),
+            fk("ratio", &[34]),
+            fk("hi-cut", &[48]),
+            fk("lo-cut", &[49]),
+            fk("width", &[55]),
+            fk("em-rate", &[59]),
+            fk("em-feedback", &[72]),
+            fk("em-mix", &[73]),
         ],
     },
     // --- Reverb block (Bypass 36) / FX Loop ---
     Effect {
-        name: "Blackpanel Spring Reverb",
+        name: "blackpanel-spring-reverb",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[36]),
-            fk("Mix", &[18]),
-            fk("Decay", &[38]),
-            fk("Tone", &[40]),
+            fon("bypass", &[36]),
+            fk("mix", &[18]),
+            fk("decay", &[38]),
+            fk("tone", &[40]),
         ],
     },
     Effect {
-        name: "Eleven SR (Stereo Reverb)",
+        name: "eleven-sr",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[36]),
-            fk("Mix", &[18]),
-            fk("Decay", &[38]),
-            fk("Tone", &[40]),
-            fk("Pre-Delay", &[39]),
-            fst("Type", REVERB_TYPE_STEPS, &[76]),
+            fon("bypass", &[36]),
+            fk("mix", &[18]),
+            fk("decay", &[38]),
+            fk("tone", &[40]),
+            fk("pre-delay", &[39]),
+            fst("type", REVERB_TYPE_STEPS, &[76]),
         ],
     },
     Effect {
-        name: "FX Loop",
+        name: "fx-loop",
         slots: FIXED,
         params: &[
-            fon("Bypass", &[107]),
-            fk("Send", &[19]),
-            fk("Return", &[108]),
-            fk("Mix", &[88]),
+            fon("bypass", &[107]),
+            fk("send", &[19]),
+            fk("return", &[108]),
+            fk("mix", &[88]),
         ],
     },
     // --- Mod/FX1/FX2 slot effects (cc = [Mod, FX1, FX2]) ---
     Effect {
-        name: "C1 Chorus/Vibrato",
+        name: "c1-chorus-vibrato",
         slots: MOD_FX,
         params: &[
-            fon("Bypass", &[50, 63, 86]),
-            fk("Chorus", &[61, 20, 113]),
-            fk("Rate", &[52, 42, 114]),
-            fst("Sync", FX_SYNC_STEPS, &[53, 60, 115]),
-            fk("Depth", &[54, 77, 96]),
-            fsw("Chorus/Vibrato", "Chorus", "Vibrato", &[57, 116, 97]),
+            fon("bypass", &[50, 63, 86]),
+            fk("chorus", &[61, 20, 113]),
+            fk("rate", &[52, 42, 114]),
+            fst("sync", FX_SYNC_STEPS, &[53, 60, 115]),
+            fk("depth", &[54, 77, 96]),
+            fsw("chorus-vibrato", "Chorus", "Vibrato", &[57, 116, 97]),
         ],
     },
     Effect {
-        name: "Flanger",
+        name: "flanger",
         slots: MOD_FX,
         params: &[
-            fon("Bypass", &[50, 63, 86]),
-            fk("Pre-Delay", &[61, 20, 113]),
-            fk("Depth", &[52, 42, 114]),
-            fk("Rate", &[53, 60, 115]),
-            fst("Sync", FX_SYNC_STEPS, &[54, 77, 96]),
-            fk("Feedback", &[57, 116, 97]),
+            fon("bypass", &[50, 63, 86]),
+            fk("pre-delay", &[61, 20, 113]),
+            fk("depth", &[52, 42, 114]),
+            fk("rate", &[53, 60, 115]),
+            fst("sync", FX_SYNC_STEPS, &[54, 77, 96]),
+            fk("feedback", &[57, 116, 97]),
         ],
     },
     Effect {
-        name: "Orange Phaser",
+        name: "orange-phaser",
         slots: MOD_FX,
         params: &[
-            fon("Bypass", &[50, 63, 86]),
-            fk("Rate", &[61, 20, 113]),
-            fst("Sync", FX_SYNC_STEPS, &[52, 42, 114]),
+            fon("bypass", &[50, 63, 86]),
+            fk("rate", &[61, 20, 113]),
+            fst("sync", FX_SYNC_STEPS, &[52, 42, 114]),
         ],
     },
     Effect {
-        name: "Roto Speaker",
+        name: "roto-speaker",
         slots: MOD_FX,
         params: &[
-            fon("Bypass", &[50, 63, 86]),
-            fst("Speed", ROTO_SPEED_STEPS, &[61, 20, 113]),
-            fk("Balance", &[52, 42, 114]),
-            fst("Type", ROTO_TYPE_STEPS, &[53, 60, 115]),
+            fon("bypass", &[50, 63, 86]),
+            fst("speed", ROTO_SPEED_STEPS, &[61, 20, 113]),
+            fk("balance", &[52, 42, 114]),
+            fst("type", ROTO_TYPE_STEPS, &[53, 60, 115]),
         ],
     },
     Effect {
-        name: "Vibe Phaser",
+        name: "vibe-phaser",
         slots: MOD_FX,
         params: &[
-            fon("Bypass", &[50, 63, 86]),
-            fk("Volume", &[61, 20, 113]),
-            fk("Depth", &[52, 42, 114]),
-            fk("Rate", &[53, 60, 115]),
-            fst("Sync", FX_SYNC_STEPS, &[54, 77, 96]),
-            fsw("Chorus/Vibrato", "Chorus", "Vibrato", &[57, 116, 97]),
+            fon("bypass", &[50, 63, 86]),
+            fk("volume", &[61, 20, 113]),
+            fk("depth", &[52, 42, 114]),
+            fk("rate", &[53, 60, 115]),
+            fst("sync", FX_SYNC_STEPS, &[54, 77, 96]),
+            fsw("chorus-vibrato", "Chorus", "Vibrato", &[57, 116, 97]),
         ],
     },
     Effect {
-        name: "Multi Chorus",
+        name: "multi-chorus",
         slots: MOD_FX,
         params: &[
-            fon("Bypass", &[50, 63, 86]),
-            fk("Rate", &[61, 20, 113]),
-            fst("Sync", FX_SYNC_STEPS, &[52, 42, 114]),
-            fk("Depth", &[53, 60, 115]),
-            fk("Pre-Delay", &[54, 77, 96]),
-            fk("Mix", &[57, 116, 97]),
-            fsw("Triangle/Sine", "Triangle", "Sine", &[51, 117, 98]),
-            fk("Voices", &[56, 118, 99]),
-            fk("Lo Cut", &[89, 89, 89]),
-            fk("Width", &[90, 90, 90]),
+            fon("bypass", &[50, 63, 86]),
+            fk("rate", &[61, 20, 113]),
+            fst("sync", FX_SYNC_STEPS, &[52, 42, 114]),
+            fk("depth", &[53, 60, 115]),
+            fk("pre-delay", &[54, 77, 96]),
+            fk("mix", &[57, 116, 97]),
+            fsw("triangle-sine", "Triangle", "Sine", &[51, 117, 98]),
+            fk("voices", &[56, 118, 99]),
+            fk("lo-cut", &[89, 89, 89]),
+            fk("width", &[90, 90, 90]),
         ],
     },
     // --- FX1/FX2 slot effects (cc = [FX1, FX2]) ---
     Effect {
-        name: "Graphic EQ",
+        name: "graphic-eq",
         slots: FX12,
         params: &[
-            fon("Bypass", &[63, 86]),
-            fk("100 Hz", &[20, 113]),
-            fk("370 Hz", &[42, 114]),
-            fk("800 Hz", &[60, 115]),
-            fk("2 kHz", &[77, 96]),
-            fk("3.25 kHz", &[116, 97]),
-            fk("Output", &[117, 98]),
+            fon("bypass", &[63, 86]),
+            fk("100-hz", &[20, 113]),
+            fk("370-hz", &[42, 114]),
+            fk("800-hz", &[60, 115]),
+            fk("2-khz", &[77, 96]),
+            fk("3-25-khz", &[116, 97]),
+            fk("output", &[117, 98]),
         ],
     },
     Effect {
-        name: "Parametric EQ",
+        name: "parametric-eq",
         slots: FX12,
         params: &[
-            fon("Bypass", &[63, 86]),
-            fk("L Gain", &[20, 113]),
-            fk("LM Gain", &[42, 114]),
-            fk("HM Gain", &[77, 96]),
-            fk("H Gain", &[116, 97]),
-            fk("Output", &[117, 98]),
-            fk("L Freq", &[118, 99]),
-            fk("L Q", &[5, 37]),
-            fk("LM Freq", &[119, 46]),
-            fk("LM Q", &[9, 47]),
-            fk("HM Freq", &[12, 58]),
-            fk("HM Q", &[26, 109]),
-            fk("H Freq", &[29, 110]),
-            fk("H Q", &[30, 70]),
+            fon("bypass", &[63, 86]),
+            fk("l-gain", &[20, 113]),
+            fk("lm-gain", &[42, 114]),
+            fk("hm-gain", &[77, 96]),
+            fk("h-gain", &[116, 97]),
+            fk("output", &[117, 98]),
+            fk("l-freq", &[118, 99]),
+            fk("l-q", &[5, 37]),
+            fk("lm-freq", &[119, 46]),
+            fk("lm-q", &[9, 47]),
+            fk("hm-freq", &[12, 58]),
+            fk("hm-q", &[26, 109]),
+            fk("h-freq", &[29, 110]),
+            fk("h-q", &[30, 70]),
         ],
     },
     Effect {
-        name: "Gray Compressor",
+        name: "gray-compressor",
         slots: FX12,
         params: &[
-            fon("Bypass", &[63, 86]),
-            fk("Sustain", &[20, 113]),
-            fk("Level", &[42, 114]),
+            fon("bypass", &[63, 86]),
+            fk("sustain", &[20, 113]),
+            fk("level", &[42, 114]),
         ],
     },
     Effect {
-        name: "Dyn3 Compressor",
+        name: "dyn3-compressor",
         slots: FX12,
         params: &[
-            fon("Bypass", &[63, 86]),
-            fk("Threshold", &[20, 113]),
-            fk("Attack", &[42, 114]),
-            fk("Release", &[60, 115]),
-            fk("Gain", &[77, 96]),
-            fk("Ratio", &[116, 97]),
-            fk("Knee", &[117, 98]),
+            fon("bypass", &[63, 86]),
+            fk("threshold", &[20, 113]),
+            fk("attack", &[42, 114]),
+            fk("release", &[60, 115]),
+            fk("gain", &[77, 96]),
+            fk("ratio", &[116, 97]),
+            fk("knee", &[117, 98]),
         ],
     },
 ];
@@ -1011,28 +1012,28 @@ pub const EFFECTS: &[Effect] = &[
 
 /// The "General/Frequently Used Controls" bypass shortcuts and pedal positions.
 pub const GENERAL: &[Param] = &[
-    onoff("DIST BYPASS", 25),
-    onoff("MOD BYPASS", 50),
-    onoff("DELAY BYPASS", 28),
-    onoff("REVERB BYPASS", 36),
-    onoff("FX LOOP BYPASS", 107),
-    onoff("FX1 BYPASS", 63),
-    onoff("FX2 BYPASS", 86),
-    onoff("WAH BYPASS", 43),
-    onoff("AMP BYPASS", 111),
-    knob("VOLUME PEDAL POSITION", 7),
-    knob("WAH POSITION", 4),
-    knob("MULTI FX CONTROL", 11),
-    knob("TAP TEMPO", 64),
+    onoff("dist-bypass", 25),
+    onoff("mod-bypass", 50),
+    onoff("delay-bypass", 28),
+    onoff("reverb-bypass", 36),
+    onoff("fx-loop-bypass", 107),
+    onoff("fx1-bypass", 63),
+    onoff("fx2-bypass", 86),
+    onoff("wah-bypass", 43),
+    onoff("amp-bypass", 111),
+    knob("volume-pedal-position", 7),
+    knob("wah-position", 4),
+    knob("multi-fx-control", 11),
+    knob("tap-tempo", 64),
 ];
 
 /// "Miscellaneous MIDI Controls": the multi-FX and rig-volume pedal assignments.
 /// Bank select (CC 32: `1` = Factory rigs, `0` = User rigs) precedes a Program
 /// Change to select a rig; see `docs/eleven-rack-sysex-protocol.adoc`.
 pub const MISC: &[Param] = &[
-    knob("MULTI FX PEDAL POSITION", 11),
-    knob("RIG VOLUME PEDAL POSITION", 17),
-    sw("BANK CHANGE", 32, "User Rigs", "Factory Rigs"),
+    knob("multi-fx-pedal-position", 11),
+    knob("rig-volume-pedal-position", 17),
+    sw("bank-change", 32, "User Rigs", "Factory Rigs"),
 ];
 
 /// Look up an amp model by case-insensitive name.
@@ -1062,8 +1063,8 @@ pub fn global(name: &str) -> Option<&'static Param> {
 /// Resolve a control `name` to its MIDI CC and value [`Kind`] for remote control.
 ///
 /// Context disambiguates names that appear on many models/slots:
-/// * `amp_ctx` — resolve an amp model's parameter (e.g. `PRESENCE` is CC 13 on
-///   Tweed Bass but CC 3 on M-2 Lead).
+/// * `amp_ctx` — resolve an amp model's parameter (e.g. `presence` is CC 13 on
+///   `tweed-bass` but CC 3 on `m-2-lead`).
 /// * `fx_ctx` — resolve an effect parameter in a given [`Slot`] (an effect's CC
 ///   differs per slot).
 /// * neither — a [`global`] control.
@@ -1095,10 +1096,10 @@ mod tests {
     #[test]
     fn amp_param_lookup_returns_documented_cc() {
         // Spot-check the transcription against the User Guide chart.
-        let dc = amp("DC Modern Crunch").unwrap();
-        assert_eq!(dc.param("GAIN").unwrap().cc, 13);
-        assert_eq!(dc.param("MASTER").unwrap().cc, 10);
-        assert_eq!(dc.param("PRESENCE").unwrap().cc, 21);
+        let dc = amp("dc-modern-crunch").unwrap();
+        assert_eq!(dc.param("gain").unwrap().cc, 13);
+        assert_eq!(dc.param("master").unwrap().cc, 10);
+        assert_eq!(dc.param("presence").unwrap().cc, 21);
         // CC is the remote-control number, not the SysEx index (those differ).
         assert!(dc.param("missing").is_none());
     }
@@ -1131,8 +1132,8 @@ mod tests {
             }
         }
         // cc_in resolves the right per-slot CC (C1 Chorus Bypass: Mod 50 / FX1 63 / FX2 86).
-        let c1 = effect("C1 Chorus/Vibrato").unwrap();
-        let byp = c1.param("Bypass").unwrap();
+        let c1 = effect("c1-chorus-vibrato").unwrap();
+        let byp = c1.param("bypass").unwrap();
         assert_eq!(c1.cc_in(byp, Slot::Mod), Some(50));
         assert_eq!(c1.cc_in(byp, Slot::Fx1), Some(63));
         assert_eq!(c1.cc_in(byp, Slot::Fx2), Some(86));
@@ -1140,8 +1141,8 @@ mod tests {
 
     #[test]
     fn stepped_describe_picks_the_right_label() {
-        let rev = effect("Eleven SR (Stereo Reverb)").unwrap();
-        let ty = rev.param("Type").unwrap();
+        let rev = effect("eleven-sr").unwrap();
+        let ty = rev.param("type").unwrap();
         assert_eq!(ty.kind.describe(70), "Concert Hall");
         assert_eq!(ty.kind.describe(0), "Echo Room");
         assert_eq!(ty.kind.describe(127), "Early Reflect 2");
@@ -1150,19 +1151,19 @@ mod tests {
     #[test]
     fn expansion_effects_now_fully_catalogued() {
         // The Expansion Pack effects are present with their full parameters.
-        let peq = effect("Parametric EQ").unwrap();
+        let peq = effect("parametric-eq").unwrap();
         assert_eq!(peq.slots, [Slot::Fx1, Slot::Fx2]);
         assert_eq!(peq.params.len(), 14);
-        assert_eq!(peq.cc_in(peq.param("H Q").unwrap(), Slot::Fx2), Some(70));
-        // Multi Chorus: Lo Cut/Width share one CC across all slots.
-        let mc = effect("Multi Chorus").unwrap();
-        let lo = mc.param("Lo Cut").unwrap();
+        assert_eq!(peq.cc_in(peq.param("h-q").unwrap(), Slot::Fx2), Some(70));
+        // Multi Chorus: lo-cut/width share one CC across all slots.
+        let mc = effect("multi-chorus").unwrap();
+        let lo = mc.param("lo-cut").unwrap();
         assert_eq!(mc.cc_in(lo, Slot::Mod), Some(89));
         assert_eq!(mc.cc_in(lo, Slot::Fx2), Some(89));
-        // White Boost / DC Distortion are fixed-block, 5 params.
-        assert_eq!(effect("DC Distortion").unwrap().slots, [Slot::Fixed]);
+        // white-boost / dc-distortion are fixed-block, 5 params.
+        assert_eq!(effect("dc-distortion").unwrap().slots, [Slot::Fixed]);
         assert_eq!(
-            effect("White Boost").unwrap().param("Volume").unwrap().cc,
+            effect("white-boost").unwrap().param("volume").unwrap().cc,
             [80]
         );
     }
@@ -1178,36 +1179,36 @@ mod tests {
 
     #[test]
     fn resolve_cc_uses_context() {
-        // Amp context: PRESENCE differs per model.
+        // Amp context: presence differs per model.
         assert_eq!(
-            resolve_cc("PRESENCE", Some("Tweed Bass"), None).unwrap().0,
+            resolve_cc("presence", Some("tweed-bass"), None).unwrap().0,
             13
         );
-        assert_eq!(resolve_cc("PRESENCE", Some("M-2 Lead"), None).unwrap().0, 3);
+        assert_eq!(resolve_cc("presence", Some("m-2-lead"), None).unwrap().0, 3);
         // Effect context: an effect's CC differs per slot.
         assert_eq!(
-            resolve_cc("Rate", None, Some(("Multi Chorus", Slot::Fx1)))
+            resolve_cc("rate", None, Some(("multi-chorus", Slot::Fx1)))
                 .unwrap()
                 .0,
             20
         );
         assert_eq!(
-            resolve_cc("Rate", None, Some(("Multi Chorus", Slot::Fx2)))
+            resolve_cc("rate", None, Some(("multi-chorus", Slot::Fx2)))
                 .unwrap()
                 .0,
             113
         );
         // Global control needs no context.
-        assert_eq!(resolve_cc("DIST BYPASS", None, None).unwrap().0, 25);
-        assert_eq!(resolve_cc("AMP OUTPUT", None, None).unwrap().0, 92);
+        assert_eq!(resolve_cc("dist-bypass", None, None).unwrap().0, 25);
+        assert_eq!(resolve_cc("amp-output", None, None).unwrap().0, 92);
         // Unknown / missing context.
-        assert!(resolve_cc("PRESENCE", None, None).is_none()); // ambiguous amp param, no ctx
-        assert!(resolve_cc("nope", Some("Tweed Bass"), None).is_none());
+        assert!(resolve_cc("presence", None, None).is_none()); // ambiguous amp param, no ctx
+        assert!(resolve_cc("nope", Some("tweed-bass"), None).is_none());
     }
 
     #[test]
     fn switch_describe_splits_at_64() {
-        let p = onoff("X", 1);
+        let p = onoff("x", 1);
         assert_eq!(p.kind.describe(63), "Off");
         assert_eq!(p.kind.describe(64), "On");
     }
