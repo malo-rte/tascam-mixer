@@ -12,6 +12,7 @@ use std::fmt;
 use std::thread::sleep;
 use std::time::Duration;
 
+use rackctl_eleven::backup::AGGREGATE_BLOCK;
 use rackctl_eleven::param::{self, Kind, Slot};
 use rackctl_eleven::{BlockData, PatchBackup, RawMidi, RestoreAction};
 
@@ -19,7 +20,11 @@ use crate::format::Scene;
 use crate::slot_label;
 
 /// Pause after a Program Change for the unit to load the patch before reading it.
-pub const SETTLE: Duration = Duration::from_millis(300);
+/// The swap is timing-sensitive; too short and a capture/store reads the *previous*
+/// edit buffer, so this is deliberately generous.
+pub const SETTLE: Duration = Duration::from_millis(500);
+/// The name block (`0x05`): the current sound's name, NUL-terminated from byte 0.
+const NAME_BLOCK: u8 = 0x05;
 /// Pause between slots when sweeping a whole bank, to avoid overrunning the unit.
 pub const BANK_PACE: Duration = Duration::from_millis(60);
 /// The User bank (Bank Select `0`); the Factory bank is `1`.
@@ -265,9 +270,46 @@ pub fn copy_slot(
     from_slot: u8,
     to_slot: u8,
 ) -> Result<VerifyReport, String> {
+    // Load the whole source sound into the edit buffer, then persist it to the
+    // target with the device's native store — a *full* copy of every block, not the
+    // restorable subset. (Store commits the current edit buffer; see
+    // [`RawMidi::store`].) Verified by re-reading the target's packed image.
     select_settle(dev, from_bank, from_slot)?;
-    let patch = dev.capture_patch().map_err(|e| e.to_string())?;
-    restore(dev, to_slot, &patch)
+    let name = read_name(dev)?;
+    let source = read_aggregate(dev)?;
+    dev.store(u16::from(to_slot), &name)
+        .map_err(|e| format!("storing to slot {to_slot}: {e}"))?;
+    select_settle(dev, USER_BANK, to_slot)?;
+    let after = read_aggregate(dev)?;
+    Ok(verify_aggregate(&source, &after))
+}
+
+/// Read the current edit buffer's name (block `0x05`).
+fn read_name(dev: &mut RawMidi) -> Result<String, String> {
+    dev.read_block(&[NAME_BLOCK])
+        .map(|b| block_name(&b))
+        .map_err(|e| format!("reading name block: {e}"))
+}
+
+/// Read the current edit buffer's full packed patch image (aggregate block `0x01`).
+fn read_aggregate(dev: &mut RawMidi) -> Result<Vec<u8>, String> {
+    dev.read_block(&[AGGREGATE_BLOCK])
+        .map_err(|e| format!("reading aggregate block: {e}"))
+}
+
+/// Verify a native full-buffer copy: the target's packed image (`0x01`) must match
+/// the source's, non-empty. Reported as the single aggregate "block".
+fn verify_aggregate(source: &[u8], after: &[u8]) -> VerifyReport {
+    let mut report = VerifyReport {
+        written: 1,
+        ..Default::default()
+    };
+    if !source.is_empty() && source == after {
+        report.matched = 1;
+    } else {
+        report.mismatched.push(AGGREGATE_BLOCK);
+    }
+    report
 }
 
 /// Resolve a control `name` to its MIDI CC (via the parameter catalog, using the
