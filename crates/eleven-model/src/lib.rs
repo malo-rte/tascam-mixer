@@ -17,7 +17,7 @@
 //!   stepped), transcribed from the User Guide's MIDI chapter. The amp section's
 //!   wire addressing (`11 21 <cc>`) is hardware-confirmed; see [`param`].
 //!
-//! The typed per-block rig model lands in a later step (see
+//! The typed per-block patch model lands in a later step (see
 //! `docs/eleven-rack-roadmap.adoc`); for now this crate carries the value codec,
 //! the `.tfx` reader and the parameter catalog.
 //!
@@ -33,7 +33,7 @@ pub mod value;
 
 pub use backup::{BlockData, ParamRecord, PatchBackup, RestoreAction};
 pub use error::{Error, Result};
-pub use tfx::{Block, Param, Rig};
+pub use tfx::{Block, Param, Patch};
 pub use value::{RawValue, VALUE_LEN};
 
 /// A confirmed `SysEx` parameter address: the amp **Gain** knob, on the one amp

@@ -1088,13 +1088,13 @@ pub const GENERAL: &[Param] = &[
     knob("tap-tempo", 64),
 ];
 
-/// "Miscellaneous MIDI Controls": the multi-FX and rig-volume pedal assignments.
-/// Bank select (CC 32: `1` = Factory rigs, `0` = User rigs) precedes a Program
-/// Change to select a rig; see `docs/eleven-rack-sysex-protocol.adoc`.
+/// "Miscellaneous MIDI Controls": the multi-FX and patch-volume pedal assignments.
+/// Bank select (CC 32: `1` = Factory patches, `0` = User patches) precedes a Program
+/// Change to select a patch; see `docs/eleven-rack-sysex-protocol.adoc`.
 pub const MISC: &[Param] = &[
     knob("multi-fx-pedal-position", 11),
-    knob("rig-volume-pedal-position", 17),
-    sw("bank-change", 32, "User Rigs", "Factory Rigs"),
+    knob("patch-volume-pedal-position", 17),
+    sw("bank-change", 32, "User Imports", "Factory Imports"),
 ];
 
 /// Look up an amp model by case-insensitive name.

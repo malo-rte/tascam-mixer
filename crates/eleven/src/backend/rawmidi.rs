@@ -194,7 +194,7 @@ impl RawMidi {
         Ok(())
     }
 
-    /// Select a rig: Bank Select (`CC 32`, `1` = Factory, `0` = User) then a
+    /// Select a patch: Bank Select (`CC 32`, `1` = Factory, `0` = User) then a
     /// Program Change. Give the unit a moment to load before reading it.
     ///
     /// # Errors

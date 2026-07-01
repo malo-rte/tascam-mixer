@@ -1,13 +1,13 @@
-//! Parser for the Eleven Rack binary **rig file** format (`.tfx`).
+//! Parser for the Eleven Rack binary **patch file** format (`.tfx`).
 //!
-//! A rig file is a header, the rig name (word-swapped ASCII from offset 64), then
+//! A patch file is a header, the patch name (word-swapped ASCII from offset 64), then
 //! from offset 92 a sequence of *blocks*. Each block is a header word
 //! `[size_lo size_hi 0x20 block_id]` followed by `size / 8` entries, each a 4-byte
 //! `FourCC` tag (stored little-endian, so its ASCII reads byte-swapped) and a 32-bit
 //! value. Global-block values are integers; effect-block values are 32-bit floats.
 //!
-//! This layout was reverse-engineered and validated across the full 1,243-rig ERUG
-//! corpus; see `docs/eleven-rack-rig-format.adoc`. The parser preserves the raw
+//! This layout was reverse-engineered and validated across the full 1,243-patch ERUG
+//! corpus; see `docs/eleven-rack-patch-format.adoc`. The parser preserves the raw
 //! 32-bit value of each parameter losslessly; interpreting it (int vs. float) is the
 //! caller's job, since it depends on the block.
 
@@ -15,23 +15,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
-/// Offset where the rig name begins (word-swapped ASCII).
+/// Offset where the patch name begins (word-swapped ASCII).
 const NAME_OFFSET: usize = 64;
 /// Offset where the block table begins.
 const BODY_OFFSET: usize = 92;
 /// The constant marker byte (3rd) in a block header word.
 const BLOCK_MARKER: u8 = 0x20;
 
-/// A parsed Eleven Rack rig.
+/// A parsed Eleven Rack patch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Rig {
-    /// The rig name.
+pub struct Patch {
+    /// The patch name.
     pub name: String,
     /// The signal-chain blocks, in file order.
     pub blocks: Vec<Block>,
 }
 
-/// One block of a rig (a signal-chain slot).
+/// One block of a patch (a signal-chain slot).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
     /// The block id (signal-chain slot: `0x41` global, `0x49` amp, …).
@@ -71,24 +71,24 @@ fn tag_string(word: &[u8]) -> String {
     word.iter().rev().map(|&b| char::from(b)).collect()
 }
 
-/// Parse a `.tfx` rig file.
+/// Parse a `.tfx` patch file.
 ///
 /// # Errors
 /// [`Error::Tfx`] if the data is too short to contain the header and block table.
-pub fn parse(data: &[u8]) -> Result<Rig> {
+pub fn parse(data: &[u8]) -> Result<Patch> {
     if data.len() < BODY_OFFSET {
         return Err(Error::Tfx(format!(
             "file too short: {} bytes (need at least {BODY_OFFSET})",
             data.len()
         )));
     }
-    Ok(Rig {
+    Ok(Patch {
         name: parse_name(data),
         blocks: parse_blocks(data),
     })
 }
 
-/// Read the rig name (word-swapped ASCII from [`NAME_OFFSET`] up to the first
+/// Read the patch name (word-swapped ASCII from [`NAME_OFFSET`] up to the first
 /// zero word or the block table).
 fn parse_name(data: &[u8]) -> String {
     let mut bytes = Vec::new();
@@ -208,11 +208,11 @@ mod tests {
                 (0x49, &[("sld1", 0x1234_5678)]),
             ],
         );
-        let rig = parse(&img).unwrap();
-        assert_eq!(rig.name, "DC Modern");
-        assert_eq!(rig.blocks.len(), 2);
+        let patch = parse(&img).unwrap();
+        assert_eq!(patch.name, "DC Modern");
+        assert_eq!(patch.blocks.len(), 2);
 
-        let g = &rig.blocks[0];
+        let g = &patch.blocks[0];
         assert_eq!(g.id, 0x41);
         assert_eq!(
             g.params[0],
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(g.params[1].tag, "PIGI");
         assert_eq!(g.params[1].value, 125);
 
-        let amp = &rig.blocks[1];
+        let amp = &patch.blocks[1];
         assert_eq!(amp.id, 0x49);
         assert_eq!(amp.params[0].tag, "sld1");
         assert_eq!(amp.params[0].value, 0x1234_5678);
@@ -240,8 +240,8 @@ mod tests {
     fn float_values_reinterpret() {
         let bits = 0.5f32.to_bits();
         let img = build("x", &[(0x45, &[("Driv", bits)])]);
-        let rig = parse(&img).unwrap();
-        assert!((rig.blocks[0].params[0].as_f32() - 0.5).abs() < f32::EPSILON);
+        let patch = parse(&img).unwrap();
+        assert!((patch.blocks[0].params[0].as_f32() - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]

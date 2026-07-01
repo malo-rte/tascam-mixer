@@ -58,7 +58,7 @@ enum Command {
         #[arg(long, default_value = "7f")]
         to: String,
     },
-    /// Select a rig (Program Change); Factory bank with `--factory`.
+    /// Select a patch (Program Change); Factory bank with `--factory`.
     Select {
         /// Slot number (0-based).
         slot: u8,
@@ -85,7 +85,7 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         channel: u8,
     },
-    /// List the on-device bank's rig names (User, or Factory with `--factory`).
+    /// List the on-device bank's patch names (User, or Factory with `--factory`).
     Patches {
         /// How many slots to read.
         #[arg(long, default_value_t = 128)]
@@ -108,15 +108,15 @@ enum Command {
         #[arg(long)]
         slot: Option<u8>,
     },
-    /// Load a saved rig from the library onto a User slot (verified).
+    /// Load a saved patch from the library onto a User slot (verified).
     Load {
-        /// Saved rig name (see `library`).
+        /// Saved patch name (see `library`).
         name: String,
         /// Target User slot number (0-based).
         #[arg(long)]
         slot: u8,
     },
-    /// Copy a rig from one slot to a User slot (e.g. a Factory preset).
+    /// Copy a patch from one slot to a User slot (e.g. a Factory preset).
     Copy {
         /// Source slot number (0-based).
         from: u8,
@@ -127,22 +127,22 @@ enum Command {
         #[arg(long)]
         factory: bool,
     },
-    /// Back up the whole User bank to the library (one saved rig per slot).
+    /// Back up the whole User bank to the library (one saved patch per slot).
     Backup {
         /// Number of User slots to read.
         #[arg(long, default_value_t = 128)]
         count: u8,
     },
-    /// List the saved rigs in the library.
+    /// List the saved patches in the library.
     Library,
     /// Store the current edit buffer to a User slot, with a name (persists).
     Store {
         /// User slot number (0-based).
         slot: u8,
-        /// Name for the stored rig.
+        /// Name for the stored patch.
         name: String,
     },
-    /// Rename a User slot, preserving its rig data.
+    /// Rename a User slot, preserving its patch data.
     Rename {
         /// User slot number (0-based).
         slot: u8,
@@ -154,16 +154,16 @@ enum Command {
         #[command(subcommand)]
         cmd: SceneCommand,
     },
-    /// Import a `.tfx` rig file into the on-disk rig library.
+    /// Import a `.tfx` patch file into the on-disk patch library.
     Import {
         /// Path to the `.tfx` file.
         file: String,
-        /// Save under this name (default: the rig's own name).
+        /// Save under this name (default: the patch's own name).
         #[arg(long)]
         name: Option<String>,
     },
-    /// List the `.tfx` rigs saved in the on-disk library.
-    Rigs,
+    /// List the `.tfx` patches saved in the on-disk library.
+    Imports,
     /// List the parameter catalog (amp models and effects); optionally filtered.
     List {
         /// Only show amps/effects whose name contains this text.
@@ -253,8 +253,8 @@ fn main() -> Result<()> {
             }
         },
         Command::Import { file, name } => commands::import(&file, name.as_deref()),
-        Command::Rigs => {
-            commands::rigs();
+        Command::Imports => {
+            commands::imports();
             Ok(())
         }
         Command::List { filter } => {

@@ -18,7 +18,7 @@ use rackctl_eleven::{BlockData, PatchBackup, RawMidi, RestoreAction};
 use crate::format::Scene;
 use crate::slot_label;
 
-/// Pause after a Program Change for the unit to load the rig before reading it.
+/// Pause after a Program Change for the unit to load the patch before reading it.
 pub const SETTLE: Duration = Duration::from_millis(300);
 /// Pause between slots when sweeping a whole bank, to avoid overrunning the unit.
 pub const BANK_PACE: Duration = Duration::from_millis(60);
@@ -254,7 +254,7 @@ pub fn restore_scene(
     Ok(agg)
 }
 
-/// Copy the rig at `from_bank`/`from_slot` (e.g. a Factory preset) into User
+/// Copy the patch at `from_bank`/`from_slot` (e.g. a Factory preset) into User
 /// `to_slot`, verifying. This is how a factory preset is placed in a user slot.
 ///
 /// # Errors

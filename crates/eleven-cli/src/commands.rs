@@ -5,7 +5,7 @@
 //! (capture / save / load / copy / bank backup / scenes / named CC) lives in
 //! `rackctl-eleven-lib`'s `manage` module, so a GUI shares one implementation.
 //! Parameter-level commands (`get`/`set`/`scan`) run on the mock or hardware; the
-//! rig/slot commands need a connected unit (`--port`).
+//! patch/slot commands need a connected unit (`--port`).
 
 use anyhow::{Context, Result};
 
@@ -103,24 +103,24 @@ pub fn scan(mock: bool, port: Option<&str>, prefix: &str, from: &str, to: &str) 
 
 // ---- disk commands (no device) ----
 
-/// Parse a `.tfx` rig file and save it to the on-disk rig library.
+/// Parse a `.tfx` patch file and save it to the on-disk patch library.
 pub fn import(file: &str, name: Option<&str>) -> Result<()> {
-    let rig =
+    let patch =
         rackctl_eleven_lib::import_tfx(std::path::Path::new(file)).map_err(anyhow::Error::msg)?;
-    let save_as = name.unwrap_or(&rig.name);
-    let path = rackctl_eleven_lib::save_rig(save_as, &rig).map_err(anyhow::Error::msg)?;
+    let save_as = name.unwrap_or(&patch.name);
+    let file = rackctl_eleven_lib::save_patch(save_as, &patch).map_err(anyhow::Error::msg)?;
     println!(
         "imported {:?} ({} blocks) -> {}",
-        rig.name,
-        rig.blocks.len(),
-        path.display()
+        patch.name,
+        patch.blocks.len(),
+        file.display()
     );
     Ok(())
 }
 
-/// List rigs saved in the on-disk library.
-pub fn rigs() {
-    for name in rackctl_eleven_lib::list_rigs() {
+/// List patches saved in the on-disk library.
+pub fn imports() {
+    for name in rackctl_eleven_lib::list_patches() {
         println!("{name}");
     }
 }
@@ -267,7 +267,7 @@ fn describe_kind(kind: rackctl_eleven::param::Kind) {
 
 // ---- hardware-only commands ----
 
-/// Select a rig (Program Change), from the User or Factory bank.
+/// Select a patch (Program Change), from the User or Factory bank.
 #[cfg(feature = "alsa")]
 pub fn select(port: Option<&str>, slot: u8, factory: bool) -> Result<()> {
     use rackctl_eleven_lib::manage::{FACTORY_BANK, USER_BANK};
@@ -343,7 +343,7 @@ fn kind_summary(kind: rackctl_eleven::param::Kind) -> &'static str {
     }
 }
 
-/// List the on-device bank's rig names from the directory (block `0x04`).
+/// List the on-device bank's patch names from the directory (block `0x04`).
 #[cfg(feature = "alsa")]
 pub fn patches(port: Option<&str>, count: u8, factory: bool) -> Result<()> {
     use rackctl_eleven_lib::manage::{self, FACTORY_BANK, USER_BANK};
@@ -389,7 +389,7 @@ pub fn save(port: Option<&str>, name: &str, slot: Option<u8>) -> Result<()> {
     Ok(())
 }
 
-/// Load a saved rig from the library onto User `slot`, verifying.
+/// Load a saved patch from the library onto User `slot`, verifying.
 #[cfg(feature = "alsa")]
 pub fn load(port: Option<&str>, name: &str, slot: u8) -> Result<()> {
     let mut dev = open_rawmidi(port)?;
@@ -402,7 +402,7 @@ pub fn load(port: Option<&str>, name: &str, slot: u8) -> Result<()> {
     Ok(())
 }
 
-/// Copy a rig from one slot to a User slot (e.g. a Factory preset), verifying.
+/// Copy a patch from one slot to a User slot (e.g. a Factory preset), verifying.
 #[cfg(feature = "alsa")]
 pub fn copy(port: Option<&str>, from: u8, to: u8, factory: bool) -> Result<()> {
     use rackctl_eleven_lib::manage::{self, FACTORY_BANK, USER_BANK};
@@ -417,7 +417,7 @@ pub fn copy(port: Option<&str>, from: u8, to: u8, factory: bool) -> Result<()> {
     Ok(())
 }
 
-/// Back up the whole User bank to the library (one saved rig per slot).
+/// Back up the whole User bank to the library (one saved patch per slot).
 #[cfg(feature = "alsa")]
 pub fn backup(port: Option<&str>, count: u8) -> Result<()> {
     let mut dev = open_rawmidi(port)?;
@@ -425,11 +425,11 @@ pub fn backup(port: Option<&str>, count: u8) -> Result<()> {
         println!("U{slot:03}: {name:?}");
     })
     .map_err(anyhow::Error::msg)?;
-    println!("backed up {n} User rigs to the library");
+    println!("backed up {n} User patches to the library");
     Ok(())
 }
 
-/// List the saved rigs in the library.
+/// List the saved patches in the library.
 pub fn library() {
     for name in rackctl_eleven_lib::list_backups() {
         println!("{name}");
@@ -444,7 +444,7 @@ pub fn store(port: Option<&str>, slot: u8, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Rename a User slot, preserving its rig data (select it, then store it back).
+/// Rename a User slot, preserving its patch data (select it, then store it back).
 #[cfg(feature = "alsa")]
 pub fn rename(port: Option<&str>, slot: u8, name: &str) -> Result<()> {
     let mut dev = open_rawmidi(port)?;
@@ -464,7 +464,7 @@ pub fn scene_save(port: Option<&str>, name: &str, count: u8) -> Result<()> {
     })
     .map_err(anyhow::Error::msg)?;
     rackctl_eleven_lib::save_scene(&scene).map_err(anyhow::Error::msg)?;
-    println!("saved scene {name:?} ({} rigs)", scene.patches.len());
+    println!("saved scene {name:?} ({} patches)", scene.patches.len());
     Ok(())
 }
 
@@ -584,7 +584,7 @@ fn parse_addr(s: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// The trailing run of printable ASCII in `payload` (a rig name, after any flag
+/// The trailing run of printable ASCII in `payload` (a patch name, after any flag
 /// byte and before the NUL terminator).
 #[cfg(feature = "alsa")]
 fn trailing_name(payload: &[u8]) -> String {

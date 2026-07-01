@@ -1,7 +1,7 @@
 //! A captured patch as raw `SysEx` block payloads — the unit of MIDI library
 //! backup/restore.
 //!
-//! Unlike a `.tfx` [`crate::Rig`] (a typed, on-disk rig file), a [`PatchBackup`] is
+//! Unlike a `.tfx` [`crate::Patch`] (a typed, on-disk patch file), a [`PatchBackup`] is
 //! a *device-faithful* snapshot: the bytes the unit itself returned for each block
 //! read (`01 <block>` → `12 <block> <payload>`). Restoring writes those payloads
 //! straight back into the edit buffer (`00 <block> <payload>`) and runs the store
@@ -195,7 +195,7 @@ mod tests {
 
     fn sample() -> PatchBackup {
         PatchBackup::new(
-            "Test Rig",
+            "Test Patch",
             vec![
                 BlockData {
                     id: 0x01,
@@ -203,7 +203,7 @@ mod tests {
                 }, // aggregate (read-only)
                 BlockData {
                     id: 0x05,
-                    bytes: b"Test Rig".to_vec(),
+                    bytes: b"Test Patch".to_vec(),
                 },
                 BlockData {
                     id: 0x21,
@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn block_lookup_by_id() {
         let b = sample();
-        assert_eq!(b.block(0x05), Some(&b"Test Rig"[..]));
+        assert_eq!(b.block(0x05), Some(&b"Test Patch"[..]));
         assert_eq!(b.block(0x99), None);
     }
 

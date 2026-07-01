@@ -11,7 +11,7 @@
 //!
 //! The protocol was reverse-engineered from hardware (no public spec exists); see
 //! `docs/eleven-rack-sysex-protocol.adoc`. Parameter addresses, value scaling and
-//! the typed rig model are filled in later (`docs/eleven-rack-roadmap.adoc`).
+//! the typed patch model are filled in later (`docs/eleven-rack-roadmap.adoc`).
 //!
 //! # Backends
 //!
@@ -45,8 +45,8 @@ pub mod sysex;
 // The data model lives in `rackctl-eleven-model`; re-export it so this crate's
 // public surface carries the shared `Error`/`Result` and the value codec.
 pub use rackctl_eleven_model::{
-    AMP_GAIN, Block, BlockData, Error, Param, ParamRecord, PatchBackup, RawValue, RestoreAction,
-    Result, Rig, backup, error, param, tfx, value,
+    AMP_GAIN, Block, BlockData, Error, Param, ParamRecord, Patch, PatchBackup, RawValue,
+    RestoreAction, Result, backup, error, param, tfx, value,
 };
 
 #[cfg(feature = "alsa")]

@@ -42,7 +42,7 @@ pub enum Error {
     #[error("timed out waiting for a device reply")]
     Timeout,
 
-    /// A rig (`.tfx`) file was malformed: too short, or a bad block header.
+    /// A patch (`.tfx`) file was malformed: too short, or a bad block header.
     #[error("tfx error: {0}")]
     Tfx(String),
 }
