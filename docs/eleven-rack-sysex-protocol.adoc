@@ -385,17 +385,21 @@ each write as a `0x02` report; read back to verify.)
 == Restoring a patch (write the edit buffer, then store)
 
 Implemented as a *device-faithful* round-trip that avoids decoding per-parameter value
-scaling. A `PatchBackup` (the `rackctl-eleven save` command) snapshots a patch as the
-raw payloads the unit returned for each content block — name `0x05`, config `0x07`,
-FX-chain `0x08`, and the parameter blocks (`0x1E..=0x3F`; the densest, `0x21`, is the amp).
-The read-only aggregate `0x01` is captured for reference but never written back, and the
-directory/commit blocks `0x02..0x04` are not captured. This management logic lives in
-`rackctl-eleven-lib`'s `manage` module, shared by the CLI and the GUI.
+scaling. A `PatchBackup` (the `rackctl-eleven save` command) snapshots a patch as the raw
+payloads the unit returned for each content block, including the *aggregate* block `0x01`
+— the whole packed patch in one blob. This management logic lives in `rackctl-eleven-lib`'s
+`manage` module, shared by the CLI and the GUI.
 
-Load (`rackctl-eleven load <name> --slot N`) selects slot N, writes each block by its
-[`RestoreAction`] into the edit buffer, runs the store sequence, then re-captures and compares
-to verify. The action depends on the block kind — *hardware-confirmed* on a same-model restore
-(firmware `0157`):
+*Primary path — write the aggregate.* The aggregate block `0x01` is *writable*: writing it
+whole into the edit buffer (`00 01 <1235-byte image>`) and then storing loads the patch *in
+full, byte-for-byte* — no per-block reconstruction, no value scaling. *Hardware-confirmed*
+(firmware `0157`): after `load`, the target slot's re-read `0x01` is byte-identical to the
+source, and slot 0 is untouched. So `load`/`copy` just write `0x01` + store, and verify by
+comparing the re-read `0x01`. (This is also the delivery mechanism for writing an imported
+`.tfx` once a valid `0x01` image can be built from it.)
+
+*Fallback — per-block replay.* Only a backup that carries no `0x01` (an old/partial capture)
+replays the individual restorable blocks. The action depends on the block kind:
 
 * *Parameter-table blocks* (the amp `0x21`): a whole-block write does *not* take — the unit
   rebuilds the table itself. They are replayed *per parameter*. Crucially, the record

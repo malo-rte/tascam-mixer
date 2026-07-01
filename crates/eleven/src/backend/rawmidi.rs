@@ -343,17 +343,33 @@ impl RawMidi {
         Ok(PatchBackup::new(name, blocks))
     }
 
-    /// Restore a [`PatchBackup`] into User `slot`: write each restorable block into
-    /// the edit buffer, then run the store sequence to persist it. The read-only
-    /// aggregate and the directory/commit blocks are skipped (see
+    /// Restore a [`PatchBackup`] into User `slot`, then persist it with the store
+    /// sequence.
+    ///
+    /// The full patch lives in the aggregate block `0x01`, which is *writable*: the
+    /// normal path writes that one block into the edit buffer and stores it — a
+    /// complete, byte-exact load. Only a backup lacking `0x01` falls back to the
+    /// per-block replay (the restorable blocks; system/device blocks skipped, see
     /// [`BlockData::is_restorable`]).
     ///
-    /// The caller should `select_rig` the target slot first (so the edit buffer
-    /// starts from a real patch) and verify afterwards by re-reading.
+    /// The caller should verify afterwards by re-reading the target.
     ///
     /// # Errors
     /// [`Error::Transport`] on a link failure during a block write or the store.
     pub fn restore_patch(&mut self, slot: u16, patch: &PatchBackup) -> Result<()> {
+        // Preferred path: write the whole packed patch (aggregate block `0x01`) into
+        // the edit buffer, then store. `0x01` is writable (hardware-verified: the
+        // slot's aggregate reads back byte-identical to the source), so this loads
+        // *any* captured patch in full — every block — with no per-block replay.
+        if let Some(agg) = patch.blocks.iter().find(|b| b.id == 0x01)
+            && !agg.bytes.is_empty()
+        {
+            self.write_block(0x01, &agg.bytes)?;
+            sleep(STORE_PACE);
+            self.store(slot, &patch.name)?;
+            return Ok(());
+        }
+        // Fallback (a backup that carries no aggregate block): per-block restore.
         for b in &patch.blocks {
             match b.restore_action() {
                 // System/device blocks are NEVER written — writing them blindly

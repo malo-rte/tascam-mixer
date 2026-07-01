@@ -117,8 +117,9 @@ fn verify_blocks(patch: &PatchBackup, after: &PatchBackup) -> VerifyReport {
     report
 }
 
-/// Restore `patch` into User `slot` (select, write the restorable blocks, store),
-/// then re-capture and verify. See [`RawMidi::restore_patch`] for the mechanism.
+/// Restore `patch` into User `slot`, then re-read and verify. See
+/// [`RawMidi::restore_patch`] for the mechanism (a full aggregate-block write when
+/// the backup carries `0x01`, else a per-block replay).
 ///
 /// # Errors
 /// If any device operation fails.
@@ -127,8 +128,21 @@ pub fn restore(dev: &mut RawMidi, slot: u8, patch: &PatchBackup) -> Result<Verif
     dev.restore_patch(u16::from(slot), patch)
         .map_err(|e| format!("restoring to slot {slot}: {e}"))?;
     select_settle(dev, USER_BANK, slot)?;
-    let after = dev.capture_patch().map_err(|e| e.to_string())?;
-    Ok(verify_blocks(patch, &after))
+    // A backup with the full aggregate loads in full, so verify against it (the
+    // whole packed image); a backup without one used the per-block replay, so fall
+    // back to the target-keyed per-block compare.
+    if let Some(want) = patch
+        .blocks
+        .iter()
+        .find(|b| b.id == AGGREGATE_BLOCK)
+        .filter(|b| !b.bytes.is_empty())
+    {
+        let after = read_aggregate(dev)?;
+        Ok(verify_aggregate(&want.bytes, &after))
+    } else {
+        let after = dev.capture_patch().map_err(|e| e.to_string())?;
+        Ok(verify_blocks(patch, &after))
+    }
 }
 
 /// Capture the current sound (or User `slot`) and save it to the backup library as
