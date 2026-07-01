@@ -223,11 +223,18 @@ So amp Gain is `00 11 3D 07 <value-word>` (set) / `02 11 3D 07 <value-word>` (re
   reads the patch (hundreds of `0x01` reads) and issues `00 02 <slot>` recalls; the store
   is the usual `00 05` / `00 03/04/02`.
 
-So the `11 <block> <sub>` live-parameter namespace appears to be *activated by the
-editor's full session/model context* (the model definitions it loads at startup), not by
-a bare Program Change — our patches simply don't expose it. Resolving host-set therefore
-needs replicating that editor init, or capturing the editor editing *the same patch* we
-test against. Until then: live parameter changes go through MIDI CC (`Bn <cc> <v>`) and a
+So the `11 <block> <sub>` live-parameter namespace is *activated by the editor's full
+session/model context*, not by a bare Program Change. This was confirmed against the
+capture's *exact* patch: it was made on User A1 (`Big Blue`, slot 0), and even with
+`Big Blue` loaded — and after an editor-style recall `00 02 00 00` — the unit still
+returns nothing for `01 11 3D 07` and ignores a replayed set. So it is *not* a
+patch/model mismatch; it is session state.
+
+The likely key is the model-definition area the editor reads at startup: `01 20 <n>`
+returns model/def records (`01 20 00` → `12 20 00 "DigiElvn…Eleven"`), and `01 22` is the
+device-info register (`0x41`). Replicating that full init handshake (the ~530 startup
+reads and the `00 02 <slot>` recalls) before a parameter set is the open path to
+host-set. Until then: live parameter changes go through MIDI CC (`Bn <cc> <v>`) and a
 full patch change through the aggregate `0x01` write — both hardware-verified.
 
 Requesting every populated block id (a *small paced batch* — not a flood) reads the
