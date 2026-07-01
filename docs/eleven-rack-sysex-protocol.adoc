@@ -155,21 +155,36 @@ stable `target`: read the table block (`01 21`), find the record with that targe
 use its current `index`. The CLI does exactly this — `scan amp` dumps the table
 (target / value / live index) and `get <target>` reads a value.
 
-*Parameter-change opcode.* A parameter change is opcode `0x02` (not the block-write
-`0x00`) — captured from the unit: turning the amp *Gain* knob emits
-`02 11 3D 07 <value> 00 00 00 10` (this rig's amp sits at block `0x3D`; the value word
-is `<v> 00 00 00 10`, as elsewhere). `0x02` is bidirectional — the unit *reports*
-changes with it and (per the editor) the host *sets* with it.
+=== Live parameter access (decoded from the editor USB capture)
 
-*Open: host-initiated parameter set.* Sending that `02 11 <block> <index> <v>` from the
-host does *not* change the value on the tested patches — tried the live table block
-`0x21` (whose `index` is volatile — an indirection table, not a set address) and swept
-the `0x2E..0x3F` model range with no effect. The per-knob captures we could read are
-`aseqdump` of the unit's *own* port, i.e. the unit's change *reports* from physical
-knob turns — so they give the read/report address but do not prove the host can set the
-same way. Resolving this needs the editor→unit direction from the USB capture
-(`11/*.pcapng`). For now, live amp editing goes through MIDI CC (`Bn <cc> <v>`), and a
-full patch change goes through the aggregate `0x01` write.
+Decoding the Windows editor's USB-MIDI traffic (`11/*.pcapng`, usbmon; split by
+direction and de-framed from the 4-byte USB-MIDI packets) settles how parameters are
+read, set and reported:
+
+* *Set = opcode `0x00`* (host→unit). The editor sets a parameter with the *block-write*
+  opcode, e.g. `00 11 44 02 <index> <value-word> F7`. (Our earlier per-knob `aseqdump`
+  logs showed `0x02` — but those were the unit's *reports*, not the editor's sets.)
+* *Report = opcode `0x02`* (unit→host). The unit echoes each change with `0x02` and the
+  same address, e.g. `02 11 44 02 <index> <value-word> F7`. Value words differ only in
+  the trailing tag byte (`…00` written vs `…10` reported).
+* *Read = opcode `0x01`* → reply `0x12`, as before.
+
+*Parameter address: `11 <block> <sub> <index>`.* The `<block>` is the *`.tfx` block id*
+— the editor reads `11 42 01`, `11 43 01`, `11 44 0n`, `11 45 0n`, … `11 49 01` (the
+*amp* — `0x49` is the `.tfx` amp block), `11 4A/4B/4C` (fx-loop / delay / reverb). So the
+live SysEx parameter space is addressed by the *same block ids as the `.tfx` file* — the
+missing link between the two. `01 11 <block> <sub>` reads a sub-block's parameter table;
+`00 11 <block> <sub> <index> <value>` writes one.
+
+*Store* (unchanged) follows the same session: `00 05 <name>` then `00 03/04/02 <slot>`.
+
+CAUTION: this is the *addressing model*, not a finished host-set. On our unit, writing
+`00 11 49 01 <index>` (amp) with an index taken from the `01 21` table did *not* change
+the value, and reading `01 11 49 01` returns a *table*, not a 5-byte word (so the simple
+`read_raw` path times out). The remaining work is the exact per-parameter `<sub>`/`<index>`
+within block `0x49` and the packed `<value-word>` encoding (tied to the effect-float
+scaling). Until that lands, live amp editing goes through MIDI CC (`Bn <cc> <v>`) and a
+full patch change through the aggregate `0x01` write.
 
 Requesting every populated block id (a *small paced batch* — not a flood) reads the
 whole patch without per-parameter polling. Other blocks seen on one patch: `0x05` name,

@@ -379,13 +379,15 @@ pub fn set_amp_param(
     target: u8,
     value: u8,
 ) -> Result<(u8, ParamRecord), String> {
-    let (block, recs) = amp_param_table(dev)?;
+    let (_block, recs) = amp_param_table(dev)?;
     let index = recs
         .iter()
         .find(|r| r.target == target)
         .map(|r| r.index)
         .ok_or_else(|| format!("no amp parameter with target {target:#04X} (see `scan amp`)"))?;
-    dev.write_param(block, index, value)
+    // The editor addresses a parameter as `11 <tfx-block> <sub> <index>`; the amp is
+    // .tfx block 0x49, sub 0x01 (from the USB capture's `11 49 01` reads).
+    dev.write_param(&[0x49, 0x01, index], value)
         .map_err(|e| format!("writing amp param: {e}"))?;
     sleep(BANK_PACE);
     get_amp_param(dev, target)

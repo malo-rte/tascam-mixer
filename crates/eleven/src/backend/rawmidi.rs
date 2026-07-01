@@ -317,18 +317,19 @@ impl RawMidi {
         Ok(())
     }
 
-    /// Set a live parameter to a knob value (`0..=127`): the *parameter-change*
-    /// message `02 11 <block> <index> <value> 00 00 00 10` — the same form the
-    /// official editor sends when a knob moves. `index` is the *live* table index
-    /// (read fresh from the block, since it is reassigned on reload). Affects the
-    /// edit buffer only; a store persists it. Note: a `0x00` block write does *not*
-    /// set a parameter (that was the earlier "writes don't take" bug).
+    /// Set a live parameter to a knob value (`0..=127`) by its full address bytes
+    /// (after the `0x11` prefix): the editor sets a parameter with the *block write*
+    /// opcode `0x00` and address `11 <tfx-block> <sub> <index>` (the `.tfx` block
+    /// ids — `0x49` is the amp); the unit *reports* the same change back with opcode
+    /// `0x02`. Affects the edit buffer only; a store persists it.
     ///
     /// # Errors
     /// [`Error::Transport`] on a link failure.
-    pub fn write_param(&mut self, block: u8, index: u8, value: u8) -> Result<()> {
+    pub fn write_param(&mut self, addr: &[u8], value: u8) -> Result<()> {
         let word = RawValue::from_bytes([value, 0, 0, 0, 0x10]);
-        let msg = sysex::build_param_set(self.device_id, &[0x11, block, index], &word);
+        let mut full = vec![0x11];
+        full.extend_from_slice(addr);
+        let msg = sysex::build_write(self.device_id, &full, &word);
         self.port.write_all(&msg).map_err(midi_err)
     }
 
