@@ -561,38 +561,38 @@ pub const AMPS: &[Amp] = &[
     },
 ];
 
-/// The speaker-cabinet models (User Guide ch.3, "The Speaker Cabinets"). The amp
-/// section is *Amp + Cab + Mic*; the cabinet is chosen on the Cab page. These are
-/// model selections, not MIDI-CC-addressable parameters (only `CAB/MIC BYPASS`,
-/// CC 71, is — see [`AMP_GLOBAL`]).
+/// The speaker-cabinet models (User Guide ch.3, "The Speaker Cabinets"), as
+/// selectable kebab-case names. The amp section is *Amp + Cab + Mic*; the cabinet
+/// is chosen on the Cab page. These are model selections, not MIDI-CC-addressable
+/// parameters (only `cab-mic-bypass`, CC 71, is — see [`AMP_GLOBAL`]).
 pub const CABS: &[&str] = &[
-    "1x12 Black Lux",
-    "1x12 Tweed Lux",
-    "2x12 AC Blue",
-    "2x12 Black Duo",
-    "4x10 Tweed Bass",
-    "4x12 Classic 30",
-    "4x12 Green 25Watt",
+    "1x12-black-lux",
+    "1x12-tweed-lux",
+    "2x12-ac-blue",
+    "2x12-black-duo",
+    "4x10-tweed-bass",
+    "4x12-classic-30",
+    "4x12-green-25watt",
 ];
 
-/// The microphone models (User Guide ch.3, "The Microphones"), chosen alongside the
-/// cabinet on the Cab page. Two dynamic-American (`Dyn 7`/`Dyn 57`), two
-/// dynamic-German (`Dyn 409`/`Dyn 421`), two condenser (`Cond 67`/`Cond 87`) and one
-/// ribbon (`Ribbon 121`).
+/// The microphone models (User Guide ch.3, "The Microphones"), as selectable
+/// kebab-case names, chosen alongside the cabinet on the Cab page. Two
+/// dynamic-American (`dyn-7`/`dyn-57`), two dynamic-German (`dyn-409`/`dyn-421`),
+/// two condenser (`cond-67`/`cond-87`) and one ribbon (`ribbon-121`).
 pub const MICS: &[&str] = &[
-    "Dyn 7",
-    "Dyn 57",
-    "Dyn 409",
-    "Dyn 421",
-    "Cond 67",
-    "Cond 87",
-    "Ribbon 121",
+    "dyn-7",
+    "dyn-57",
+    "dyn-409",
+    "dyn-421",
+    "cond-67",
+    "cond-87",
+    "ribbon-121",
 ];
 
 /// The microphone position, toggled by the front-panel **SW2** on the Cab page:
 /// the virtual mic is either centred on the speaker cone (on-axis, brighter) or
 /// angled toward its edge (off-axis, warmer).
-pub const MIC_POSITION: &[&str] = &["On-axis", "Off-axis"];
+pub const MIC_POSITION: &[&str] = &["on-axis", "off-axis"];
 
 // ----------------------------------------------------------------------------
 // Effects.
@@ -1172,9 +1172,9 @@ mod tests {
     fn amp_section_models_are_populated() {
         assert_eq!(CABS.len(), 7);
         assert_eq!(MICS.len(), 7);
-        assert_eq!(MIC_POSITION, ["On-axis", "Off-axis"]);
-        assert!(CABS.contains(&"4x12 Green 25Watt"));
-        assert!(MICS.contains(&"Ribbon 121"));
+        assert_eq!(MIC_POSITION, ["on-axis", "off-axis"]);
+        assert!(CABS.contains(&"4x12-green-25watt"));
+        assert!(MICS.contains(&"ribbon-121"));
     }
 
     #[test]
