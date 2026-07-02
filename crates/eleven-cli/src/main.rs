@@ -27,6 +27,10 @@ struct Cli {
     #[arg(long, global = true)]
     port: Option<String>,
 
+    /// Log every MIDI byte sent/received to this file (for diagnosing device I/O).
+    #[arg(long, global = true, value_name = "FILE")]
+    midi_log: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -217,6 +221,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let mock = cli.mock;
     let port = cli.port.as_deref();
+    // A `--midi-log FILE` opens a byte-level I/O log on any hardware connection.
+    commands::set_midi_log(cli.midi_log);
     match cli.command {
         Command::Ports => commands::ports(),
         Command::Get { addr } => commands::get(mock, port, &addr),

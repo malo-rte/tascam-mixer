@@ -8,8 +8,11 @@
 //!
 //! This path is exercised only on hardware; CI and tests use the mock.
 
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::Path;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rackctl_midi::MidiPort;
 
@@ -98,12 +101,60 @@ fn ascii_name(payload: &[u8]) -> String {
         .to_owned()
 }
 
+/// A byte-level MIDI I/O log: one line per port write/read — a millisecond
+/// timestamp (relative to when logging began), a direction (`>` out / `<` in),
+/// the byte count, then the bytes as hex. Enabled by the CLI `--midi-log` flag to
+/// capture exactly what crosses the wire when diagnosing device I/O.
+#[derive(Debug)]
+struct MidiLog {
+    out: BufWriter<File>,
+    start: Instant,
+}
+
+impl MidiLog {
+    /// Create (truncating) the log file at `path`.
+    ///
+    /// Uses a real monotonic clock for the elapsed-time column — the whole point
+    /// of this log is to show inter-message *timing*. RS-80's "inject a clock" is
+    /// about test determinism; this is a hardware-only diagnostic path never run
+    /// in tests, so a direct [`Instant`] is correct here.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "diagnostic MIDI log needs a real clock; hardware-only, never in tests"
+    )]
+    fn create(path: &Path) -> Result<Self> {
+        let file = File::create(path)
+            .map_err(|e| Error::Transport(format!("opening MIDI log {}: {e}", path.display())))?;
+        Ok(Self {
+            out: BufWriter::new(file),
+            start: Instant::now(),
+        })
+    }
+
+    /// Append one line for `bytes` moving in direction `dir` (`>` out / `<` in).
+    /// Flushed immediately so a hang or crash still leaves a complete log.
+    /// Best-effort: a logging error never disturbs the device I/O it records.
+    fn record(&mut self, dir: char, bytes: &[u8]) {
+        let ms = self.start.elapsed().as_millis();
+        let hex: Vec<String> = bytes.iter().map(|b| format!("{b:02X}")).collect();
+        let _ = writeln!(
+            self.out,
+            "{ms:>8} {dir} {:4} {}",
+            bytes.len(),
+            hex.join(" ")
+        );
+        let _ = self.out.flush();
+    }
+}
+
 /// A live connection to an Eleven Rack: the Digidesign protocol over a
 /// [`MidiPort`] (the "Eleven Rack Rig" rawmidi port).
 #[derive(Debug)]
 pub struct RawMidi {
     port: MidiPort,
     device_id: u8,
+    /// Optional byte-level I/O log (see [`RawMidi::enable_midi_log`]).
+    log: Option<MidiLog>,
 }
 
 impl RawMidi {
@@ -127,7 +178,47 @@ impl RawMidi {
         Ok(Self {
             port: MidiPort::open(port).map_err(midi_err)?,
             device_id: sysex::DEFAULT_DEVICE_ID,
+            log: None,
         })
+    }
+
+    /// Log every MIDI byte sent and received to `path` (truncating it), for
+    /// diagnosing device I/O. Wired to the CLI `--midi-log` flag; call once, right
+    /// after opening, so the whole session is captured.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if the log file cannot be created.
+    pub fn enable_midi_log(&mut self, path: &Path) -> Result<()> {
+        self.log = Some(MidiLog::create(path)?);
+        Ok(())
+    }
+
+    /// Send a raw message to the port, logging it first if a log is enabled. All
+    /// outbound MIDI goes through here so the log is complete.
+    fn write_port(&mut self, bytes: &[u8]) -> Result<()> {
+        if let Some(log) = self.log.as_mut() {
+            log.record('>', bytes);
+        }
+        self.port.write_all(bytes).map_err(midi_err)
+    }
+
+    /// Read from the port into `buf`, logging any bytes received. All inbound MIDI
+    /// goes through here so the log captures replies, reports and drained bytes.
+    fn read_port(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let n = self.port.read(buf).map_err(midi_err)?;
+        if n > 0
+            && let Some(log) = self.log.as_mut()
+        {
+            log.record('<', buf.get(..n).unwrap_or(&[]));
+        }
+        Ok(n)
+    }
+
+    /// Send one message of a paced sequence, then wait [`STORE_PACE`].
+    fn send_paced(&mut self, msg: &[u8]) -> Result<()> {
+        self.write_port(msg)?;
+        sleep(STORE_PACE);
+        Ok(())
     }
 
     /// Print every incoming complete `SysEx` message as hex, one per line, until
@@ -140,7 +231,7 @@ impl RawMidi {
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
         loop {
-            match self.port.read(&mut buf).map_err(midi_err)? {
+            match self.read_port(&mut buf)? {
                 0 => sleep(POLL_INTERVAL),
                 n => {
                     for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
@@ -160,13 +251,11 @@ impl RawMidi {
     /// link failure.
     pub fn identity(&mut self) -> Result<Identity> {
         self.drain_input();
-        self.port
-            .write_all(&sysex::build_identity_request())
-            .map_err(midi_err)?;
+        self.write_port(&sysex::build_identity_request())?;
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
         for _ in 0..REPLY_POLLS {
-            match self.port.read(&mut buf).map_err(midi_err)? {
+            match self.read_port(&mut buf)? {
                 0 => sleep(POLL_INTERVAL),
                 n => {
                     for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
@@ -188,9 +277,7 @@ impl RawMidi {
     /// [`Error::Transport`] on a link failure.
     pub fn send_cc(&mut self, channel: u8, cc: u8, value: u8) -> Result<()> {
         let status = 0xB0 | (channel.saturating_sub(1) & 0x0f);
-        self.port
-            .write_all(&[status, cc & 0x7f, value & 0x7f])
-            .map_err(midi_err)?;
+        self.write_port(&[status, cc & 0x7f, value & 0x7f])?;
         Ok(())
     }
 
@@ -200,12 +287,8 @@ impl RawMidi {
     /// # Errors
     /// [`Error::Transport`] on a link failure.
     pub fn select_rig(&mut self, bank: u8, program: u8) -> Result<()> {
-        self.port
-            .write_all(&[0xB0, 0x20, bank & 0x7f])
-            .map_err(midi_err)?;
-        self.port
-            .write_all(&[0xC0, program & 0x7f])
-            .map_err(midi_err)?;
+        self.write_port(&[0xB0, 0x20, bank & 0x7f])?;
+        self.write_port(&[0xC0, program & 0x7f])?;
         Ok(())
     }
 
@@ -234,35 +317,24 @@ impl RawMidi {
             .take(16)
             .collect();
         let dev = self.device_id;
-        let send = |port: &mut MidiPort, msg: &[u8]| -> Result<()> {
-            port.write_all(msg).map_err(midi_err)?;
-            sleep(STORE_PACE);
-            Ok(())
-        };
         // 00 05 <name> 00 : set edit-buffer name.
         let mut m = vec![0xF0, 0x13, 0x0B, dev, 0x00, 0x05];
         m.extend_from_slice(&nm);
         m.extend_from_slice(&[0x00, 0xF7]);
-        send(&mut self.port, &m)?;
+        self.send_paced(&m)?;
         // 00 03 <lo> <hi> : save the edit buffer's content to the slot. The slot is
         // addressed **little-endian** here (low 7 bits first) — hardware-verified: a
         // big-endian `<hi> <lo>` made `00 03 00 06` read as slot 0, so every store
         // silently overwrote slot 0 with truncated content. (The `00 04` directory
         // write below addresses the slot the other way round, `<hi> <lo>`.)
-        send(
-            &mut self.port,
-            &[0xF0, 0x13, 0x0B, dev, 0x00, 0x03, lo, hi, 0xF7],
-        )?;
+        self.send_paced(&[0xF0, 0x13, 0x0B, dev, 0x00, 0x03, lo, hi, 0xF7])?;
         // 00 04 <hi> <lo> <name> 00 : directory entry (name) for the slot.
         let mut m = vec![0xF0, 0x13, 0x0B, dev, 0x00, 0x04, hi, lo];
         m.extend_from_slice(&nm);
         m.extend_from_slice(&[0x00, 0xF7]);
-        send(&mut self.port, &m)?;
+        self.send_paced(&m)?;
         // 00 02 <hi> <lo> : commit.
-        send(
-            &mut self.port,
-            &[0xF0, 0x13, 0x0B, dev, 0x00, 0x02, hi, lo, 0xF7],
-        )?;
+        self.send_paced(&[0xF0, 0x13, 0x0B, dev, 0x00, 0x02, hi, lo, 0xF7])?;
         Ok(())
     }
 
@@ -277,13 +349,11 @@ impl RawMidi {
     /// link failure.
     pub fn read_block(&mut self, addr: &[u8]) -> Result<Vec<u8>> {
         self.drain_input();
-        self.port
-            .write_all(&sysex::build_read_request(self.device_id, addr))
-            .map_err(midi_err)?;
+        self.write_port(&sysex::build_read_request(self.device_id, addr))?;
         let mut framer = Framer::new();
         let mut buf = [0u8; 512];
         for _ in 0..REPLY_POLLS {
-            match self.port.read(&mut buf).map_err(midi_err)? {
+            match self.read_port(&mut buf)? {
                 0 => sleep(POLL_INTERVAL),
                 n => {
                     for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
@@ -313,7 +383,7 @@ impl RawMidi {
         let mut msg = vec![0xF0, 0x13, 0x0B, self.device_id, 0x00, block];
         msg.extend_from_slice(payload);
         msg.push(0xF7);
-        self.port.write_all(&msg).map_err(midi_err)?;
+        self.write_port(&msg)?;
         Ok(())
     }
 
@@ -330,7 +400,7 @@ impl RawMidi {
         let mut full = vec![0x11];
         full.extend_from_slice(addr);
         let msg = sysex::build_write(self.device_id, &full, &word);
-        self.port.write_all(&msg).map_err(midi_err)
+        self.write_port(&msg)
     }
 
     /// Capture the *currently selected* patch as a device-faithful [`PatchBackup`]:
@@ -437,7 +507,7 @@ impl RawMidi {
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
         loop {
-            match self.port.read(&mut buf).map_err(midi_err)? {
+            match self.read_port(&mut buf)? {
                 0 => sleep(POLL_INTERVAL),
                 n => {
                     for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
@@ -465,7 +535,7 @@ impl RawMidi {
         let mut quiet = 0u32;
         let mut waited = 0u32;
         loop {
-            match self.port.read(&mut buf) {
+            match self.read_port(&mut buf) {
                 Ok(n) if n > 0 => {
                     quiet = 0;
                     for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
@@ -504,7 +574,7 @@ impl RawMidi {
         let mut buf = [0u8; 256];
         let mut quiet = 0u32;
         while quiet < DRAIN_QUIET_POLLS {
-            match self.port.read(&mut buf) {
+            match self.read_port(&mut buf) {
                 Ok(n) if n > 0 => quiet = 0,
                 _ => {
                     quiet = quiet.saturating_add(1);
@@ -519,12 +589,12 @@ impl Transport for RawMidi {
     fn read(&mut self, addr: &[u8]) -> Result<RawValue> {
         self.drain_input();
         let msg = sysex::build_read_request(self.device_id, addr);
-        self.port.write_all(&msg).map_err(midi_err)?;
+        self.write_port(&msg)?;
 
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
         for _ in 0..REPLY_POLLS {
-            match self.port.read(&mut buf).map_err(midi_err)? {
+            match self.read_port(&mut buf)? {
                 0 => sleep(POLL_INTERVAL),
                 n => {
                     for reply in framer.push(buf.get(..n).unwrap_or(&[])) {
@@ -546,7 +616,7 @@ impl Transport for RawMidi {
 
     fn write(&mut self, addr: &[u8], value: &RawValue) -> Result<()> {
         let msg = sysex::build_write(self.device_id, addr, value);
-        self.port.write_all(&msg).map_err(midi_err)?;
+        self.write_port(&msg)?;
         Ok(())
     }
 
@@ -558,7 +628,7 @@ impl Transport for RawMidi {
         for addr in addrs {
             batch.extend_from_slice(&sysex::build_read_request(self.device_id, addr));
         }
-        self.port.write_all(&batch).map_err(midi_err)?;
+        self.write_port(&batch)?;
         Ok(self.collect_replies())
     }
 }

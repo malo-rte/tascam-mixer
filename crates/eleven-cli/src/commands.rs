@@ -7,6 +7,9 @@
 //! Parameter-level commands (`get`/`set`/`scan`) run on the mock or hardware; the
 //! patch/slot commands need a connected unit (`--port`).
 
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
 use anyhow::{Context, Result};
 
 #[cfg(feature = "alsa")]
@@ -14,6 +17,26 @@ use rackctl_eleven::RawMidi;
 use rackctl_eleven::{Eleven, MockTransport, RawValue, Transport};
 
 // ---- device opening ----
+
+/// The `--midi-log` path, set once at startup and read when opening hardware.
+static MIDI_LOG: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Record the `--midi-log FILE` path. Called once from `main` before dispatch;
+/// any subsequent hardware connection logs its byte-level MIDI I/O to it.
+pub fn set_midi_log(path: Option<PathBuf>) {
+    let _ = MIDI_LOG.set(path);
+}
+
+/// Open a real unit at `port`, enabling the byte-level MIDI log when `--midi-log`
+/// was given.
+#[cfg(feature = "alsa")]
+fn open_raw(port: &str) -> Result<RawMidi> {
+    let mut dev = RawMidi::open(port)?;
+    if let Some(path) = MIDI_LOG.get().and_then(Option::as_deref) {
+        dev.enable_midi_log(path)?;
+    }
+    Ok(dev)
+}
 
 /// Open the device for parameter-level commands: the mock (`--mock`) or the
 /// hardware port (`--port`).
@@ -24,7 +47,7 @@ fn open_device(mock: bool, port: Option<&str>) -> Result<Eleven<Box<dyn Transpor
     #[cfg(feature = "alsa")]
     {
         let port = port.context("no --port given (run `ports`, or use --mock)")?;
-        Ok(Eleven::new(Box::new(RawMidi::open(port)?)))
+        Ok(Eleven::new(Box::new(open_raw(port)?)))
     }
     #[cfg(not(feature = "alsa"))]
     {
@@ -37,7 +60,7 @@ fn open_device(mock: bool, port: Option<&str>) -> Result<Eleven<Box<dyn Transpor
 #[cfg(feature = "alsa")]
 fn open_rawmidi(port: Option<&str>) -> Result<RawMidi> {
     let port = port.context("this command needs --port (a connected unit)")?;
-    Ok(RawMidi::open(port)?)
+    open_raw(port)
 }
 
 // ---- parameter commands (mock or hardware) ----
