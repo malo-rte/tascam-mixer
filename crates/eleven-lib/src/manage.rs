@@ -223,13 +223,19 @@ pub fn restore_from_library<D: ElevenDevice + ?Sized>(
 /// if the slot does not answer. Used by [`patch_directory`] and by a GUI's
 /// background bank reader to stream the list slot-by-slot.
 ///
+/// Retries a dropped reply like every other read (`read_block_retry`): the unit
+/// occasionally drops one, and without a retry a whole-bank scan would then flag a
+/// random slot as failed on each run.
+///
 /// # Errors
-/// Never returns `Err`; a non-answering slot is `None`.
+/// Never returns `Err`; a slot that does not answer after retries is `None`.
 #[must_use]
 pub fn slot_name<D: ElevenDevice + ?Sized>(dev: &mut D, slot: u8) -> Option<String> {
     let hi = (slot >> 7) & 0x7f;
     let lo = slot & 0x7f;
-    dev.read_block(&[0x04, hi, lo]).ok().map(|b| block_name(&b))
+    read_block_retry(dev, &[0x04, hi, lo], "slot name")
+        .ok()
+        .map(|b| block_name(&b))
 }
 
 /// Read a bank's on-device patch directory (block `0x04`): `(slot, name)` for each

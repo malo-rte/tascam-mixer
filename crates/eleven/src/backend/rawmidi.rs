@@ -25,9 +25,13 @@ use rackctl_eleven_model::value::{RawValue, VALUE_LEN};
 /// Pause between non-blocking read polls while waiting for a reply.
 const POLL_INTERVAL: Duration = Duration::from_millis(1);
 
-/// How many [`POLL_INTERVAL`] polls to wait for a read reply before giving up
-/// (about 500 ms).
-const REPLY_POLLS: u32 = 500;
+/// How many *consecutive idle* [`POLL_INTERVAL`] polls (no bytes) to wait before
+/// giving up on a reply — about 1.2 s. The counter resets whenever data arrives,
+/// so a large multi-chunk reply never times out mid-stream; only real silence
+/// ends the wait. Sized well above the unit's periodic ~0.6 s housekeeping stall
+/// (seen in `--midi-log` captures), which would otherwise abort a read that is
+/// simply waiting for the unit to resume.
+const REPLY_POLLS: u32 = 1200;
 
 /// Consecutive silent [`POLL_INTERVAL`] polls that end an input drain (~20 ms).
 const DRAIN_QUIET_POLLS: u32 = 20;
@@ -352,10 +356,18 @@ impl RawMidi {
         self.write_port(&sysex::build_read_request(self.device_id, addr))?;
         let mut framer = Framer::new();
         let mut buf = [0u8; 512];
-        for _ in 0..REPLY_POLLS {
+        // Wait on *idle* time, not total iterations: reset the counter whenever
+        // bytes arrive so a large reply streaming in over many small reads (or a
+        // reply delayed by the unit's periodic stall) is never abandoned mid-flight.
+        let mut idle = 0u32;
+        while idle < REPLY_POLLS {
             match self.read_port(&mut buf)? {
-                0 => sleep(POLL_INTERVAL),
+                0 => {
+                    idle += 1;
+                    sleep(POLL_INTERVAL);
+                }
                 n => {
+                    idle = 0;
                     for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
                         let Ok(parsed) = sysex::parse(&msg) else {
                             continue;
@@ -593,10 +605,17 @@ impl Transport for RawMidi {
 
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
-        for _ in 0..REPLY_POLLS {
+        // Idle-based wait (see `read_block`): reset on any data so a reply delayed
+        // by the unit's periodic stall isn't abandoned.
+        let mut idle = 0u32;
+        while idle < REPLY_POLLS {
             match self.read_port(&mut buf)? {
-                0 => sleep(POLL_INTERVAL),
+                0 => {
+                    idle += 1;
+                    sleep(POLL_INTERVAL);
+                }
                 n => {
+                    idle = 0;
                     for reply in framer.push(buf.get(..n).unwrap_or(&[])) {
                         let Ok(parsed) = sysex::parse(&reply) else {
                             continue;

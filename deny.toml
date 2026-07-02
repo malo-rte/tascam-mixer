@@ -20,6 +20,13 @@ ignore = [
     # ttf-parser. Nothing we depend on directly; drop this once epaint's tree moves
     # off it. https://rustsec.org/advisories/RUSTSEC-2026-0192
     "RUSTSEC-2026-0192",
+    # `quick-xml` quadratic-time attribute-duplicate check (DoS on adversarial XML).
+    # Pulled in transitively by the GUI only, in two places we never feed untrusted
+    # XML: the a11y stack (eframe -> accesskit -> atspi -> zbus_xml -> quick-xml
+    # 0.30) and Wayland (eframe -> winit -> wayland-scanner -> quick-xml 0.39). No
+    # semver-compatible patched release is reachable yet; drop this once eframe's
+    # tree moves to a fixed quick-xml. https://rustsec.org/advisories/RUSTSEC-2026-0194
+    "RUSTSEC-2026-0194",
 ]
 
 [licenses]
