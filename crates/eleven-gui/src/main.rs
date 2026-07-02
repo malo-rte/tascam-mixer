@@ -26,6 +26,9 @@ struct Cli {
     /// offline. Use the Connect button (top bar) to go online later.
     #[arg(long)]
     offline: bool,
+    /// Log every MIDI byte sent/received to this file (for diagnosing device I/O).
+    #[arg(long, value_name = "FILE")]
+    midi_log: Option<std::path::PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -35,7 +38,9 @@ fn main() -> Result<()> {
     let port = cli.port.or_else(|| config::load().port);
     // Lets the app (re)open the device on demand (Retry / Connect button).
     let reopen_port = port.clone();
-    let mut reopen: app::Reopen = Box::new(move || device::open(mock, reopen_port.as_deref()));
+    let midi_log = cli.midi_log;
+    let mut reopen: app::Reopen =
+        Box::new(move || device::open(mock, reopen_port.as_deref(), midi_log.as_deref()));
     // Open now if we can; otherwise start disconnected and let the user Retry.
     // `--offline` skips the connect attempt entirely.
     let (dev, connected) = if offline {
