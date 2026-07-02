@@ -882,6 +882,13 @@ impl eframe::App for App {
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Exit in the far-right corner (config is saved on close via on_exit).
+                    if action_button(ui, "Exit", ActionKind::Neutral)
+                        .on_hover_text("close the editor (staged changes are kept until written)")
+                        .clicked()
+                    {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
                     if !self.connected && action_button(ui, "Connect", ActionKind::Read).clicked() {
                         actions.push(Action::Retry);
                     }
