@@ -14,8 +14,8 @@ use rackctl_eleven_lib::manage;
 
 use crate::device::{SharedDevice, lock};
 
-/// Number of User patch slots (Program Change `0..=127`).
-pub(crate) const USER_SLOTS: u8 = 128;
+/// Number of User patch slots (`0x00..=0x67`, confirmed from a full-bank backup).
+pub(crate) use rackctl_eleven::backup::USER_SLOTS;
 
 /// Gap between slot reads, to avoid overrunning the USB-MIDI interface.
 const READ_PACE: Duration = Duration::from_millis(15);

@@ -19,6 +19,17 @@ use serde::{Deserialize, Serialize};
 /// nothing), so it is captured for reference but never written back.
 pub const AGGREGATE_BLOCK: u8 = 0x01;
 
+/// First address byte of a **direct slot read**: `01 00 <slot>` returns that User
+/// slot's whole packed patch — the same image as [`AGGREGATE_BLOCK`] — with **no
+/// Program Change**. This is how the official editor backs up the entire bank in
+/// seconds (confirmed in the `eleven-save-*` USB captures); pair it with the slot
+/// number as the second address byte: `read_block(&[SLOT_PATCH_READ, slot])`.
+pub const SLOT_PATCH_READ: u8 = 0x00;
+
+/// The Eleven Rack's User bank size: slots `0x00..=0x67` (104), confirmed from a
+/// full-bank editor backup. Bank capture / backup / scene sweep this range.
+pub const USER_SLOTS: u8 = 104;
+
 /// The directory/commit blocks driven by the store sequence (`0x02` commit,
 /// `0x03` begin, `0x04` directory entry). These are not per-patch content.
 pub const DIRECTORY_BLOCKS: [u8; 3] = [0x02, 0x03, 0x04];

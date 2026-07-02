@@ -92,7 +92,7 @@ enum Command {
     /// List the on-device bank's patch names (User, or Factory with `--factory`).
     Patches {
         /// How many slots to read.
-        #[arg(long, default_value_t = 128)]
+        #[arg(long, default_value_t = rackctl_eleven::backup::USER_SLOTS)]
         count: u8,
         /// List the Factory bank instead of User.
         #[arg(long)]
@@ -134,7 +134,7 @@ enum Command {
     /// Back up the whole User bank to the library (one saved patch per slot).
     Backup {
         /// Number of User slots to read.
-        #[arg(long, default_value_t = 128)]
+        #[arg(long, default_value_t = rackctl_eleven::backup::USER_SLOTS)]
         count: u8,
     },
     /// List the saved patches in the library.
@@ -201,7 +201,7 @@ enum SceneCommand {
         /// Name to save the scene under.
         name: String,
         /// Number of User slots to read.
-        #[arg(long, default_value_t = 128)]
+        #[arg(long, default_value_t = rackctl_eleven::backup::USER_SLOTS)]
         count: u8,
     },
     /// Restore a saved scene to the device (overwrites each captured slot).

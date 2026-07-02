@@ -12,7 +12,7 @@ use std::fmt;
 use std::thread::sleep;
 use std::time::Duration;
 
-use rackctl_eleven::backup::AGGREGATE_BLOCK;
+use rackctl_eleven::backup::{AGGREGATE_BLOCK, SLOT_PATCH_READ};
 use rackctl_eleven::param::{self, Kind, Slot};
 use rackctl_eleven::{BlockData, ElevenDevice, ParamRecord, PatchBackup, RestoreAction};
 
@@ -42,16 +42,53 @@ fn select_settle<D: ElevenDevice + ?Sized>(dev: &mut D, bank: u8, slot: u8) -> R
 
 /// Capture the current sound, or User `slot` if given, as a [`PatchBackup`].
 ///
+/// With a `slot` this takes the **fast, Program-Change-free** path (see
+/// [`capture_slot`]); with `None` it captures the live edit buffer.
+///
 /// # Errors
-/// If selecting the slot or reading the unit fails.
+/// If reading the unit fails.
 pub fn capture<D: ElevenDevice + ?Sized>(
     dev: &mut D,
     slot: Option<u8>,
 ) -> Result<PatchBackup, String> {
-    if let Some(s) = slot {
-        select_settle(dev, USER_BANK, s)?;
+    match slot {
+        Some(s) => capture_slot(dev, s),
+        None => dev.capture_patch().map_err(|e| e.to_string()),
     }
-    dev.capture_patch().map_err(|e| e.to_string())
+}
+
+/// Read User `slot`'s whole patch **directly** via address `00 <slot>` — no Program
+/// Change, no swap-settle. This is the hardware-native bank-read the official editor
+/// uses to back up all 104 slots in seconds, instead of cycling the unit through a
+/// Program Change + settle for every slot.
+///
+/// The returned backup carries the aggregate block `0x01` (the byte-exact restore
+/// source) and the slot's directory name — everything restore and the library need.
+///
+/// # Errors
+/// If the slot read fails after retries, or the slot returns no patch data.
+pub fn capture_slot<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
+    slot: u8,
+) -> Result<PatchBackup, String> {
+    let agg = read_block_retry(dev, &[SLOT_PATCH_READ, slot], "slot patch")?;
+    if agg.is_empty() {
+        return Err(format!("slot {slot} returned no patch data"));
+    }
+    let name = slot_name(dev, slot).unwrap_or_default();
+    let mut name_bytes: Vec<u8> = name.bytes().collect();
+    name_bytes.push(0);
+    let blocks = vec![
+        BlockData {
+            id: NAME_BLOCK,
+            bytes: name_bytes,
+        },
+        BlockData {
+            id: AGGREGATE_BLOCK,
+            bytes: agg,
+        },
+    ];
+    Ok(PatchBackup::new(name, blocks))
 }
 
 /// The outcome of a restore's read-back verify.
@@ -216,8 +253,9 @@ pub fn patch_directory<D: ElevenDevice + ?Sized>(
 }
 
 /// Capture the whole User bank to the backup library, one file per slot named by
-/// its [`slot_label`]. Stops when the bank wraps (a repeated first name) or after
-/// `count` slots. Returns how many were saved.
+/// its [`slot_label`], reading each slot directly (no Program Change — see
+/// [`capture_slot`]). Reads `count` slots; a slot with no data ends the sweep.
+/// Returns how many were saved.
 ///
 /// # Errors
 /// If a device read or a library save fails.
@@ -227,14 +265,10 @@ pub fn backup_bank<D: ElevenDevice + ?Sized>(
     mut progress: impl FnMut(u8, &str),
 ) -> Result<u32, String> {
     let mut saved = 0;
-    let mut first: Option<String> = None;
     for slot in 0..count {
-        select_settle(dev, USER_BANK, slot)?;
-        let patch = dev.capture_patch().map_err(|e| e.to_string())?;
-        if slot > 0 && first.as_deref() == Some(patch.name.as_str()) {
-            break; // bank wrapped
-        }
-        first.get_or_insert_with(|| patch.name.clone());
+        let Ok(patch) = capture_slot(dev, slot) else {
+            break; // end of the populated bank
+        };
         progress(slot, &patch.name);
         crate::save_backup(&slot_label(slot), &patch)?;
         saved += 1;
@@ -243,8 +277,9 @@ pub fn backup_bank<D: ElevenDevice + ?Sized>(
     Ok(saved)
 }
 
-/// Capture the whole User bank into a [`Scene`] named `name` (not yet saved).
-/// Stops when the bank wraps or after `count` slots.
+/// Capture the whole User bank into a [`Scene`] named `name` (not yet saved),
+/// reading each slot directly (no Program Change — see [`capture_slot`]). Reads
+/// `count` slots; a slot with no data ends the sweep.
 ///
 /// # Errors
 /// If a device read fails.
@@ -255,14 +290,10 @@ pub fn capture_scene<D: ElevenDevice + ?Sized>(
     mut progress: impl FnMut(u8, &str),
 ) -> Result<Scene, String> {
     let mut scene = Scene::new(name);
-    let mut first: Option<String> = None;
     for slot in 0..count {
-        select_settle(dev, USER_BANK, slot)?;
-        let patch = dev.capture_patch().map_err(|e| e.to_string())?;
-        if slot > 0 && first.as_deref() == Some(patch.name.as_str()) {
-            break;
-        }
-        first.get_or_insert_with(|| patch.name.clone());
+        let Ok(patch) = capture_slot(dev, slot) else {
+            break; // end of the populated bank
+        };
         progress(slot, &patch.name);
         scene.patches.insert(slot, patch);
         sleep(BANK_PACE);
@@ -515,7 +546,26 @@ fn block_name(payload: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::block_name;
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use rackctl_eleven::MockEleven;
+    use rackctl_eleven::backup::AGGREGATE_BLOCK;
+
+    use super::{block_name, capture_slot};
+
+    #[test]
+    fn capture_slot_reads_directly_without_selecting() {
+        // The fast path reads a slot's whole patch via `00 <slot>` — no Program
+        // Change — and carries the aggregate block (the byte-exact restore source).
+        let mut dev = MockEleven::new();
+        let patch = capture_slot(&mut dev, 2).expect("slot 2 populated");
+        assert_eq!(patch.name, "Bolder Axe");
+        assert!(
+            patch.blocks.iter().any(|b| b.id == AGGREGATE_BLOCK),
+            "capture must carry the aggregate block for a full restore"
+        );
+        // An unpopulated slot returns no data → an error, so a bank sweep can stop.
+        assert!(capture_slot(&mut dev, 90).is_err());
+    }
 
     #[test]
     fn block_name_decodes_from_byte_zero_no_header() {

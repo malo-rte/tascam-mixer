@@ -269,12 +269,23 @@ whole patch without per-parameter polling. Other blocks seen on one patch: `0x05
 `0x08` FX-chain routing, `0x07` a small config word, `0x01` the packed blob, and several
 single-value blocks (per-slot model ids / settings).
 
-IMPORTANT: these blocks reflect the *currently selected* patch — they are not addressed
-by patch number. The name at `01 05` follows a Program Change (`"A is A 800"` ->
-`"Diezel  Einstein"` after `C0 0A`), and the `01 01` blob changes size per patch. So the
-*whole patch library* is backed up by *iterating Program Change over every patch and
-dumping each* (read `01 01` + `01 05` per patch) — the "dump them one at a time" method.
-Rig selection is `CC 32` bank (`1`=Factory, `0`=User) then Program Change.
+These blocks (`01 01` blob, `01 05` name, `01 21` amp table, …) reflect the *currently
+selected* patch — a bare block id reads the live edit buffer. Selecting a patch is
+`CC 32` bank (`1`=Factory, `0`=User) then Program Change.
+
+IMPORTANT — direct slot read (no Program Change): a slot's *whole packed patch* is ALSO
+addressable **by patch number**, `01 00 <slot>` -> reply `12 00 <slot> <~1235-byte blob>`
+(the same image as the buffer's `01 01`). Confirmed from the official editor's
+full-backup capture (`11/eleven-save-20260702-091303.pcapng`): the editor backs up the
+**entire 104-slot User bank in ~15 s with zero Program Changes** — just 104 `01 00 <slot>`
+reads at ~150 ms each. Slot names are likewise PC-free via the directory `01 04 <hi> <lo>`.
+So a whole-bank *backup/capture/scene* should sweep `01 00 <slot>` directly; a Program
+Change + settle is only needed to *audition* a slot or to read the *live edit buffer*.
+This is `manage::capture_slot` (and now the default for `capture(slot)`, `backup_bank`,
+`capture_scene`). The User bank is **104 slots** (`0x00..=0x67`).
+
+The earlier "iterate Program Change over every patch and dump each" method still works but
+is an order of magnitude slower (per-slot swap + settle); the direct read supersedes it.
 
 Batching many `0x01` requests then collecting the `0x12` replies enumerates an
 address range in one pass -- the basis for a `scan`/`dump` command.

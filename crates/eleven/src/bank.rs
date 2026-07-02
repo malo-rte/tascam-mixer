@@ -16,6 +16,11 @@ const AGGREGATE_BLOCK: u8 = 0x01;
 const NAME_BLOCK: u8 = 0x05;
 /// Block id of the on-device directory (`04 <hi> <lo>` → a slot's name).
 const DIRECTORY_BLOCK: u8 = 0x04;
+/// Address of a slot's whole packed patch, read directly with no Program Change:
+/// `01 00 <slot>` → the same packed image as reading [`AGGREGATE_BLOCK`] of the
+/// buffer after selecting that slot. This is how the official editor backs up the
+/// whole bank in seconds (see the `eleven-save-*` USB captures).
+const SLOT_PATCH_BLOCK: u8 = 0x00;
 
 /// The management-level device operations, over real hardware or a mock. All
 /// methods are object-safe so a frontend can hold a `Box<dyn ElevenDevice + Send>`.
@@ -193,6 +198,13 @@ impl ElevenDevice for MockEleven {
                 v.push(0);
                 Ok(v)
             }
+            // Direct slot read (`00 <slot>`): the slot's whole packed patch, no PC.
+            [SLOT_PATCH_BLOCK, slot] => Ok(self
+                .user
+                .get(slot)
+                .and_then(|p| p.block(AGGREGATE_BLOCK))
+                .map(<[u8]>::to_vec)
+                .unwrap_or_default()),
             [id] => Ok(self
                 .buffer
                 .block(*id)
@@ -228,5 +240,9 @@ mod tests {
         // Store persists a renamed buffer to a slot; the directory reflects it.
         m.store(10, "My Patch").unwrap();
         assert_eq!(m.read_block(&[0x04, 0, 10]).unwrap(), b"My Patch\0");
+        // Direct slot read (`00 <slot>`) returns the slot's aggregate with no
+        // select — the fast, Program-Change-free capture path.
+        let want = mock_patch("Bolder Axe", 2).block(0x01).unwrap().to_vec();
+        assert_eq!(m.read_block(&[0x00, 2]).unwrap(), want);
     }
 }
