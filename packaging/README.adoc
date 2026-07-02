@@ -1,13 +1,14 @@
 = Packaging and desktop integration
 
 Distribution assets for the Rackctl suite and notes on installing them by hand.
-The suite ships two devices, each with a CLI and a GUI:
+The suite ships three devices, each with a CLI and a GUI:
 
 [cols="1,1,2",options="header"]
 |===
 | Device | Binaries | What it controls
 | Tascam US-16x08 | `rackctl-us16x08`, `rackctl-us16x08-gui` | The USB interface's built-in DSP mixer (ALSA)
 | BOSS GX-700 | `rackctl-gx700`, `rackctl-gx700-gui` | Guitar-effects patches over MIDI SysEx
+| Avid/Digidesign Eleven Rack | `rackctl-eleven`, `rackctl-eleven-gui` | Guitar-amp patches over MIDI SysEx
 |===
 
 The Nix flake (`../flake.nix`) wires all of this up automatically — `nix profile
@@ -21,7 +22,8 @@ Build the release binaries and copy them onto the `PATH`:
 [source,bash]
 ----
 cargo build --release --workspace
-for bin in rackctl-us16x08 rackctl-us16x08-gui rackctl-gx700 rackctl-gx700-gui; do
+for bin in rackctl-us16x08 rackctl-us16x08-gui rackctl-gx700 rackctl-gx700-gui \
+           rackctl-eleven rackctl-eleven-gui; do
   sudo install -Dm755 "target/release/$bin" "/usr/bin/$bin"
 done
 ----
@@ -44,7 +46,7 @@ them:
 
 [source,bash]
 ----
-for gui in rackctl-us16x08-gui rackctl-gx700-gui; do
+for gui in rackctl-us16x08-gui rackctl-gx700-gui rackctl-eleven-gui; do
   sudo install -Dm644 "packaging/$gui.svg" \
     "/usr/share/icons/hicolor/scalable/apps/$gui.svg"
 done
@@ -58,7 +60,7 @@ example does both CLIs:
 
 [source,bash]
 ----
-for cli in rackctl-us16x08 rackctl-gx700; do
+for cli in rackctl-us16x08 rackctl-gx700 rackctl-eleven; do
   # bash
   "$cli" completions bash | sudo tee "/usr/share/bash-completion/completions/$cli" >/dev/null
   # zsh  (a directory on your $fpath)

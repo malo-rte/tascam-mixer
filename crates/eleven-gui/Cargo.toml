@@ -1,0 +1,36 @@
+[package]
+name = "rackctl-eleven-gui"
+version.workspace = true
+description = "Graphical patch librarian (rackctl-eleven-gui) for the Avid/Digidesign Eleven Rack guitar processor."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false             # application crate, not for crates.io (it has a path dependency)
+
+[[bin]]
+name = "rackctl-eleven-gui"
+path = "src/main.rs"
+
+[features]
+# The real ALSA rawmidi backend is on by default; `--mock` swaps in the in-memory
+# device at runtime. Build with `--no-default-features` for a mock-only binary.
+default = ["alsa"]
+alsa = ["rackctl-eleven/alsa"]
+
+[dependencies]
+rackctl-eleven = { path = "../eleven", default-features = false }
+rackctl-eleven-lib = { workspace = true }
+rackctl-core = { workspace = true }
+rackctl-ui = { path = "../ui-common" }
+clap.workspace = true
+eframe.workspace = true
+egui.workspace = true
+directories.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

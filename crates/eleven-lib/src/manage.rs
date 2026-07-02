@@ -182,6 +182,19 @@ pub fn restore_from_library<D: ElevenDevice + ?Sized>(
     Ok((patch, report))
 }
 
+/// Read one User slot's name from the directory (block `0x04 <hi> <lo>`), or `None`
+/// if the slot does not answer. Used by [`patch_directory`] and by a GUI's
+/// background bank reader to stream the list slot-by-slot.
+///
+/// # Errors
+/// Never returns `Err`; a non-answering slot is `None`.
+#[must_use]
+pub fn slot_name<D: ElevenDevice + ?Sized>(dev: &mut D, slot: u8) -> Option<String> {
+    let hi = (slot >> 7) & 0x7f;
+    let lo = slot & 0x7f;
+    dev.read_block(&[0x04, hi, lo]).ok().map(|b| block_name(&b))
+}
+
 /// Read a bank's on-device patch directory (block `0x04`): `(slot, name)` for each
 /// slot that answers, up to `count`. `bank` is [`USER_BANK`] / [`FACTORY_BANK`].
 ///
@@ -195,10 +208,8 @@ pub fn patch_directory<D: ElevenDevice + ?Sized>(
 ) -> Result<Vec<(u8, String)>, String> {
     let mut out = Vec::new();
     for slot in 0..count {
-        let hi = (slot >> 7) & 0x7f;
-        let lo = slot & 0x7f;
-        if let Ok(payload) = dev.read_block(&[0x04, hi, lo]) {
-            out.push((slot, block_name(&payload)));
+        if let Some(name) = slot_name(dev, slot) {
+            out.push((slot, name));
         }
     }
     Ok(out)
@@ -305,6 +316,17 @@ pub fn copy_slot<D: ElevenDevice + ?Sized>(
     Ok(verify_aggregate(&source, &after))
 }
 
+/// Rename User `slot` in place: select it (so the edit buffer holds its sound), then
+/// store it under `name`. The patch content is unchanged; only its name is rewritten.
+///
+/// # Errors
+/// If selecting or storing fails.
+pub fn rename<D: ElevenDevice + ?Sized>(dev: &mut D, slot: u8, name: &str) -> Result<(), String> {
+    select_settle(dev, USER_BANK, slot)?;
+    dev.store(u16::from(slot), name)
+        .map_err(|e| format!("renaming slot {slot}: {e}"))
+}
+
 /// How many times to retry a required single-block read. The unit occasionally
 /// drops one reply; a whole-bank capture tolerates that (it skips the block), but
 /// a single *required* read (name, aggregate) would otherwise abort the operation.
@@ -327,6 +349,20 @@ fn read_block_retry<D: ElevenDevice + ?Sized>(
         }
     }
     Err(format!("reading {label}: {last}"))
+}
+
+/// Read the current edit buffer's name (public; `None` if the read fails).
+#[must_use]
+pub fn current_name<D: ElevenDevice + ?Sized>(dev: &mut D) -> Option<String> {
+    read_name(dev).ok()
+}
+
+/// Select a Factory slot and read its name — for a read-only preset browser. Note
+/// this loads the slot into the edit buffer (so it also auditions it).
+#[must_use]
+pub fn factory_name<D: ElevenDevice + ?Sized>(dev: &mut D, slot: u8) -> Option<String> {
+    select_settle(dev, FACTORY_BANK, slot).ok()?;
+    read_name(dev).ok()
 }
 
 /// Read the current edit buffer's name (block `0x05`).

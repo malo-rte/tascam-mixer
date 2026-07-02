@@ -2773,6 +2773,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackctl-eleven-gui"
+version = "0.8.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "directories",
+ "eframe",
+ "egui",
+ "rackctl-core",
+ "rackctl-eleven",
+ "rackctl-eleven-lib",
+ "rackctl-ui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rackctl-eleven-lib"
 version = "0.8.0"
 dependencies = [

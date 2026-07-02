@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Rackctl Eleven Rack Patch Librarian
+GenericName=Guitar Amp Patch Librarian
+Comment=Browse, audition, and back up Avid/Digidesign Eleven Rack patches
+Exec=rackctl-eleven-gui
+Icon=rackctl-eleven-gui
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=rackctl;avid;digidesign;eleven;rack;guitar;amp;patch;midi;sysex;
+StartupNotify=true
+StartupWMClass=rackctl-eleven-gui
